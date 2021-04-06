@@ -1,0 +1,2 @@
+# Build rdma-unit-test with C++ 17 features.
+build --copt='-std=c++17'
