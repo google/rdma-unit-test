@@ -14,6 +14,7 @@
 
 #include "impl/roce_backend.h"
 
+#include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
 #include "public/flags.h"
@@ -22,8 +23,8 @@
 namespace rdma_unit_test {
 
 absl::Status RoceBackend::SetUpRcQp(
-    ibv_qp* local_qp, const verbs_util::VerbsAddress& local_address,
-    ibv_qp* remote_qp, const verbs_util::VerbsAddress& remote_address) {
+    ibv_qp* local_qp, const verbs_util::LocalVerbsAddress& local_address,
+    ibv_gid remote_gid, uint32_t remote_qpn) {
   ibv_mtu mtu = verbs_util::ToVerbsMtu(absl::GetFlag(FLAGS_verbs_mtu));
   // Init.
   ibv_qp_attr mod_init = {};
@@ -45,13 +46,13 @@ absl::Status RoceBackend::SetUpRcQp(
   ibv_qp_attr mod_rtr = {};
   mod_rtr.qp_state = IBV_QPS_RTR;
   mod_rtr.path_mtu = verbs_util::ToVerbsMtu(mtu);
-  mod_rtr.dest_qp_num = remote_qp->qp_num;
+  mod_rtr.dest_qp_num = remote_qpn;
   static unsigned int psn = 1225;
   mod_rtr.rq_psn = psn;
   // 1225;  // TODO(author1): Eventually randomize for reality.
   mod_rtr.max_dest_rd_atomic = 10;
   mod_rtr.min_rnr_timer = 26;  // 82us delay
-  mod_rtr.ah_attr.grh.dgid = remote_address.gid();
+  mod_rtr.ah_attr.grh.dgid = remote_gid;
   mod_rtr.ah_attr.grh.flow_label = 0;
   mod_rtr.ah_attr.grh.sgid_index = local_address.gid_index();
   mod_rtr.ah_attr.grh.hop_limit = 127;

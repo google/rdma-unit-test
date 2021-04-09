@@ -17,6 +17,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_BACKEND_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_BACKEND_H_
 
+#include <cstdint>
+
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
 #include "impl/verbs_backend.h"
@@ -30,10 +32,9 @@ class RoceBackend : public VerbsBackend {
   ~RoceBackend() override = default;
 
   // See verbs_backend.h.
-  absl::Status SetUpRcQp(
-      ibv_qp* local_qp, const verbs_util::VerbsAddress& local_address,
-      ibv_qp* remote_qp,
-      const verbs_util::VerbsAddress& remote_address) override;
+  absl::Status SetUpRcQp(ibv_qp* local_qp,
+                         const verbs_util::LocalVerbsAddress& local_address,
+                         ibv_gid remote_gid, uint32_t remote_qpn) override;
 };
 
 }  // namespace rdma_unit_test

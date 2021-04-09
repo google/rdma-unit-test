@@ -31,6 +31,7 @@
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "cases/status_matchers.h"
 #include "public/rdma-memblock.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
@@ -70,12 +71,6 @@ TEST_F(MrTest, RegisterMemory) {
   EXPECT_NE(nullptr, mr);
 }
 
-TEST_F(MrTest, DeregUnknownMr) {
-  ibv_context* context = ibv_.OpenDevice().value();
-  verbs_mr dummy;
-  dummy.ibv_mr.context = context;
-  EXPECT_EQ(ENOENT, ibv_dereg_mr(&dummy.ibv_mr));
-}
 
 // Check with a pointer in the correct range.
 TEST_F(MrTest, DeregInvalidMr) {
@@ -130,7 +125,7 @@ class MRLoopbackTest : public BasicFixture {
 
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::VerbsAddress address;
+    verbs_util::LocalVerbsAddress address;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     // RC qp.

@@ -34,6 +34,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        ":status_matchers",
         "//public:flags",
         "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",
@@ -101,6 +102,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        ":status_matchers",
         "//public:rdma-memblock",
         "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",
@@ -172,6 +174,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        ":status_matchers",
         "//public:rdma-memblock",
         "//public:util",
         "//public:verbs_helper_suite",
@@ -231,6 +234,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        ":status_matchers",
         "//public:util",
         "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",
@@ -270,6 +274,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        ":status_matchers",
         "//public:rdma-memblock",
         "//public:util",
         "//public:verbs_helper_suite",

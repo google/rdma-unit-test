@@ -22,21 +22,23 @@
 namespace rdma_unit_test {
 
 void VerbsBackend::SetUpSelfConnectedRcQp(
-    ibv_qp* qp, const verbs_util::VerbsAddress& address) {
-  absl::Status result = SetUpRcQp(qp, address, qp, address);
+    ibv_qp* qp, const verbs_util::LocalVerbsAddress& address) {
+  absl::Status result = SetUpRcQp(qp, address, address.gid(), qp->qp_num);
   CHECK(result.ok());  // Crash ok
 }
 
 void VerbsBackend::SetUpLoopbackRcQps(
-    ibv_qp* qp1, ibv_qp* qp2, const verbs_util::VerbsAddress& local_address) {
-  absl::Status result = SetUpRcQp(qp1, local_address, qp2, local_address);
+    ibv_qp* qp1, ibv_qp* qp2,
+    const verbs_util::LocalVerbsAddress& local_address) {
+  absl::Status result =
+      SetUpRcQp(qp1, local_address, local_address.gid(), qp2->qp_num);
   CHECK(result.ok());  // Crash ok
-  result = SetUpRcQp(qp2, local_address, qp1, local_address);
+  result = SetUpRcQp(qp2, local_address, local_address.gid(), qp1->qp_num);
   CHECK(result.ok());  // Crash ok
 }
 
 absl::Status VerbsBackend::SetUpUdQp(ibv_qp* qp,
-                                     verbs_util::VerbsAddress address,
+                                     verbs_util::LocalVerbsAddress address,
                                      uint32_t qkey) {
   ibv_qp_attr mod_init = {};
   mod_init.qp_state = IBV_QPS_INIT;

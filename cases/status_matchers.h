@@ -25,6 +25,18 @@
 #define DCHECK_OK(expression) DCHECK(((expression).ok()))
 #define EXPECT_OK(expression) EXPECT_TRUE(((expression).ok()))
 #define ASSERT_OK(expression) ASSERT_TRUE(((expression).ok()))
+
+#define CONCAT_IMPL(x, y) x##y
+#define CONCAT_MACRO(x, y) CONCAT_IMPL(x, y)
+
+#define ASSERT_OK_AND_ASSIGN(lhs, rexpr) \
+  ASSERT_OK_AND_ASSIGN_IMPL(CONCAT_MACRO(_status_or, __COUNTER__), lhs, rexpr)
+
+#define ASSERT_OK_AND_ASSIGN_IMPL(statusor, lhs, rexpr)     \
+  auto statusor = (rexpr);                                  \
+  ASSERT_TRUE(statusor.status().ok()) << statusor.status(); \
+  lhs = std::move(statusor.value())
+
 #endif
 
 #endif  // RDMA_UNIT_TEST_CASES_STATUS_MATCHERS_H_

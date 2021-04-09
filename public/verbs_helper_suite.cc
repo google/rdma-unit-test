@@ -27,6 +27,7 @@
 
 namespace rdma_unit_test {
 
+// END GOOGLE-INTERNAL
 VerbsHelperSuite::VerbsHelperSuite() {
   allocator_ = std::make_unique<RoceAllocator>();
   CHECK(allocator_);  // Crash ok
@@ -41,24 +42,24 @@ void VerbsHelperSuite::TearDownHelperGlobal() {
 }
 
 absl::Status VerbsHelperSuite::SetUpRcQp(
-    ibv_qp* local_qp, const verbs_util::VerbsAddress& local_address,
-    ibv_qp* remote_qp, const verbs_util::VerbsAddress& remote_address) {
-  return backend_->SetUpRcQp(local_qp, local_address, remote_qp,
-                             remote_address);
+    ibv_qp* local_qp, const verbs_util::LocalVerbsAddress& local_address,
+    ibv_gid remote_gid, uint32_t remote_qpn) {
+  return backend_->SetUpRcQp(local_qp, local_address, remote_gid, remote_qpn);
 }
 
 void VerbsHelperSuite::SetUpSelfConnectedRcQp(
-    ibv_qp* qp, const verbs_util::VerbsAddress& address) {
+    ibv_qp* qp, const verbs_util::LocalVerbsAddress& address) {
   backend_->SetUpSelfConnectedRcQp(qp, address);
 }
 
 void VerbsHelperSuite::SetUpLoopbackRcQps(
-    ibv_qp* qp1, ibv_qp* qp2, const verbs_util::VerbsAddress& local_address) {
+    ibv_qp* qp1, ibv_qp* qp2,
+    const verbs_util::LocalVerbsAddress& local_address) {
   backend_->SetUpLoopbackRcQps(qp1, qp2, local_address);
 }
 
 absl::Status VerbsHelperSuite::SetUpUdQp(
-    ibv_qp* qp, const verbs_util::VerbsAddress& address, uint32_t qkey) {
+    ibv_qp* qp, const verbs_util::LocalVerbsAddress& address, uint32_t qkey) {
   return backend_->SetUpUdQp(qp, address, qkey);
 }
 
@@ -161,7 +162,7 @@ int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   return allocator_->DestroyQp(qp);
 }
 
-verbs_util::VerbsAddress VerbsHelperSuite::GetContextAddressInfo(
+verbs_util::LocalVerbsAddress VerbsHelperSuite::GetContextAddressInfo(
     ibv_context* context) const {
   return allocator_->GetContextAddressInfo(context);
 }

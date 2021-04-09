@@ -45,29 +45,30 @@ namespace verbs_util {
 //                          Classes and Data Types
 //////////////////////////////////////////////////////////////////////////////
 
-// Encapsulates the various attributes that are used to define a verbs endpoint.
-class VerbsAddress {
+// Encapsulates the various attributes that are used to define a local verbs
+// endpoint. Note: a remote endpoint is solely defined by an ibv_gid.
+class LocalVerbsAddress {
  public:
-  VerbsAddress();
-  ~VerbsAddress() = default;
-  VerbsAddress(const VerbsAddress& other) = default;
-  VerbsAddress& operator=(const VerbsAddress& other) = default;
-  VerbsAddress(VerbsAddress&& other) = default;
-  VerbsAddress& operator=(VerbsAddress&& other) = default;
+  LocalVerbsAddress();
+  ~LocalVerbsAddress() = default;
+  LocalVerbsAddress(const LocalVerbsAddress& other) = default;
+  LocalVerbsAddress& operator=(const LocalVerbsAddress& other) = default;
+  LocalVerbsAddress(LocalVerbsAddress&& other) = default;
+  LocalVerbsAddress& operator=(LocalVerbsAddress&& other) = default;
 
   int port() const { return port_; }
-  VerbsAddress& set_port(int port) {
+  LocalVerbsAddress& set_port(int port) {
     port_ = port;
     return *this;
   }
   ibv_gid gid() const { return gid_; }
-  VerbsAddress& set_gid(const ibv_gid& gid) {
+  LocalVerbsAddress& set_gid(const ibv_gid& gid) {
     gid_ = gid;
     return *this;
   }
 
   int gid_index() const { return gid_index_; }
-  VerbsAddress& set_gid_index(int gid_index) {
+  LocalVerbsAddress& set_gid_index(int gid_index) {
     gid_index_ = gid_index;
     return *this;
   }
@@ -86,7 +87,7 @@ class AddressHandleAttributes {
   // Creates an AddressHandle with default attributes with the info from the
   // passed address.
   explicit AddressHandleAttributes(
-      const verbs_util::VerbsAddress& verbs_address);
+      const verbs_util::LocalVerbsAddress& verbs_address);
   ~AddressHandleAttributes() = default;
 
   // Returns the underlying ibv_ah_attr.
@@ -137,7 +138,7 @@ ibv_mtu ToVerbsMtu(uint64_t mtu);
 std::string GidToString(const ibv_gid& gid);
 
 // Enumerate all ports with (one of) their sgid(s).
-absl::StatusOr<std::vector<VerbsAddress>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
     ibv_context* context);
 
 // Verbs utilities:
@@ -190,13 +191,14 @@ void PrintCompletion(const ibv_wc& completion);
 // 1. Create WR.
 // 2. Post WR to QP.
 // 3. Wait for completion and return completion status.
-ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw, absl::Span<uint8> buffer,
-                              ibv_mr* mr,
+ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
+                              absl::Span<uint8_t> buffer, ibv_mr* mr,
                               int access = IBV_ACCESS_REMOTE_READ |
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_ATOMIC);
-ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw, absl::Span<uint8> buffer,
-                              uint32_t rkey, ibv_mr* mr,
+ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
+                              absl::Span<uint8_t> buffer, uint32_t rkey,
+                              ibv_mr* mr,
                               int access = IBV_ACCESS_REMOTE_READ |
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_ATOMIC);

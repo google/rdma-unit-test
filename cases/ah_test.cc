@@ -21,6 +21,7 @@
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "cases/status_matchers.h"
 #include "public/flags.h"
 #include "public/verbs_helper_suite.h"
 

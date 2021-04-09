@@ -40,20 +40,20 @@ class VerbsBackend {
 
   // Sets up a reliable connection queue pair to RTS (ready to send).
   virtual absl::Status SetUpRcQp(
-      ibv_qp* local_qp, const verbs_util::VerbsAddress& local_address,
-      ibv_qp* remote_qp, const verbs_util::VerbsAddress& remote_address) = 0;
+      ibv_qp* local_qp, const verbs_util::LocalVerbsAddress& local_address,
+      ibv_gid remote_gid, uint32_t remote_qpn) = 0;
 
   // Set up a QP that is connected to itself. Succeed or crash.
   void SetUpSelfConnectedRcQp(ibv_qp* qp,
-                              const verbs_util::VerbsAddress& address);
+                              const verbs_util::LocalVerbsAddress& address);
 
   // Set up a pair of interconnected RC QPs on loopback port. Both QPs share the
   // same NIC and thus same verbs_util::VerbsAddress.
   void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::VerbsAddress& local_address);
+                          const verbs_util::LocalVerbsAddress& local_address);
 
   // Sets up a unreliable datagram queue pair to RTS (ready to send).
-  absl::Status SetUpUdQp(ibv_qp* qp, verbs_util::VerbsAddress address,
+  absl::Status SetUpUdQp(ibv_qp* qp, verbs_util::LocalVerbsAddress address,
                          uint32_t qkey);
 };
 

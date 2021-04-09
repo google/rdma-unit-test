@@ -134,7 +134,7 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
     LOG_IF(DFATAL, result != 0) << "Failed to close device";
     return enum_result.status();
   }
-  std::vector<verbs_util::VerbsAddress> addresses = enum_result.value();
+  std::vector<verbs_util::LocalVerbsAddress> addresses = enum_result.value();
   {
     absl::MutexLock guard(&mtx_contexts_);
     contexts_.emplace_back(context, &ContextDeleter);
@@ -386,7 +386,7 @@ int VerbsAllocator::DestroyQp(ibv_qp* qp) {
   return result;
 }
 
-verbs_util::VerbsAddress VerbsAllocator::GetContextAddressInfo(
+verbs_util::LocalVerbsAddress VerbsAllocator::GetContextAddressInfo(
     ibv_context* context) const {
   absl::MutexLock guard(&mtx_address_info_);
   auto iter = address_info_.find(context);

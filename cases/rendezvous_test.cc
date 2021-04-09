@@ -175,8 +175,8 @@ class RpcControl {
 
   void Init(VerbsHelperSuite& ibv, RpcControl& other) {
     CHECK_OK(ibv.SetUpRcQp(qp_, ibv.GetContextAddressInfo(qp_->context),
-                           other.qp_,
-                           ibv.GetContextAddressInfo(other.qp_->context)));
+                           ibv.GetContextAddressInfo(other.qp_->context).gid(),
+                           other.qp_->qp_num));
     other_rkey_ = other.mr_->rkey;
   }
 
@@ -332,9 +332,10 @@ class RpcBase {
         control_(ibv, context_, pd_, control_pages, max_outstanding) {}
 
   void Init(VerbsHelperSuite& ibv, RpcBase& other) {
-    CHECK_OK(ibv.SetUpRcQp(
-        data_qp_, ibv.GetContextAddressInfo(data_qp_->context), other.data_qp_,
-        ibv.GetContextAddressInfo(data_qp_->context)));
+    CHECK_OK(ibv.SetUpRcQp(data_qp_,
+                           ibv.GetContextAddressInfo(data_qp_->context),
+                           ibv.GetContextAddressInfo(data_qp_->context).gid(),
+                           other.data_qp_->qp_num));
     control_.Init(ibv, other.control_);
   }
 

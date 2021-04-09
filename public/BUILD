@@ -73,7 +73,6 @@ cc_library(
     deps = [
         ":flags",
         ":util",
-        "//google:goog_roce_allocator",
         "//impl:roce_allocator",
         "//impl:roce_backend",
         "//impl:verbs_allocator",

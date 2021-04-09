@@ -87,7 +87,8 @@ class VerbsAllocator {
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   // Returns the first available GID from the device context.
-  verbs_util::VerbsAddress GetContextAddressInfo(ibv_context* context) const;
+  verbs_util::LocalVerbsAddress GetContextAddressInfo(
+      ibv_context* context) const;
 
  private:
   // This only creates Ah/Qp/Mr without putting it into qps_ for auto-cleanup.
@@ -118,7 +119,7 @@ class VerbsAllocator {
   std::vector<std::unique_ptr<ibv_mw, decltype(&MwDeleter)>> mws_
       ABSL_GUARDED_BY(mtx_mws_);
   // Tracks address info for a given context.
-  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::VerbsAddress>>
+  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::LocalVerbsAddress>>
       address_info_ ABSL_GUARDED_BY(mtx_address_info_);
 
   // locks for containers above.

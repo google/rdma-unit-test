@@ -26,6 +26,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "cases/status_matchers.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
@@ -39,7 +40,8 @@ class QpTest : public BasicFixture {
   }
 
   int InitUdQP(ibv_qp* qp, uint32_t qkey) const {
-    verbs_util::VerbsAddress address = ibv_.GetContextAddressInfo(qp->context);
+    verbs_util::LocalVerbsAddress address =
+        ibv_.GetContextAddressInfo(qp->context);
     ibv_qp_attr mod_init = {};
     mod_init.qp_state = IBV_QPS_INIT;
     mod_init.pkey_index = 0;
@@ -111,7 +113,8 @@ class QpTest : public BasicFixture {
     static constexpr int kRemoteAccessAll = IBV_ACCESS_REMOTE_WRITE |
                                             IBV_ACCESS_REMOTE_READ |
                                             IBV_ACCESS_REMOTE_ATOMIC;
-    verbs_util::VerbsAddress address = ibv_.GetContextAddressInfo(qp->context);
+    verbs_util::LocalVerbsAddress address =
+        ibv_.GetContextAddressInfo(qp->context);
     ibv_qp_attr mod_init = {};
     mod_init.qp_state = IBV_QPS_INIT;
     mod_init.pkey_index = 0;
@@ -121,7 +124,8 @@ class QpTest : public BasicFixture {
   }
 
   ibv_qp_attr CreateBasicRcQpRtrAttr(ibv_qp* qp) const {
-    verbs_util::VerbsAddress address = ibv_.GetContextAddressInfo(qp->context);
+    verbs_util::LocalVerbsAddress address =
+        ibv_.GetContextAddressInfo(qp->context);
     ibv_qp_attr mod_rtr = {};
     mod_rtr.qp_state = IBV_QPS_RTR;
     // Small enough MTU that should be supported everywhere.
@@ -160,7 +164,7 @@ class QpTest : public BasicFixture {
     required_attributes |= IBV_QP_STATE;
     // Traverse the bitmask from bit0..binN and find each set bit which
     // corresponds to an attribute that is set and add it the vector.
-    for (int bit = 0; bit < 8 * sizeof(required_attributes); ++bit) {
+    for (unsigned int bit = 0; bit < 8 * sizeof(required_attributes); ++bit) {
       if ((1 << bit) & required_attributes)
         masks.push_back(1 << bit | IBV_QP_STATE);
     }
@@ -275,8 +279,9 @@ TEST_F(QpTest, ModifyBadResetToInitStateTransition) {
   ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
   for (auto mask : CreateMaskCombinations(kRcQpInitMask)) {
     int result = ibv_modify_qp(qp, &mod_init, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions())
+    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
       EXPECT_NE(result, 0);
+    }
   }
   EXPECT_EQ(0, ibv_modify_qp(qp, &mod_init, kRcQpInitMask));
 }
@@ -293,8 +298,9 @@ TEST_F(QpTest, ModifyBadInitToRtrStateTransition) {
   ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
   for (auto mask : CreateMaskCombinations(kRcQpRtrMask)) {
     int result = ibv_modify_qp(qp, &mod_rtr, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions())
+    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
       EXPECT_NE(result, 0);
+    }
   }
   EXPECT_EQ(0, ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask));
 }
@@ -316,8 +322,9 @@ TEST_F(QpTest, ModifyBadRtrToRtsStateTransition) {
   ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
   for (auto mask : CreateMaskCombinations(kRcQpRtsMask)) {
     int result = ibv_modify_qp(qp, &mod_rts, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions())
+    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
       EXPECT_NE(result, 0);
+    }
   }
   EXPECT_EQ(0, ibv_modify_qp(qp, &mod_rts, kRcQpRtsMask));
 }

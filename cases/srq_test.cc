@@ -27,6 +27,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "cases/status_matchers.h"
 #include "public/rdma-memblock.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"

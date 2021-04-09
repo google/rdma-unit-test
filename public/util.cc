@@ -35,7 +35,6 @@
 #include <vector>
 
 #include "glog/logging.h"
-
 #include "gtest/gtest.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
@@ -83,11 +82,11 @@ int GetIpAddressType(const ibv_gid& gid) {
 
 }  // namespace
 
-VerbsAddress::VerbsAddress() {
+LocalVerbsAddress::LocalVerbsAddress() {
 }
 
 AddressHandleAttributes::AddressHandleAttributes(
-    const verbs_util::VerbsAddress& verbs_address) {
+    const verbs_util::LocalVerbsAddress& verbs_address) {
   // Set base ibv_ah parameters as the source of truth.  Then
   // copy those into custom transport settings when requested.
   ibv_ah_attr_.sl = 0;
@@ -170,9 +169,9 @@ std::string GidToString(const ibv_gid& gid) {
                          gid.raw[12], gid.raw[13], gid.raw[14], gid.raw[15]);
 }
 
-absl::StatusOr<std::vector<VerbsAddress>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
     ibv_context* context) {
-  std::vector<VerbsAddress> result;
+  std::vector<LocalVerbsAddress> result;
   bool no_ipv6_for_gid = absl::GetFlag(FLAGS_no_ipv6_for_gid);
   LOG(INFO) << "Enumerating Ports for " << context
             << "no_ipv6: " << no_ipv6_for_gid;
@@ -215,13 +214,14 @@ absl::StatusOr<std::vector<VerbsAddress>> EnumeratePortsForContext(
                    << VerbsMtuToValue(port_attr.max_mtu);
       }
       VLOG(2) << "Adding: " << GidToString(gid);
-      VerbsAddress match;
+      LocalVerbsAddress match;
       match.set_port(port_idx);
       match.set_gid(gid);
       match.set_gid_index(gid_idx);
       result.push_back(match);
     }
   }
+  CHECK(!result.empty()) << "No active ports detected.";  // Crash ok
   return result;
 }
 
@@ -437,8 +437,9 @@ void PrintCompletion(const ibv_wc& completion) {
   LOG(INFO) << "  qp_num = " << completion.qp_num;
 }
 
-ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw, absl::Span<uint8> buffer,
-                              ibv_mr* mr, int access) {
+ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
+                              absl::Span<uint8_t> buffer, ibv_mr* mr,
+                              int access) {
   ibv_mw_bind bind = CreateType1MwBind(/*wr_id=*/1, buffer, mr, access);
   PostType1Bind(qp, mw, bind);
   ibv_wc completion = WaitForCompletion(qp->send_cq).value();
@@ -448,8 +449,9 @@ ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw, absl::Span<uint8> buffer,
   return completion.status;
 }
 
-ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw, absl::Span<uint8> buffer,
-                              uint32_t rkey, ibv_mr* mr, int access) {
+ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
+                              absl::Span<uint8_t> buffer, uint32_t rkey,
+                              ibv_mr* mr, int access) {
   ibv_send_wr bind =
       CreateType2BindWr(/*wr_id=*/1, mw, buffer, rkey, mr, access);
   PostSend(qp, bind);
@@ -491,7 +493,7 @@ ibv_wc_status FetchAddSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
                            void* remote_buffer, uint32_t rkey,
                            uint64_t comp_add) {
   ibv_sge sge;
-  sge.addr = reinterpret_cast<uint64>(local_buffer);
+  sge.addr = reinterpret_cast<uint64_t>(local_buffer);
   sge.length = 8;
   sge.lkey = local_mr->lkey;
   ibv_send_wr read = CreateFetchAddWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
@@ -508,7 +510,7 @@ ibv_wc_status CompSwapSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
                            void* remote_buffer, uint32_t rkey,
                            uint64_t comp_add, uint64_t swap) {
   ibv_sge sge;
-  sge.addr = reinterpret_cast<uint64>(local_buffer);
+  sge.addr = reinterpret_cast<uint64_t>(local_buffer);
   sge.length = 8;
   sge.lkey = local_mr->lkey;
   ibv_send_wr read = CreateCompSwapWr(/*wr_id=*/1, &sge, /*num_sge=*/1,

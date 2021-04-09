@@ -54,7 +54,7 @@ class BufferTest : public BasicFixture {
   // Struct containing some basic objects shared by all buffer tests.
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::VerbsAddress address;
+    verbs_util::LocalVerbsAddress address;
     ibv_pd* pd;
     ibv_mr* mr;
     ibv_cq* cq;

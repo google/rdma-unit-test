@@ -45,7 +45,7 @@ class AccessTest : public BasicFixture,
  protected:
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::VerbsAddress address;
+    verbs_util::LocalVerbsAddress address;
     ibv_pd* pd;
     RdmaMemBlock src_buffer;
     RdmaMemBlock dst_buffer;

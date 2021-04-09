@@ -59,7 +59,7 @@ class LoopbackTest : public BasicFixture {
 
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::VerbsAddress address;
+    verbs_util::LocalVerbsAddress address;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     ibv_qp* qp = nullptr;

@@ -51,14 +51,14 @@ class VerbsHelperSuite {
 
   // See VerbsBackend.
   absl::Status SetUpRcQp(ibv_qp* local_qp,
-                         const verbs_util::VerbsAddress& local_address,
-                         ibv_qp* remote_qp,
-                         const verbs_util::VerbsAddress& remote_address);
+                         const verbs_util::LocalVerbsAddress& local_address,
+                         ibv_gid remote_gid, uint32_t remote_qpn);
   void SetUpSelfConnectedRcQp(ibv_qp* qp,
-                              const verbs_util::VerbsAddress& address);
+                              const verbs_util::LocalVerbsAddress& address);
   void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::VerbsAddress& local_address);
-  absl::Status SetUpUdQp(ibv_qp* qp, const verbs_util::VerbsAddress& address,
+                          const verbs_util::LocalVerbsAddress& local_address);
+  absl::Status SetUpUdQp(ibv_qp* qp,
+                         const verbs_util::LocalVerbsAddress& address,
                          uint32_t qkey);
 
   // See VerbsAllocator.
@@ -93,7 +93,8 @@ class VerbsHelperSuite {
                    ibv_qp_type qp_type, int sig_all);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
-  verbs_util::VerbsAddress GetContextAddressInfo(ibv_context* context) const;
+  verbs_util::LocalVerbsAddress GetContextAddressInfo(
+      ibv_context* context) const;
 
  private:
   std::unique_ptr<VerbsAllocator> allocator_;
