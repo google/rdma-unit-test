@@ -27,7 +27,6 @@
 
 namespace rdma_unit_test {
 
-// END GOOGLE-INTERNAL
 VerbsHelperSuite::VerbsHelperSuite() {
   allocator_ = std::make_unique<RoceAllocator>();
   CHECK(allocator_);  // Crash ok
