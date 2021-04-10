@@ -140,6 +140,7 @@ cc_library(
     srcs = ["gunit_main.cc"],
     deps = [
         "//impl:introspection_mlx4",
+        "//impl:introspection_mlx5",
         "//impl:introspection_rxe",
         "@com_google_absl//absl/debugging:failure_signal_handler",
         "@com_google_absl//absl/flags:parse",

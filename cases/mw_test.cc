@@ -130,7 +130,10 @@ TEST_F(MwTest, BindType1ReadWithNoLocalWrite) {
   ASSERT_NE(nullptr, mw);
   ibv_wc_status bind_result = verbs_util::BindType1MwSync(
       setup.qp, mw, setup.buffer.span(), mr, IBV_ACCESS_REMOTE_READ);
-  EXPECT_EQ(IBV_WC_MW_BIND_ERR, bind_result);
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
+  EXPECT_EQ(kExpected, bind_result);
 }
 
 TEST_F(MwTest, BindType1AtomicWithNoLocalWrite) {
@@ -142,7 +145,10 @@ TEST_F(MwTest, BindType1AtomicWithNoLocalWrite) {
   ASSERT_NE(nullptr, mw);
   ibv_wc_status bind_result = verbs_util::BindType1MwSync(
       setup.qp, mw, setup.buffer.span(), mr, IBV_ACCESS_REMOTE_ATOMIC);
-  EXPECT_EQ(IBV_WC_MW_BIND_ERR, bind_result);
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
+  EXPECT_EQ(kExpected, bind_result);
 }
 
 TEST_F(MwTest, Read) {
@@ -204,9 +210,21 @@ TEST_F(MwTest, InvalidMr) {
   ibv_mr dummy_mr_val{};
   ibv_mr* dummy_mr = &dummy_mr_val;
   dummy_mr->handle = -1;
-  ibv_wc_status bind_result =
-      verbs_util::BindType1MwSync(setup.qp, mw, setup.buffer.span(), dummy_mr);
-  EXPECT_EQ(IBV_WC_MW_BIND_ERR, bind_result);
+  // Some clients do client side validation on type 1. First check
+  // succcess/failure of the bind and if successful than check for completion.
+  ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
+      /*wr_id=*/1, setup.buffer.span(), dummy_mr,
+      IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+          IBV_ACCESS_REMOTE_ATOMIC);
+  int result = ibv_bind_mw(setup.qp, mw, &bind_args);
+  EXPECT_THAT(result, testing::AnyOf(0, EPERM, EOPNOTSUPP));
+  if (result == 0) {
+    ibv_wc completion =
+        verbs_util::WaitForCompletion(setup.qp->send_cq).value();
+    if (completion.status == IBV_WC_SUCCESS) {
+      EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+    }
+  }
 }
 
 TEST_F(MwTest, InvalidMw) {
@@ -231,7 +249,9 @@ TEST_F(MwTest, DeregMrWhenBound) {
       verbs_util::BindType1MwSync(setup.qp, mw, setup.buffer.span(), setup.mr);
   ASSERT_EQ(IBV_WC_SUCCESS, result);
 
-  EXPECT_EQ(EBUSY, ibv_dereg_mr(setup.mr));
+  const int kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? EBUSY : 0;
+  EXPECT_EQ(kExpected, ibv_.DeregMr(setup.mr));
 }
 
 TEST_F(MwTest, DestroyQpWithType1Bound) {

@@ -207,11 +207,11 @@ absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
 
       // Check the MTU size of the port against the max mtu attribute if the
       // value is other than 0. 0 means it is unset.
-      if (port_attr.max_mtu && result.empty() &&
+      if (port_attr.active_mtu && result.empty() &&
           (absl::GetFlag(FLAGS_verbs_mtu) >
-           VerbsMtuToValue(port_attr.max_mtu))) {
-        LOG(FATAL) << "--verbs_mtu exceeds device limit of "  // Crash ok
-                   << VerbsMtuToValue(port_attr.max_mtu);
+           VerbsMtuToValue(port_attr.active_mtu))) {
+        LOG(FATAL) << "--verbs_mtu exceeds active port limit of "  // Crash ok
+                   << VerbsMtuToValue(port_attr.active_mtu);
       }
       VLOG(2) << "Adding: " << GidToString(gid);
       LocalVerbsAddress match;

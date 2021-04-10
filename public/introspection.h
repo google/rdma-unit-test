@@ -59,24 +59,33 @@ class NicIntrospection {
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 
+  // Returns true if the NIC supports RC SendWithInvalidate.
+  virtual bool SupportsRcSendWithInvalidate() const { return true; }
+
   // Returns true if the NIC allows destroying PDs with outstanding AHs.
   virtual bool CanDestroyPdWithAhOutstanding() const { return false; }
+
+  // Returns true if NIC robustly handles destruction of invalid verbs objects.
+  virtual bool CorrectlyReportsInvalidObjects() const { return true; }
 
   // Returns true if NIC robustly handles unexpected PD access according to the
   // spec.
   virtual bool CorrectlyReportsPdErrors() const { return true; }
 
-  // Returns true if NIC robustly handles completion channel errors to the spec.
+  // Returns true if NIC robustly handles completion channel errors.
   virtual bool CorrectlyReportsCompChannelErrors() const { return true; }
 
-  // Returns true if NIC robustly handles address handle errors to the spec.
+  // Returns true if NIC robustly handles address handle errors.
   virtual bool CorrectlyReportsAddressHandleErrors() const { return true; }
 
-  // Returns true if NIC robustly handles queue pair errors to the spec.
+  // Returns true if NIC robustly handles queue pair errors.
   virtual bool CorrectlyReportsQueuePairErrors() const { return true; }
 
-  // Returns true if NIC robustly handles memory region pair errors to the spec.
+  // Returns true if NIC robustly handles memory region errors.
   virtual bool CorrectlyReportsMemoryRegionErrors() const { return true; }
+
+  // Returns true if NIC robustly handles memory window errorsc.
+  virtual bool CorrectlyReportsMemoryWindowErrors() const { return true; }
 
   // Reports true if NIC robustly handles invalid remote key on self connected
   // qp.
@@ -85,6 +94,9 @@ class NicIntrospection {
   // Reports true if the NIC robustly handles prerequisites for state
   // transitions.
   virtual bool CorrectlyReportsInvalidStateTransitions() const { return true; }
+
+  // Reports true if NIC robustly handles invalid size on atomic operations.
+  virtual bool CorrectlyReportsInvalidSizeErrors() const { return true; }
 
   // Returns true if the provider requires the use of file backed shared
   // memory.

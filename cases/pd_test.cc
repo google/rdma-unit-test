@@ -57,6 +57,7 @@ TEST_F(PdTest, OpenManyPd) {
 }
 
 TEST_F(PdTest, DeleteUnknownPd) {
+  if (!Introspection().CorrectlyReportsInvalidObjects()) GTEST_SKIP();
   ibv_context* context = ibv_.OpenDevice().value();
   ibv_pd dummy;
   dummy.context = context;
@@ -65,6 +66,7 @@ TEST_F(PdTest, DeleteUnknownPd) {
 
 // Check with a pointer in the correct range.
 TEST_F(PdTest, DeleteInvalidPd) {
+  if (!Introspection().CorrectlyReportsInvalidObjects()) GTEST_SKIP();
   ibv_context* context = ibv_.OpenDevice().value();
   ibv_cq* cq = ibv_.CreateCq(context);
   ASSERT_NE(nullptr, cq);
@@ -200,8 +202,22 @@ TEST_P(PdBindTest, MwOnOtherPd) {
   ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ibv_mw* mw = ibv_.AllocMw(setup.other_pd, GetParam());
   if (GetParam() == IBV_MW_TYPE_1) {
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, verbs_util::BindType1MwSync(
-                                      setup.qp, mw, setup.buffer.span(), mr));
+    // Some clients do client side validation on type 1. First check
+    // succcess/failure of the bind and if successful than check for completion.
+    ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
+        /*wr_id=*/1, setup.buffer.span(), mr,
+        IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+            IBV_ACCESS_REMOTE_ATOMIC);
+    int result = ibv_bind_mw(setup.qp, mw, &bind_args);
+    EXPECT_THAT(result, testing::AnyOf(0, EPERM));
+    if (result == 0) {
+      ibv_wc completion =
+          verbs_util::WaitForCompletion(setup.qp->send_cq).value();
+      if (completion.status == IBV_WC_SUCCESS) {
+        EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+      }
+    }
+
   } else {
     EXPECT_EQ(IBV_WC_MW_BIND_ERR,
               verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
@@ -214,8 +230,21 @@ TEST_P(PdBindTest, MrOnOtherPd) {
   ibv_mr* mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ibv_mw* mw = ibv_.AllocMw(setup.qp_pd, GetParam());
   if (GetParam() == IBV_MW_TYPE_1) {
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, verbs_util::BindType1MwSync(
-                                      setup.qp, mw, setup.buffer.span(), mr));
+    // Some clients do client side validation on type 1. First check
+    // succcess/failure of the bind and if successful than check for completion.
+    ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
+        /*wr_id=*/1, setup.buffer.span(), mr,
+        IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+            IBV_ACCESS_REMOTE_ATOMIC);
+    int result = ibv_bind_mw(setup.qp, mw, &bind_args);
+    EXPECT_THAT(result, testing::AnyOf(0, EPERM));
+    if (result == 0) {
+      ibv_wc completion =
+          verbs_util::WaitForCompletion(setup.qp->send_cq).value();
+      if (completion.status == IBV_WC_SUCCESS) {
+        EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+      }
+    }
   } else {
     EXPECT_EQ(IBV_WC_MW_BIND_ERR,
               verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),

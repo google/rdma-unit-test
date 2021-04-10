@@ -45,7 +45,7 @@ absl::Status RoceBackend::SetUpRcQp(
   // Ready to receive.
   ibv_qp_attr mod_rtr = {};
   mod_rtr.qp_state = IBV_QPS_RTR;
-  mod_rtr.path_mtu = verbs_util::ToVerbsMtu(mtu);
+  mod_rtr.path_mtu = mtu;
   mod_rtr.dest_qp_num = remote_qpn;
   static unsigned int psn = 1225;
   mod_rtr.rq_psn = psn;

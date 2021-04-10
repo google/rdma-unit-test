@@ -389,7 +389,10 @@ TEST_P(BufferMWTest, ExceedFront) {
       kMrMemoryOffset - kExceedLength, kMrMemoryLength + kExceedLength);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   EXPECT_NE(mw, nullptr);
-  EXPECT_EQ(IBV_WC_MW_BIND_ERR, DoBind(setup, mw, invalid_buffer));
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
+  EXPECT_EQ(kExpected, DoBind(setup, mw, invalid_buffer));
 }
 
 TEST_P(BufferMWTest, ExceedRear) {
@@ -401,7 +404,10 @@ TEST_P(BufferMWTest, ExceedRear) {
       setup.buffer.subspan(kMrMemoryOffset, kMrMemoryLength + kExceedLength);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
-  EXPECT_EQ(IBV_WC_MW_BIND_ERR, DoBind(setup, mw, invalid_buffer));
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
+  EXPECT_EQ(kExpected, DoBind(setup, mw, invalid_buffer));
 }
 
 TEST_P(BufferMWTest, ReadExceedFront) {

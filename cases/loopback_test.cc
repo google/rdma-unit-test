@@ -437,8 +437,9 @@ TEST_F(LoopbackRcQpTest, SendImmData) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
-  if (!Introspection().SupportsType2()) {
-    GTEST_SKIP() << "Needs type 2 MW.";
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -482,8 +483,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
-  if (!Introspection().SupportsType2()) {
-    GTEST_SKIP() << "Needs type 2 MW.";
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -515,8 +517,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
-  if (!Introspection().SupportsType2()) {
-    GTEST_SKIP() << "Needs type 2 MW.";
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -549,8 +552,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
-  if (!Introspection().SupportsType2()) {
-    GTEST_SKIP() << "Needs type 2 MW.";
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -584,8 +588,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
 
 // Send with Invalidate targeting another QPs MW.
 TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
-  if (!Introspection().SupportsType2()) {
-    GTEST_SKIP() << "Needs type 2 MW.";
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -1519,6 +1524,7 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
+  if (!Introspection().CorrectlyReportsInvalidSizeErrors()) GTEST_SKIP();
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
@@ -1795,6 +1801,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
 }
 
 TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidSize) {
+  if (!Introspection().CorrectlyReportsInvalidSizeErrors()) GTEST_SKIP();
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
@@ -1930,7 +1937,10 @@ TEST_F(LoopbackRcQpTest, RequestOnFailedQp) {
       /*wr_id=*/1, &rsge, /*num_sge=*/1, local.buffer.data(), local.mr->rkey);
   verbs_util::PostSend(remote.qp, read2);
 
-  ibv_wc completion2 = verbs_util::WaitForCompletion(remote.cq).value();
+  ibv_wc completion2 =
+      verbs_util::WaitForCompletion(remote.cq,
+                                    verbs_util::kDefaultErrorCompletionTimeout)
+          .value();
   EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion2.status);
   EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
   EXPECT_EQ(1, completion2.wr_id);
@@ -1938,8 +1948,9 @@ TEST_F(LoopbackRcQpTest, RequestOnFailedQp) {
 }
 
 TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
-  static_assert(kQueueSize % 2 == 0,
-                "Queue size must be even for this test to hit queue bounaries");
+  static_assert(
+      kQueueSize % 2 == 0,
+      "Queue size must be even for this test to hit queue boundaries");
   static constexpr int kBatchSize = kQueueSize / 2;
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);

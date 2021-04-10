@@ -237,7 +237,9 @@ TEST_F(SrqTest, OverflowSrq) {
     recv_wrs[i + 1].wr_id = i + 1;
   }
   ibv_recv_wr* bad_wr = nullptr;
-  ASSERT_EQ(-1, ibv_post_srq_recv(srq, recv_wrs.data(), &bad_wr));
+  // mlx4 uses -1, mlx5 uses ENOMEM
+  EXPECT_THAT(ibv_post_srq_recv(srq, recv_wrs.data(), &bad_wr),
+              testing::AnyOf(-1, ENOMEM));
   ASSERT_EQ(&recv_wrs[queue_size], bad_wr);
   EXPECT_EQ(0, ibv_destroy_srq(srq));
 }
@@ -279,7 +281,9 @@ TEST_F(SrqTest, ExceedsMaxSge) {
                                                       /*num_sge=*/sges.size());
   recv_valid.next = &recv_valid;
   ibv_recv_wr* bad_wr = nullptr;
-  EXPECT_EQ(-1, ibv_post_srq_recv(srq, &recv_invalid, &bad_wr));
+  // mlx4 uses -1, mlx5 uses EINVAL
+  EXPECT_THAT(ibv_post_srq_recv(srq, &recv_invalid, &bad_wr),
+              testing::AnyOf(-1, EINVAL));
   EXPECT_EQ(&recv_invalid, bad_wr);
 }
 
@@ -288,8 +292,12 @@ TEST_F(SrqTest, RnR) {
   ibv_sge sge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
   ibv_send_wr send = verbs_util::CreateSendWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   verbs_util::PostSend(setup.send_qp, send);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.send_cq).value();
-  EXPECT_EQ(IBV_WC_RNR_RETRY_EXC_ERR, completion.status);
+  ibv_wc completion =
+      verbs_util::WaitForCompletion(setup.send_cq,
+                                    verbs_util::kDefaultErrorCompletionTimeout)
+          .value();
+  EXPECT_THAT(completion.status,
+              testing::AnyOf(IBV_WC_RNR_RETRY_EXC_ERR, IBV_WC_RETRY_EXC_ERR));
   EXPECT_THAT(setup.recv_buffer.span(), ::testing::Each(kRecvContent));
 }
 

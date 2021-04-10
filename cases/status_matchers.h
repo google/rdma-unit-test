@@ -37,6 +37,16 @@
   ASSERT_TRUE(statusor.status().ok()) << statusor.status(); \
   lhs = std::move(statusor.value())
 
+#define ASSIGN_OR_RETURN(lhs, rexpr) \
+  ASSIGN_OR_RETURN_IMPL(CONCAT_MACRO(_status_or, __COUNTER__), lhs, rexpr)
+
+#define ASSIGN_OR_RETURN_IMPL(statusor, lhs, rexpr) \
+  auto statusor = (rexpr);                          \
+  if (PREDICT_FALSE(!statusor.ok())) {              \
+    return statusor.status();                       \
+  }                                                 \
+  lhs = std::move(statusor.value())
+
 #endif
 
 #endif  // RDMA_UNIT_TEST_CASES_STATUS_MATCHERS_H_

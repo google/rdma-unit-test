@@ -49,14 +49,6 @@ class IntrospectionMlx4 : public NicIntrospection {
         });
   }
 
-  // Returns if the device supports target.
-  bool CheckCapability(ibv_device_cap_flags target) const {
-    // ibv_query_device may report the incorrect capabilities for some cards.
-    // Override result when checking for Type2 support.
-    if (target == IBV_DEVICE_MEM_WINDOW_TYPE_2B) return false;
-    return (attr_.device_cap_flags & target) > 0;
-  }
-
   bool FullCqIdlesQp() const { return true; }
 
   bool CanDestroyPdWithAhOutstanding() const { return true; }
@@ -74,7 +66,11 @@ class IntrospectionMlx4 : public NicIntrospection {
   IntrospectionMlx4() = delete;
   ~IntrospectionMlx4() = default;
   explicit IntrospectionMlx4(const ibv_device_attr& attr)
-      : NicIntrospection(attr) {}
+      : NicIntrospection(attr) {
+    // ibv_query_device may report the incorrect capabilities for some cards.
+    // Override result when checking for Type2 support.
+    attr_.device_cap_flags &= ~IBV_DEVICE_MEM_WINDOW_TYPE_2B;
+  }
 };
 
 }  // namespace rdma_unit_test

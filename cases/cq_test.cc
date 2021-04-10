@@ -176,12 +176,6 @@ class CQAdvancedTest : public BasicFixture {
 
   // Adds |count| QPs to setup.qps.
   absl::Status CreateTestQps(BasicSetup& setup, int count) {
-    ibv_device_attr dev_attr = {};
-    int err = ibv_query_device(setup.context, &dev_attr);
-    if (err) {
-      return absl::InternalError(
-          absl::StrCat("Failed to query device (", err, ")."));
-    }
     for (int i = 0; i < count; ++i) {
       size_t qp_id = setup.qps.size();
       CHECK_LT(qp_id, 1UL << kQueueIdBits) << "Maximum of 256 queues";
@@ -190,7 +184,7 @@ class CQAdvancedTest : public BasicFixture {
                             setup.command_queue_slots,
                             setup.command_queue_slots, IBV_QPT_RC,
                             /*sig_all=*/0);
-      CHECK(qp.qp);
+      CHECK(qp.qp) << "failed to create qp - " << errno;
       qp.next_send_wr_id = qp_id << kQueueIdShift;
       qp.next_recv_wr_id = qp_id << kQueueIdShift;
       ibv_.SetUpSelfConnectedRcQp(qp.qp,

@@ -111,6 +111,8 @@ constexpr uint32_t kDefaultMaxWr = 200;
 constexpr uint32_t kDefaultMaxSge = 1;
 // Default timeout waiting for completion.
 constexpr absl::Duration kDefaultCompletionTimeout = absl::Seconds(2);
+// Default timeout waiting for completion on a known qp error
+constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(10);
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
 

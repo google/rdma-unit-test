@@ -11,6 +11,7 @@ cc_library(
     name = "introspection_extras",
     deps = [
         ":introspection_mlx4",
+        ":introspection_mlx5",
         ":introspection_rxe",
     ],
 )
@@ -18,6 +19,16 @@ cc_library(
 cc_library(
     name = "introspection_mlx4",
     hdrs = ["introspection_mlx4.h"],
+    deps = [
+        ":introspection_registrar",
+        "//public:introspection",
+    ],
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "introspection_mlx5",
+    hdrs = ["introspection_mlx5.h"],
     deps = [
         ":introspection_registrar",
         "//public:introspection",
