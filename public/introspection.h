@@ -90,7 +90,7 @@ class NicIntrospection {
   // Returns true if NIC robustly handles memory region errors.
   virtual bool CorrectlyReportsMemoryRegionErrors() const { return true; }
 
-  // Returns true if NIC robustly handles memory window errorsc.
+  // Returns true if NIC robustly handles memory window errors.
   virtual bool CorrectlyReportsMemoryWindowErrors() const { return true; }
 
   // Reports true if NIC robustly handles invalid remote key on self connected

@@ -56,5 +56,5 @@ If this is the case the rdma-unit-tests must run as root.
 rdma-unit-test has been tested on the following adapters;
  * Mellonox ConnectX-3
  * Mellonox ConnectX-4
- * SoftROCE (limited support_
+ * SoftROCE (limited support)
 

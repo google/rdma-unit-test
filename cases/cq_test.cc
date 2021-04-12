@@ -139,7 +139,7 @@ TEST_F(CqTest, LargeCompVector) {
 // TODO(author1): Test lookup/delete with a different kind of object.
 // TODO(author1): (likely in a different test) messing with comp vectors.
 
-class CQAdvancedTest : public BasicFixture {
+class CqAdvancedTest : public BasicFixture {
  protected:
   // Reserve the first byte (MSB(yte)) of the wr_id to represent the queue id.
   // X0000000 Queue Id
@@ -385,7 +385,7 @@ class CQAdvancedTest : public BasicFixture {
   }
 };
 
-TEST_F(CQAdvancedTest, SendCqOverflow) {
+TEST_F(CqAdvancedTest, SendCqOverflow) {
   if (Introspection().FullCqIdlesQp()) {
     GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
   }
@@ -404,7 +404,7 @@ TEST_F(CQAdvancedTest, SendCqOverflow) {
   ValidateCompletions(setup, completions);
 }
 
-TEST_F(CQAdvancedTest, SendSharedCq) {
+TEST_F(CqAdvancedTest, SendSharedCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kQueueCount = 2;
   ASSERT_OK(CreateTestQps(setup, kQueueCount));
@@ -423,7 +423,7 @@ TEST_F(CQAdvancedTest, SendSharedCq) {
 }
 
 // 5 threads writing to the same shared completion queue.
-TEST_F(CQAdvancedTest, SendSharedCqOverflow) {
+TEST_F(CqAdvancedTest, SendSharedCqOverflow) {
   if (Introspection().FullCqIdlesQp()) {
     GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
   }
@@ -444,7 +444,7 @@ TEST_F(CQAdvancedTest, SendSharedCqOverflow) {
   ValidateCompletions(setup, completions);
 }
 
-TEST_F(CQAdvancedTest, RecvCqOverflow) {
+TEST_F(CqAdvancedTest, RecvCqOverflow) {
   if (Introspection().FullCqIdlesQp()) {
     GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
   }
@@ -467,7 +467,7 @@ TEST_F(CQAdvancedTest, RecvCqOverflow) {
 }
 
 // 2 CQs posting recv completions to a single completion queue.
-TEST_F(CQAdvancedTest, RecvSharedCq) {
+TEST_F(CqAdvancedTest, RecvSharedCq) {
   if (!Introspection().SupportsMultipleOutstandingRecvRequests()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kQueueCount = 2;
@@ -492,7 +492,7 @@ TEST_F(CQAdvancedTest, RecvSharedCq) {
   ValidateCompletions(setup, completions);
 }
 
-TEST_F(CQAdvancedTest, RecvSharedCqOverflow) {
+TEST_F(CqAdvancedTest, RecvSharedCqOverflow) {
   if (Introspection().FullCqIdlesQp()) {
     GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
   }

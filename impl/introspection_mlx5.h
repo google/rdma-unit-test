@@ -31,7 +31,7 @@ class IntrospectionMlx5 : public NicIntrospection {
 
   bool SupportsRcRemoteMwAtomic() const { return false; }
 
-  // CQAdvancedTest::RecvSharedCq failure with multiple outstanding recv
+  // CqAdvancedTest::RecvSharedCq failure with multiple outstanding recv
   // requests. Completions are returned but no data transferred which results
   // in the WaitingForChange to fail.
   // TODO(author1): determine if there is a test issue.
@@ -57,7 +57,7 @@ class IntrospectionMlx5 : public NicIntrospection {
   explicit IntrospectionMlx5(const ibv_device_attr& attr)
       : NicIntrospection(attr) {
     // ibv_queury_device incorrectly reports max_qp_wr as 32768.
-    // Unable to create RC qp above 8192, and U qp above 16384
+    // Unable to create RC qp above 8192, and UD qp above 16384
     attr_.max_qp_wr = 8192;
     // ibv_query_device may report the incorrect capabilities for some cards.
     // Override result when checking for Type2 support.

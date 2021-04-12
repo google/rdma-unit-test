@@ -1314,7 +1314,8 @@ TEST_F(LoopbackRcQpTest, FetchAddSmallSge) {
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+  EXPECT_THAT(completion.status,
+              testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
@@ -1331,13 +1332,16 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+  EXPECT_THAT(completion.status,
+              testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+  InitializeAtomicBuffer(local, /*content=*/1);
+  InitializeAtomicBuffer(remote, /*content=*/2);
   // The local SGE will be used to store the value before the update.
   ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
   ibv_sge sgl[2];
@@ -1350,11 +1354,16 @@ TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, sgl, /*num_sge=*/2, remote.atomic_buffer.data(),
       remote.mr->rkey, 0);
-  verbs_util::PostSend(local.qp, fetch_add);
+  ibv_send_wr* bad_wr = nullptr;
+  int result =
+      ibv_post_send(local.qp, const_cast<ibv_send_wr*>(&fetch_add), &bad_wr);
+  // Some adpaters do not allow 2 SG entries
+  // TODO(author1): setup buffers/adder with interesting values and check.
+  if (result) return;
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledFetchAdd) {
