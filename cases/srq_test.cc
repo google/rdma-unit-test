@@ -254,7 +254,8 @@ TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
   ibv_recv_wr* bad_wr = nullptr;
   int result = ibv_post_srq_recv(setup.srq, &recv, &bad_wr);
   EXPECT_EQ(bad_wr, &recv);
-  EXPECT_EQ(result, -1);  // mlx4 uses -1
+  // mlx4 uses -1, mlx5 uses ENOMEM
+  EXPECT_THAT(result, testing::AnyOf(-1, ENOMEM));
 }
 
 TEST_F(SrqTest, ExceedsMaxSge) {

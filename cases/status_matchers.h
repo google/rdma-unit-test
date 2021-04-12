@@ -42,7 +42,7 @@
 
 #define ASSIGN_OR_RETURN_IMPL(statusor, lhs, rexpr) \
   auto statusor = (rexpr);                          \
-  if (PREDICT_FALSE(!statusor.ok())) {              \
+  if (!statusor.ok()) {                             \
     return statusor.status();                       \
   }                                                 \
   lhs = std::move(statusor.value())

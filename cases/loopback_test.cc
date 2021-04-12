@@ -33,6 +33,7 @@
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "cases/status_matchers.h"
+#include "public/introspection.h"
 #include "public/rdma-memblock.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
@@ -627,6 +628,29 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
 
 }
 
+TEST_F(LoopbackRcQpTest, SendWithTooSmallRecv) {
+  // Recv buffer is to small to fit the whole buffer.
+  auto client_pair_or = CreateConnectedClientsPair();
+  ASSERT_OK(client_pair_or);
+  auto [local, remote] = client_pair_or.value();
+  ibv_sge sge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  const uint32_t kRecvLength = local.buffer.span().size() - 1;
+  sge.length = kRecvLength;
+  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  verbs_util::PostSend(local.qp, send);
+  ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
+  ASSERT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  ASSERT_EQ(local.qp->qp_num, completion.qp_num);
+  ASSERT_EQ(1, completion.wr_id);
+  ASSERT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
+  ASSERT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+}
+
 TEST_F(LoopbackRcQpTest, BadRecvAddr) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
@@ -705,7 +729,8 @@ TEST_F(LoopbackRcQpTest, BadRecvLength) {
   EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
   EXPECT_EQ(1, completion.wr_id);
   EXPECT_EQ(0, completion2.wr_id);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
+  if (Introspection().CorrectlyReportsMemoryRegionErrors() &&
+      Introspection().CorrectlyReportsInvalidRecvLengthErrors()) {
     EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
     EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion2.status);
   } else {
@@ -1273,6 +1298,63 @@ TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
   // The local buffer should be the same as the remote.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 2);
+}
+
+TEST_F(LoopbackRcQpTest, FetchAddSmallSge) {
+  auto client_pair_or = CreateConnectedClientsPair();
+  ASSERT_OK(client_pair_or);
+  auto [local, remote] = client_pair_or.value();
+  // The local SGE will be used to store the value before the update.
+  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  sge.length = 7;
+  ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
+      remote.mr->rkey, 0);
+  verbs_util::PostSend(local.qp, fetch_add);
+  ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
+  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+}
+
+TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
+  auto client_pair_or = CreateConnectedClientsPair();
+  ASSERT_OK(client_pair_or);
+  auto [local, remote] = client_pair_or.value();
+  // The local SGE will be used to store the value before the update.
+  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  sge.length = 9;
+  ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
+      remote.mr->rkey, 0);
+  verbs_util::PostSend(local.qp, fetch_add);
+  ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
+  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+}
+
+TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
+  auto client_pair_or = CreateConnectedClientsPair();
+  ASSERT_OK(client_pair_or);
+  auto [local, remote] = client_pair_or.value();
+  // The local SGE will be used to store the value before the update.
+  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sgl[2];
+  sgl[0].addr = sge.addr;
+  sgl[0].length = 4;
+  sgl[0].lkey = sge.lkey;
+  sgl[1].addr = sge.addr + 8;
+  sgl[1].length = 4;
+  sgl[1].lkey = sge.lkey;
+  ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
+      /*wr_id=*/1, sgl, /*num_sge=*/2, remote.atomic_buffer.data(),
+      remote.mr->rkey, 0);
+  verbs_util::PostSend(local.qp, fetch_add);
+  ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
+  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledFetchAdd) {
@@ -2126,6 +2208,35 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  send.wr.ud.ah = local.other_ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local.qp, send);
+
+  ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
+  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(1, completion.wr_id);
+}
+
+TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
+  constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
+  auto client_pair_or = CreateConnectedClientsPair();
+  ASSERT_OK(client_pair_or);
+  auto [local, remote] = client_pair_or.value();
+  const uint32_t recv_length = local.buffer.span().size() / 2;
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = recv_length + sizeof(ibv_grh);
+  // Recv buffer is to small to fit the whole buffer.
+  rsge.length -= 1;
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
 
   ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   lsge.length = kPayloadLength;

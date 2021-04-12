@@ -34,6 +34,7 @@
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "cases/status_matchers.h"
+#include "public/introspection.h"
 #include "public/rdma-memblock.h"
 #include "public/verbs_helper_suite.h"
 
@@ -467,6 +468,7 @@ TEST_F(CQAdvancedTest, RecvCqOverflow) {
 
 // 2 CQs posting recv completions to a single completion queue.
 TEST_F(CQAdvancedTest, RecvSharedCq) {
+  if (!Introspection().SupportsMultipleOutstandingRecvRequests()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kQueueCount = 2;
   ASSERT_OK(CreateTestQps(setup, kQueueCount));

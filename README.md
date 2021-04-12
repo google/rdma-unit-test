@@ -24,13 +24,19 @@ to fix overly-specificified tests are encouraged.
 
 ## Installation
 
-Prior to building the ibverb user space libraries must be installed.
+rdma-unit-test has been built/tested on CentOS 8.3.2011 using a Mellonox
+ConnectX-4 Dual port 25Gbe adapter.  Installation requirements may vary
+depending upon the distro used.
+CentOS installation uses the standard Server configuration with the following
+options;
+ * Infiniband support
+ * Development Tools
 
-    sudo apt install libibverbs libibverbs-dev
+Additional requirements;
+ * ivberbs development libraries; sudo yum install libibverbs-devel
+ * bazel build tool; instructions [here](https://docs.bazel.build/versions/master/install-redhat.html)
 
 The user space libraries are supported and packaged [here](https://github.com/linux-rdma/rdma-core)
-
-rdma-unit-test also requires [nl3](https://www.infradead.org/~tgr/libnl/).
 
 ## Introspection
 
@@ -41,3 +47,14 @@ specification. Adding introspection support for a new NIC requires 2 changes:
 
 1.  Extend NicIntrospection (ex. introspection\_rxe.h)
 2.  Update gunit\_main.cc to register the new introspection.
+
+## Running
+Some ibverb libraries require root priviledges when creating verb queue pairs.
+If this is the case the rdma-unit-tests must run as root.
+
+## Device Support
+rdma-unit-test has been tested on the following adapters;
+ * Mellonox ConnectX-3
+ * Mellonox ConnectX-4
+ * SoftROCE (limited support_
+

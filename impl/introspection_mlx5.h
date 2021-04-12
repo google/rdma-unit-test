@@ -29,6 +29,14 @@ class IntrospectionMlx5 : public NicIntrospection {
 
   bool SupportsRcSendWithInvalidate() const { return false; }
 
+  bool SupportsRcRemoteMwAtomic() const { return false; }
+
+  // CQAdvancedTest::RecvSharedCq failure with multiple outstanding recv
+  // requests. Completions are returned but no data transferred which results
+  // in the WaitingForChange to fail.
+  // TODO(author1): determine if there is a test issue.
+  bool SupportsMultipleOutstandingRecvRequests() const { return false; }
+
   bool CorrectlyReportsInvalidObjects() const { return false; }
 
   bool CorrectlyReportsCompChannelErrors() const { return false; }
@@ -40,6 +48,8 @@ class IntrospectionMlx5 : public NicIntrospection {
   bool CorrectlyReportsInvalidRemoteKeyErrors() const { return false; }
 
   bool CorrectlyReportsInvalidSizeErrors() const { return false; }
+
+  bool CorrectlyReportsInvalidRecvLengthErrors() const { return false; }
 
  private:
   IntrospectionMlx5() = delete;

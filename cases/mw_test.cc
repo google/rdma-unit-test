@@ -871,7 +871,9 @@ TEST_P(MWBindTest, MissingBind) {
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC |
                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
   const int kBindAccess = IBV_ACCESS_MW_BIND;
-  const ibv_wc_status kExpected = IBV_WC_MW_BIND_ERR;
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
@@ -934,7 +936,9 @@ TEST_P(MWBindTest, NoMrBindAccess) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_REMOTE_READ;
   const int kBindAccess = IBV_ACCESS_REMOTE_READ;
-  const ibv_wc_status kExpected = IBV_WC_MW_BIND_ERR;
+  const ibv_wc_status kExpected =
+      Introspection().CorrectlyReportsMemoryWindowErrors() ? IBV_WC_MW_BIND_ERR
+                                                           : IBV_WC_SUCCESS;
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 

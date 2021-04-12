@@ -62,6 +62,12 @@ class NicIntrospection {
   // Returns true if the NIC supports RC SendWithInvalidate.
   virtual bool SupportsRcSendWithInvalidate() const { return true; }
 
+  // Returns true if the NIC supports RC Remote Memory Window Atomic.
+  virtual bool SupportsRcRemoteMwAtomic() const { return true; }
+
+  // Returns true if the NIC supports multiple outstanding recv requests.
+  virtual bool SupportsMultipleOutstandingRecvRequests() const { return true; }
+
   // Returns true if the NIC allows destroying PDs with outstanding AHs.
   virtual bool CanDestroyPdWithAhOutstanding() const { return false; }
 
@@ -97,6 +103,9 @@ class NicIntrospection {
 
   // Reports true if NIC robustly handles invalid size on atomic operations.
   virtual bool CorrectlyReportsInvalidSizeErrors() const { return true; }
+
+  // Reports true if NIC robustly handles invalid receive length.
+  virtual bool CorrectlyReportsInvalidRecvLengthErrors() const { return true; }
 
   // Returns true if the provider requires the use of file backed shared
   // memory.
