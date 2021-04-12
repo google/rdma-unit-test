@@ -152,7 +152,7 @@ class AccessTest : public BasicFixture,
 
   void AttemptMwAtomic(BasicSetup setup, int src_mr_access, int dst_mr_access,
                        int dst_mw_access, ibv_wc_status expected) {
-    if (!Introspection().SupportsRcRemoteMwAtomic()) GTEST_SKIP();
+    if (!Introspection().SupportsRcRemoteMwAtomic()) return;
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
