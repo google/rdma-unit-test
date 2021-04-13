@@ -41,10 +41,12 @@ namespace rdma_unit_test {
 class VerbsHelperSuite {
  public:
   VerbsHelperSuite();
-  ~VerbsHelperSuite() = default;
   // Not movable or copyable.
+  VerbsHelperSuite(const VerbsHelperSuite&& helper) = delete;
+  VerbsHelperSuite& operator=(const VerbsHelperSuite&& helper) = delete;
   VerbsHelperSuite(const VerbsHelperSuite& helper) = delete;
   VerbsHelperSuite& operator=(const VerbsHelperSuite& helper) = delete;
+  ~VerbsHelperSuite() = default;
 
   static void SetUpHelperGlobal();
   static void TearDownHelperGlobal();

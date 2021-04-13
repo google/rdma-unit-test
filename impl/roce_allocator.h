@@ -25,6 +25,10 @@ namespace rdma_unit_test {
 class RoceAllocator : public VerbsAllocator {
  public:
   RoceAllocator() = default;
+  RoceAllocator(const RoceAllocator&& allocator) = delete;
+  RoceAllocator& operator=(const RoceAllocator&& allocator) = delete;
+  RoceAllocator(const RoceAllocator& allocator) = delete;
+  RoceAllocator& operator=(const RoceAllocator& allocator) = delete;
   ~RoceAllocator() override = default;
 
  private:

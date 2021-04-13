@@ -29,6 +29,10 @@ namespace rdma_unit_test {
 class RoceBackend : public VerbsBackend {
  public:
   RoceBackend() = default;
+  RoceBackend(const RoceBackend&& backend) = delete;
+  RoceBackend& operator=(const RoceBackend&& backend) = delete;
+  RoceBackend(const RoceBackend& backend) = delete;
+  RoceBackend& operator=(const RoceBackend& backend) = delete;
   ~RoceBackend() override = default;
 
   // See verbs_backend.h.

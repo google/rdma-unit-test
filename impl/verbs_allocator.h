@@ -40,6 +40,10 @@ namespace rdma_unit_test {
 class VerbsAllocator {
  public:
   VerbsAllocator() = default;
+  VerbsAllocator(const VerbsAllocator&& allocator) = delete;
+  VerbsAllocator& operator=(const VerbsAllocator&& allocator) = delete;
+  VerbsAllocator(const VerbsAllocator& allocator) = delete;
+  VerbsAllocator& operator=(const VerbsAllocator& allocator) = delete;
   virtual ~VerbsAllocator() = default;
 
   // Set of helpers for automatically cleaning up objects when the tracker is

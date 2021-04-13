@@ -34,9 +34,11 @@ namespace rdma_unit_test {
 class VerbsBackend {
  public:
   VerbsBackend() = default;
-  virtual ~VerbsBackend() = default;
+  VerbsBackend(const VerbsBackend&& transport) = delete;
+  VerbsBackend& operator=(const VerbsBackend&& transport) = delete;
   VerbsBackend(const VerbsBackend& transport) = delete;
   VerbsBackend& operator=(const VerbsBackend& transport) = delete;
+  virtual ~VerbsBackend() = default;
 
   // Sets up a reliable connection queue pair to RTS (ready to send).
   virtual absl::Status SetUpRcQp(
