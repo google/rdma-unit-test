@@ -28,6 +28,7 @@
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "cases/status_matchers.h"
+#include "public/introspection.h"
 #include "public/rdma-memblock.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
@@ -213,10 +214,11 @@ TEST_F(SrqTest, PostRecvToSrqQp) {
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   int result = ibv_post_recv(setup.recv_qp, &recv, &bad_wr);
-  EXPECT_EQ(ENOMEM, result);
+  EXPECT_THAT(result, testing::AnyOf(EINVAL, ENOMEM));
 }
 
 TEST_F(SrqTest, OverflowSrq) {
+  if (!Introspection().CorrectlyEnforcesRequestQueueSize()) GTEST_SKIP();
   static constexpr uint32_t kProposedMaxWr = verbs_util::kDefaultMaxWr;
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_srq_init_attr init_attr;
@@ -240,7 +242,7 @@ TEST_F(SrqTest, OverflowSrq) {
   // mlx4 uses -1, mlx5 uses ENOMEM
   EXPECT_THAT(ibv_post_srq_recv(srq, recv_wrs.data(), &bad_wr),
               testing::AnyOf(-1, ENOMEM));
-  ASSERT_EQ(&recv_wrs[queue_size], bad_wr);
+  EXPECT_EQ(&recv_wrs[queue_size], bad_wr);
   EXPECT_EQ(0, ibv_destroy_srq(srq));
 }
 
@@ -255,7 +257,7 @@ TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
   int result = ibv_post_srq_recv(setup.srq, &recv, &bad_wr);
   EXPECT_EQ(bad_wr, &recv);
   // mlx4 uses -1, mlx5 uses ENOMEM
-  EXPECT_THAT(result, testing::AnyOf(-1, ENOMEM));
+  EXPECT_THAT(result, testing::AnyOf(-1, ENOMEM, -ENOMEM));
 }
 
 TEST_F(SrqTest, ExceedsMaxSge) {
@@ -284,7 +286,7 @@ TEST_F(SrqTest, ExceedsMaxSge) {
   ibv_recv_wr* bad_wr = nullptr;
   // mlx4 uses -1, mlx5 uses EINVAL
   EXPECT_THAT(ibv_post_srq_recv(srq, &recv_invalid, &bad_wr),
-              testing::AnyOf(-1, EINVAL));
+              testing::AnyOf(-1, EINVAL, -EINVAL));
   EXPECT_EQ(&recv_invalid, bad_wr);
 }
 

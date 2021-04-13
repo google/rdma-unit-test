@@ -107,6 +107,9 @@ class NicIntrospection {
   // Reports true if NIC robustly handles invalid receive length.
   virtual bool CorrectlyReportsInvalidRecvLengthErrors() const { return true; }
 
+  // Reports true if NIC robustly handles work queue size update/constraints.
+  virtual bool CorrectlyEnforcesRequestQueueSize() const { return true; }
+
   // Returns true if the provider requires the use of file backed shared
   // memory.
   virtual bool RequiresSharedMemory() const { return false; }

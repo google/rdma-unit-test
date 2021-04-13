@@ -27,29 +27,33 @@ class IntrospectionMlx5 : public NicIntrospection {
         });
   }
 
-  bool SupportsRcSendWithInvalidate() const { return false; }
+  bool SupportsRcSendWithInvalidate() const override { return false; }
 
-  bool SupportsRcRemoteMwAtomic() const { return false; }
+  bool SupportsRcRemoteMwAtomic() const override { return false; }
 
   // CqAdvancedTest::RecvSharedCq failure with multiple outstanding recv
   // requests. Completions are returned but no data transferred which results
   // in the WaitingForChange to fail.
   // TODO(author1): determine if there is a test issue.
-  bool SupportsMultipleOutstandingRecvRequests() const { return false; }
+  bool SupportsMultipleOutstandingRecvRequests() const override {
+    return false;
+  }
 
-  bool CorrectlyReportsInvalidObjects() const { return false; }
+  bool CorrectlyReportsInvalidObjects() const override { return false; }
 
-  bool CorrectlyReportsCompChannelErrors() const { return false; }
+  bool CorrectlyReportsCompChannelErrors() const override { return false; }
 
-  bool CorrectlyReportsMemoryWindowErrors() const { return false; }
+  bool CorrectlyReportsMemoryWindowErrors() const override { return false; }
 
-  bool CorrectlyReportsAddressHandleErrors() const { return false; }
+  bool CorrectlyReportsAddressHandleErrors() const override { return false; }
 
-  bool CorrectlyReportsInvalidRemoteKeyErrors() const { return false; }
+  bool CorrectlyReportsInvalidRemoteKeyErrors() const override { return false; }
 
-  bool CorrectlyReportsInvalidSizeErrors() const { return false; }
+  bool CorrectlyReportsInvalidSizeErrors() const override { return false; }
 
-  bool CorrectlyReportsInvalidRecvLengthErrors() const { return false; }
+  bool CorrectlyReportsInvalidRecvLengthErrors() const override {
+    return false;
+  }
 
  private:
   IntrospectionMlx5() = delete;

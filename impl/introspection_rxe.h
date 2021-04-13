@@ -33,11 +33,17 @@ class IntrospectionRxe : public NicIntrospection {
         [](const ibv_device_attr& attr) { return new IntrospectionRxe(attr); });
   }
 
-  bool SupportsIpV6() const { return false; }
+  bool SupportsIpV6() const override { return false; }
 
-  bool CorrectlyReportsQueuePairErrors() const { return false; }
+  bool SupportsRcQp() const override { return false; }
 
-  bool CorrectlyReportsInvalidRemoteKeyErrors() const { return false; }
+  bool CorrectlyReportsCompChannelErrors() const override { return false; }
+
+  bool CorrectlyReportsQueuePairErrors() const override { return false; }
+
+  bool CorrectlyReportsInvalidRemoteKeyErrors() const override { return false; }
+
+  bool CorrectlyEnforcesRequestQueueSize() const override { return false; }
 
  private:
   IntrospectionRxe() = delete;

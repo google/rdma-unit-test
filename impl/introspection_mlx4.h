@@ -49,18 +49,16 @@ class IntrospectionMlx4 : public NicIntrospection {
         });
   }
 
-  bool FullCqIdlesQp() const { return true; }
+  bool FullCqIdlesQp() const override { return true; }
 
-  bool CanDestroyPdWithAhOutstanding() const { return true; }
+  bool CanDestroyPdWithAhOutstanding() const override { return true; }
 
-  bool CorrectlyReportsCompChannelErrors() const { return false; }
+  bool CorrectlyReportsCompChannelErrors() const override { return false; }
 
-  bool CorrectlyReportRequestionNotifications() const { return false; }
-
-  bool CorrectlyReportsAddressHandleErrors() const { return false; }
+  bool CorrectlyReportsAddressHandleErrors() const override { return false; }
 
   // This is a potential bug on CX3.
-  bool CorrectlyReportsMemoryRegionErrors() const { return false; }
+  bool CorrectlyReportsMemoryRegionErrors() const override { return false; }
 
  private:
   IntrospectionMlx4() = delete;

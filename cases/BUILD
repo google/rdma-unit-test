@@ -279,6 +279,7 @@ cc_test(
         ":basic_fixture",
         ":gunit_main",
         ":status_matchers",
+        "//public:introspection",
         "//public:rdma-memblock",
         "//public:util",
         "//public:verbs_helper_suite",
