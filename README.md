@@ -101,11 +101,14 @@ flag | default | description
 -----|---------|------------
 verbs_mtu | 4096 | Changes the mtu size for qp configuration. Note that some adapters may have limited support for 4096 so this flag must be set to be within device contraints
 no_ipv6_for_mtu | false | If set, will only enumerate ports with ipv4 addresses.
+device_name | none | If set, will attempt to open the named device for all tests. If the device is not found **rdma_unit_test** will list the available devices.
 
 
 ## Device Support
 **rdma-unit-test** uses ibv_get_device_list to find all available devices. By
 default **rdma-unit-test** will use the first device found with an active port.
+To select a difference device name or port use the **--device_name** flag.
+
 This package has been tested on the following adapters;
 
 * Mellonox ConnectX-3

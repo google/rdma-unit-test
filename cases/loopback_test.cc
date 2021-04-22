@@ -138,7 +138,8 @@ class LoopbackTest : public BasicFixture {
     DCHECK_EQ(client.atomic_buffer.size(), 0UL)
         << "Atomic buffer already initialized";
     client.atomic_buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-    DCHECK_EQ(reinterpret_cast<uintptr_t>(client.atomic_buffer.data()) % 8, 0);
+    DCHECK_EQ(reinterpret_cast<uintptr_t>(client.atomic_buffer.data()) % 8,
+              0UL);
     for (size_t i = 0; i < client.atomic_buffer.size(); i += sizeof(content)) {
       *reinterpret_cast<uint64_t*>(client.atomic_buffer.data() + i) = content;
     }
