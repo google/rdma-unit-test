@@ -17,6 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 
+#include "absl/container/flat_hash_set.h"
 #include "infiniband/verbs.h"
 #include "public/util.h"
 
@@ -59,56 +60,31 @@ class NicIntrospection {
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 
+  // Returns true if the NIC requires a deviation for the current test.
+  // Typically this is due to the test exploring (per the spec) undefined
+  // behaviors. It is up to each test how they handle deviations, but most skip
+  // execution.
+  // |identifier| is used to disambiguate among multiple deviations in a single
+  // test.
+  bool ShouldDeviateForCurrentTest(const std::string& identifier = "") const;
+
   // Returns true if the NIC supports RC SendWithInvalidate.
   virtual bool SupportsRcSendWithInvalidate() const { return true; }
 
   // Returns true if the NIC supports RC Remote Memory Window Atomic.
   virtual bool SupportsRcRemoteMwAtomic() const { return true; }
 
-  // Returns true if the NIC supports multiple outstanding recv requests.
-  virtual bool SupportsMultipleOutstandingRecvRequests() const { return true; }
-
-  // Returns true if the NIC allows destroying PDs with outstanding AHs.
-  virtual bool CanDestroyPdWithAhOutstanding() const { return false; }
-
   // Returns true if NIC robustly handles destruction of invalid verbs objects.
   virtual bool CorrectlyReportsInvalidObjects() const { return true; }
 
-  // Returns true if NIC robustly handles unexpected PD access according to the
-  // spec.
-  virtual bool CorrectlyReportsPdErrors() const { return true; }
-
-  // Returns true if NIC robustly handles completion channel errors.
-  virtual bool CorrectlyReportsCompChannelErrors() const { return true; }
-
-  // Returns true if NIC robustly handles address handle errors.
-  virtual bool CorrectlyReportsAddressHandleErrors() const { return true; }
-
-  // Returns true if NIC robustly handles queue pair errors.
-  virtual bool CorrectlyReportsQueuePairErrors() const { return true; }
-
-  // Returns true if NIC robustly handles memory region errors.
-  virtual bool CorrectlyReportsMemoryRegionErrors() const { return true; }
-
   // Returns true if NIC robustly handles memory window errors.
   virtual bool CorrectlyReportsMemoryWindowErrors() const { return true; }
-
-  // Reports true if NIC robustly handles invalid remote key on self connected
-  // qp.
-  virtual bool CorrectlyReportsInvalidRemoteKeyErrors() const { return true; }
-
-  // Reports true if the NIC robustly handles prerequisites for state
-  // transitions.
-  virtual bool CorrectlyReportsInvalidStateTransitions() const { return true; }
 
   // Reports true if NIC robustly handles invalid size on atomic operations.
   virtual bool CorrectlyReportsInvalidSizeErrors() const { return true; }
 
   // Reports true if NIC robustly handles invalid receive length.
   virtual bool CorrectlyReportsInvalidRecvLengthErrors() const { return true; }
-
-  // Reports true if NIC robustly handles work queue size update/constraints.
-  virtual bool CorrectlyEnforcesRequestQueueSize() const { return true; }
 
   // Returns true if the provider requires the use of file backed shared
   // memory.
@@ -118,6 +94,16 @@ class NicIntrospection {
   const ibv_device_attr& device_attr() const { return attr_; }
 
  protected:
+  // <TestSuite, TestCase, DeviationIdentifier>
+  // See ShouldDeviateForCurrentTest for meaning of DeviationIdentifier.
+  typedef std::tuple<std::string, std::string, std::string> DeviationEntry;
+
+  // Returns a set of <TestSuite,Name,Identifier> which should deviate.
+  virtual const absl::flat_hash_set<DeviationEntry>& GetDeviations() const {
+    static const absl::flat_hash_set<DeviationEntry> deviations;
+    return deviations;
+  }
+
   ibv_device_attr attr_;
 };
 

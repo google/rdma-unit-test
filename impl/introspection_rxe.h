@@ -37,13 +37,41 @@ class IntrospectionRxe : public NicIntrospection {
 
   bool SupportsRcQp() const override { return false; }
 
-  bool CorrectlyReportsCompChannelErrors() const override { return false; }
-
-  bool CorrectlyReportsQueuePairErrors() const override { return false; }
-
-  bool CorrectlyReportsInvalidRemoteKeyErrors() const override { return false; }
-
-  bool CorrectlyEnforcesRequestQueueSize() const override { return false; }
+ protected:
+  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
+    static const absl::flat_hash_set<DeviationEntry> deviations{
+        // Returns success completion.
+        {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
+        // Zero byte write is successful.
+        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        // Hardware returns true when requesting notification on a CQ without a
+        // Completion Channel.
+        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeTooMany", ""},
+        // RXE PD support is lacking.
+        {"PdRcLoopbackMrTest", "BasicReadMrOtherPdLocal", ""},
+        {"PdRcLoopbackMrTest", "BasicReadMrOtherPdRemote", ""},
+        {"PdRcLoopbackMrTest", "BasicWriteMrOtherPdLocal", ""},
+        {"PdRcLoopbackMrTest", "BasicWriteMrOtherPdRemote", ""},
+        {"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdLocal", ""},
+        {"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdRemote", ""},
+        {"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdLocal", ""},
+        {"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdRemote", ""},
+        {"PdUdLoopbackTest", "SendAhOnOtherPd", ""},
+        {"SrqPdTest", "SrqRecvMrSrqMatch", ""},
+        {"SrqPdTest", "SrqRecvMrSrqMismatch", ""},
+        // Does not handle overflow well.
+        {"QpTest", "OverflowSendWr", ""},
+        // Can create QPs of unknown type.
+        {"QpTest", "UnknownType", ""},
+        // Does not handle overflow well.
+        {"SrqTest", "OverflowSrq", ""},
+    };
+    return deviations;
+  }
 
  private:
   IntrospectionRxe() = delete;

@@ -81,6 +81,7 @@ cc_library(
     srcs = ["verbs_allocator.cc"],
     hdrs = ["verbs_allocator.h"],
     deps = [
+        "//public:flags",
         "//public:rdma-memblock",
         "//public:util",
         "@com_glog_glog//:glog",

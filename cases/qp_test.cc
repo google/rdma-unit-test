@@ -190,7 +190,7 @@ TEST_F(QpTest, UnknownType) {
   ibv_qp_init_attr attr = setup.basic_attr;
   attr.qp_type = static_cast<ibv_qp_type>(0xf0);
   ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
-  if (Introspection().CorrectlyReportsQueuePairErrors()) {
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(nullptr, qp);
   }
 }
@@ -211,8 +211,7 @@ TEST_F(QpTest, ZeroSendWr) {
 }
 
 TEST_F(QpTest, OverflowSendWr) {
-  // RXE does not handle overflow well.
-  if (!Introspection().CorrectlyReportsQueuePairErrors()) {
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP();
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
@@ -279,7 +278,7 @@ TEST_F(QpTest, ModifyBadResetToInitStateTransition) {
   ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
   for (auto mask : CreateMaskCombinations(kRcQpInitMask)) {
     int result = ibv_modify_qp(qp, &mod_init, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
+    if (!Introspection().ShouldDeviateForCurrentTest()) {
       EXPECT_NE(result, 0);
     }
   }
@@ -298,7 +297,7 @@ TEST_F(QpTest, ModifyBadInitToRtrStateTransition) {
   ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
   for (auto mask : CreateMaskCombinations(kRcQpRtrMask)) {
     int result = ibv_modify_qp(qp, &mod_rtr, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
+    if (!Introspection().ShouldDeviateForCurrentTest()) {
       EXPECT_NE(result, 0);
     }
   }
@@ -322,7 +321,7 @@ TEST_F(QpTest, ModifyBadRtrToRtsStateTransition) {
   ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
   for (auto mask : CreateMaskCombinations(kRcQpRtsMask)) {
     int result = ibv_modify_qp(qp, &mod_rts, mask);
-    if (Introspection().CorrectlyReportsInvalidStateTransitions()) {
+    if (!Introspection().ShouldDeviateForCurrentTest()) {
       EXPECT_NE(result, 0);
     }
   }

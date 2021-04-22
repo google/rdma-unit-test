@@ -216,10 +216,10 @@ TEST_F(BufferTest, BasicReadZeroByte) {
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
   ibv_wc_status result = verbs_util::ReadSync(
       setup.qp, local_buffer, setup.mr, remote_buffer.data(), setup.mr->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
@@ -230,10 +230,10 @@ TEST_F(BufferTest, BasicReadZeroByteOutsideMr) {
   absl::Span<uint8_t> remote_buffer = setup.buffer.subspan(0, 0);
   ibv_wc_status result = verbs_util::ReadSync(
       setup.qp, local_buffer, setup.mr, remote_buffer.data(), setup.mr->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
@@ -266,10 +266,10 @@ TEST_F(BufferTest, BasicReadZeroByteFromZeroByteMr) {
   ibv_wc_status result =
       verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                            remote_buffer.data(), zerobyte_mr->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
@@ -284,10 +284,10 @@ TEST_F(BufferTest, BasicReadZeroByteOutsideZeroByteMr) {
   ibv_wc_status result =
       verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                            remote_buffer.data(), zerobyte_mr->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
@@ -323,12 +323,12 @@ TEST_F(BufferTest, ZeroByteReadInvalidRKey) {
   ibv_wc_status result =
       verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                            remote_buffer.data(), (setup.mr->rkey + 10) * 10);
-  if (!Introspection().CorrectlyReportsInvalidRemoteKeyErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest("no error")) {
     EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, result);
-  } else {
+  } else if (Introspection().ShouldDeviateForCurrentTest("local error")) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, result);
   }
 }
 
@@ -340,15 +340,14 @@ TEST_F(BufferTest, ZeroByteWriteInvalidRKey) {
       verbs_util::WriteSync(setup.qp, local_buffer, setup.mr,
                             remote_buffer.data(), (setup.mr->rkey + 10) * 10);
 
-  if (Introspection().CorrectlyReportsMemoryRegionErrors() &&
-      Introspection().CorrectlyReportsInvalidRemoteKeyErrors()) {
-    EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_SUCCESS, result);
+  } else {
+    EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, result);
   }
 }
 
-class BufferMWTest : public BufferTest,
+class BufferMwTest : public BufferTest,
                      public ::testing::WithParamInterface<ibv_mw_type> {
  public:
   void SetUp() override {
@@ -378,10 +377,10 @@ class BufferMWTest : public BufferTest,
     }
   }
 };
-INSTANTIATE_TEST_SUITE_P(BufferMWTestCase, BufferMWTest,
+INSTANTIATE_TEST_SUITE_P(BufferMwTestCase, BufferMwTest,
                          ::testing::Values(IBV_MW_TYPE_1, IBV_MW_TYPE_2));
 
-TEST_P(BufferMWTest, ExceedFront) {
+TEST_P(BufferMwTest, ExceedFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   constexpr uint64_t kExceedLength = 1;
   ASSERT_LE(kExceedLength, kMrMemoryOffset);
@@ -395,7 +394,7 @@ TEST_P(BufferMWTest, ExceedFront) {
   EXPECT_EQ(kExpected, DoBind(setup, mw, invalid_buffer));
 }
 
-TEST_P(BufferMWTest, ExceedRear) {
+TEST_P(BufferMwTest, ExceedRear) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   constexpr uint64_t kExceedLength = 1;
   ASSERT_LE(kExceedLength, kBufferMemoryPage * verbs_util::kPageSize -
@@ -410,7 +409,7 @@ TEST_P(BufferMWTest, ExceedRear) {
   EXPECT_EQ(kExpected, DoBind(setup, mw, invalid_buffer));
 }
 
-TEST_P(BufferMWTest, ReadExceedFront) {
+TEST_P(BufferMwTest, ReadExceedFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -432,7 +431,7 @@ TEST_P(BufferMWTest, ReadExceedFront) {
                                  remote_buffer.data(), mw->rkey));
 }
 
-TEST_P(BufferMWTest, ReadExceedRear) {
+TEST_P(BufferMwTest, ReadExceedRear) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -455,7 +454,7 @@ TEST_P(BufferMWTest, ReadExceedRear) {
                                  remote_buffer.data(), mw->rkey));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteFront) {
+TEST_P(BufferMwTest, CreateZeroByteFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> buffer = setup.mr_buffer.subspan(0, 0);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
@@ -463,7 +462,7 @@ TEST_P(BufferMWTest, CreateZeroByteFront) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, buffer));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteRear) {
+TEST_P(BufferMwTest, CreateZeroByteRear) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> buffer =
       setup.buffer.subspan(kMrMemoryOffset + kMrMemoryLength, 0);
@@ -472,7 +471,7 @@ TEST_P(BufferMWTest, CreateZeroByteRear) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, buffer));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteOutsideRear) {
+TEST_P(BufferMwTest, CreateZeroByteOutsideRear) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   constexpr int kDistance = 1;
   absl::Span<uint8_t> buffer =
@@ -482,7 +481,7 @@ TEST_P(BufferMWTest, CreateZeroByteOutsideRear) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, buffer));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteOutsideFront) {
+TEST_P(BufferMwTest, CreateZeroByteOutsideFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   constexpr int kDistance = 1;
   absl::Span<uint8_t> buffer =
@@ -492,7 +491,7 @@ TEST_P(BufferMWTest, CreateZeroByteOutsideFront) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, buffer));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteInZeroByteMr) {
+TEST_P(BufferMwTest, CreateZeroByteInZeroByteMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, buffer);
@@ -502,7 +501,7 @@ TEST_P(BufferMWTest, CreateZeroByteInZeroByteMr) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, buffer.span()));
 }
 
-TEST_P(BufferMWTest, CreateZeroByteOutsideZeroByteMr) {
+TEST_P(BufferMwTest, CreateZeroByteOutsideZeroByteMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, mr_buffer);
@@ -513,7 +512,7 @@ TEST_P(BufferMWTest, CreateZeroByteOutsideZeroByteMr) {
   EXPECT_EQ(IBV_WC_SUCCESS, DoBind(setup, mw, mw_buffer));
 }
 
-TEST_P(BufferMWTest, ReadZeroByte) {
+TEST_P(BufferMwTest, ReadZeroByte) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -527,14 +526,14 @@ TEST_P(BufferMWTest, ReadZeroByte) {
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
   ibv_wc_status result = verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                                               remote_buffer.data(), mw->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
-TEST_P(BufferMWTest, ReadZeroByteOutsideMw) {
+TEST_P(BufferMwTest, ReadZeroByteOutsideMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -549,14 +548,14 @@ TEST_P(BufferMWTest, ReadZeroByteOutsideMw) {
   ibv_wc_status result = verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                                               remote_buffer.data(), mw->rkey);
 
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
-TEST_P(BufferMWTest, WriteZeroByte) {
+TEST_P(BufferMwTest, WriteZeroByte) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -573,7 +572,7 @@ TEST_P(BufferMWTest, WriteZeroByte) {
                                   remote_buffer.data(), mw->rkey));
 }
 
-TEST_P(BufferMWTest, WriteZeroByteOutsideMw) {
+TEST_P(BufferMwTest, WriteZeroByteOutsideMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -591,7 +590,7 @@ TEST_P(BufferMWTest, WriteZeroByteOutsideMw) {
                                   remote_buffer.data(), mw->rkey));
 }
 
-TEST_P(BufferMWTest, MwReadZeroByteFromZeroByteMr) {
+TEST_P(BufferMwTest, MwReadZeroByteFromZeroByteMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -605,14 +604,14 @@ TEST_P(BufferMWTest, MwReadZeroByteFromZeroByteMr) {
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
   ibv_wc_status result = verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                                               remote_buffer.data(), mw->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
-TEST_P(BufferMWTest, ReadZeroByteOutsideZeroByteMw) {
+TEST_P(BufferMwTest, ReadZeroByteOutsideZeroByteMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -626,14 +625,14 @@ TEST_P(BufferMWTest, ReadZeroByteOutsideZeroByteMw) {
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
   ibv_wc_status result = verbs_util::ReadSync(setup.qp, local_buffer, setup.mr,
                                               remote_buffer.data(), mw->rkey);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, result);
-  } else {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, result);
+  } else {
+    EXPECT_EQ(IBV_WC_SUCCESS, result);
   }
 }
 
-TEST_P(BufferMWTest, WriteZeroByteToZeroByteMw) {
+TEST_P(BufferMwTest, WriteZeroByteToZeroByteMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);
@@ -650,7 +649,7 @@ TEST_P(BufferMWTest, WriteZeroByteToZeroByteMw) {
                                   remote_buffer.data(), mw->rkey));
 }
 
-TEST_P(BufferMWTest, WriteZeroByteOutsideZeroByteMw) {
+TEST_P(BufferMwTest, WriteZeroByteOutsideZeroByteMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_NE(mw, nullptr);

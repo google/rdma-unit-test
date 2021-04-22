@@ -56,7 +56,7 @@ TEST_F(AhTest, CreateAh) {
 }
 
 TEST_F(AhTest, DeregUnknownAh) {
-  if (!Introspection().CorrectlyReportsAddressHandleErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "transport handling of unknown AH will crash.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
@@ -74,7 +74,7 @@ TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ah = ibv_.CreateAh(setup.pd);
   ASSERT_NE(nullptr, ah);
   int result = ibv_.DeallocPd(setup.pd);
-  if (Introspection().CanDestroyPdWithAhOutstanding()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(0, result);
   } else {
     EXPECT_EQ(EBUSY, result);

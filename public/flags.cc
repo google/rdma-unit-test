@@ -27,3 +27,7 @@ ABSL_FLAG(uint64_t, verbs_mtu, 4096,
           "2048, 4096[default]");
 ABSL_FLAG(bool, no_ipv6_for_gid, false,
           "Force use of IPv4. IPv6 ports will be ignored.");
+ABSL_FLAG(std::string, device_name, "",
+          "RDMA device name as returned by ibv_devices(). If --device_name is "
+          "empty, chooses the device at index zero as returned by "
+          "ibv_get_device_list().");

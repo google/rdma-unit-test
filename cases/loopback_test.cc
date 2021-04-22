@@ -72,7 +72,8 @@ class LoopbackTest : public BasicFixture {
     ibv_mw* type1_mw = nullptr;
     ibv_mw* type2_mw = nullptr;
     RdmaMemBlock buffer;
-    absl::Span<uint8_t> atomic_buffer;
+    ibv_mr* atomic_mr = nullptr;
+    RdmaMemBlock atomic_buffer;
   };
 
   // Interface to lookup the type of QP under test.
@@ -131,11 +132,22 @@ class LoopbackTest : public BasicFixture {
     return client;
   }
 
-  void InitializeAtomicBuffer(Client& client, uint64_t content) {
-    client.atomic_buffer = client.buffer.subspan(0, 8);
-    uint64_t* client_int =
-        reinterpret_cast<uint64_t*>(client.atomic_buffer.data());
-    *client_int = content;
+  // Populates |client|.atomic_buffer and |client|.atomic_mr and fills the
+  // resulting buffer with |content| repeated.
+  absl::Status InitializeAtomicBuffer(Client& client, uint64_t content) {
+    DCHECK_EQ(client.atomic_buffer.size(), 0)
+        << "Atomic buffer already initialized";
+    client.atomic_buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+    DCHECK_EQ(reinterpret_cast<uintptr_t>(client.atomic_buffer.data()) % 8, 0);
+    for (int i = 0; i < client.atomic_buffer.size(); i += sizeof(content)) {
+      *reinterpret_cast<uint64_t*>(client.atomic_buffer.data() + i) = content;
+    }
+    DCHECK_EQ(client.atomic_mr, nullptr);
+    client.atomic_mr = ibv_.RegMr(client.pd, client.atomic_buffer);
+    if (!client.mr) {
+      return absl::InternalError("Failed to register atomic_mr.");
+    }
+    return absl::OkStatus();
   }
 
   absl::Status BindMws(Client& client, uint32_t type2_rkey) {
@@ -729,7 +741,7 @@ TEST_F(LoopbackRcQpTest, BadRecvLength) {
   EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
   EXPECT_EQ(1, completion.wr_id);
   EXPECT_EQ(0, completion2.wr_id);
-  if (Introspection().CorrectlyReportsMemoryRegionErrors() &&
+  if (!Introspection().ShouldDeviateForCurrentTest() &&
       Introspection().CorrectlyReportsInvalidRecvLengthErrors()) {
     EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
     EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion2.status);
@@ -1280,14 +1292,15 @@ TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 0);
+      remote.atomic_mr->rkey, 0);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1304,12 +1317,15 @@ TEST_F(LoopbackRcQpTest, FetchAddSmallSge) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 0);
+      remote.atomic_mr->rkey, 0);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1322,12 +1338,15 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 9;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 0);
+      remote.atomic_mr->rkey, 0);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1340,49 +1359,73 @@ TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  static constexpr uint64_t kSrcContent = 0xAAAAAAAAAAAAAAAA;
+  ASSERT_OK(InitializeAtomicBuffer(local, kSrcContent));
+  static constexpr uint64_t kDstContent = 2;
+  ASSERT_OK(InitializeAtomicBuffer(remote, kDstContent));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  // Going to read 0x2 from the remote and split it into 2 to store on the local
+  // side:
+  // 0x00 --------
+  // 0x10 xxxx----
+  // 0x20 xxxx----
+  // 0x30 --------
   ibv_sge sgl[2];
-  sgl[0].addr = sge.addr;
-  sgl[0].length = 4;
-  sgl[0].lkey = sge.lkey;
-  sgl[1].addr = sge.addr + 8;
-  sgl[1].length = 4;
-  sgl[1].lkey = sge.lkey;
+  sgl[0] =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(8, 4), local.atomic_mr);
+  sgl[1] = verbs_util::CreateSge(local.atomic_buffer.subspan(16, 4),
+                                 local.atomic_mr);
+  static constexpr uint64_t kIncrementAmount = 15;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, sgl, /*num_sge=*/2, remote.atomic_buffer.data(),
-      remote.mr->rkey, 0);
+      remote.atomic_mr->rkey, kIncrementAmount);
   ibv_send_wr* bad_wr = nullptr;
   int result =
       ibv_post_send(local.qp, const_cast<ibv_send_wr*>(&fetch_add), &bad_wr);
-  // Some adpaters do not allow 2 SG entries
-  // TODO(author1): setup buffers/adder with interesting values and check.
+
+  // Some adapters do not allow 2 SG entries
   if (result) return;
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
   EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  // Check destination.
+  uint64_t value = *reinterpret_cast<uint64*>(remote.atomic_buffer.data());
+  EXPECT_EQ(value, kDstContent + kIncrementAmount);
+  // Check source.
+  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data());
+  EXPECT_EQ(value, kSrcContent);
+  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 8);
+  uint64_t fetched = kDstContent;
+  uint64_t expected = kSrcContent;
+  memcpy(&expected, &fetched, 4);
+  EXPECT_EQ(value, expected);
+  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 16);
+  expected = kSrcContent;
+  memcpy(&expected, reinterpret_cast<uint8_t*>(&fetched) + 4, 4);
+  EXPECT_EQ(value, expected);
+  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 24);
+  EXPECT_EQ(value, kSrcContent);
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledFetchAdd) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 10);
+      remote.atomic_mr->rkey, 10);
   fetch_add.send_flags = fetch_add.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_send_wr fetch_add2 = verbs_util::CreateFetchAddWr(
       /*wr_id=*/2, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add2);
 
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
@@ -1399,14 +1442,15 @@ TEST_F(LoopbackRcQpTest, FetchAddIncrementBy1) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey,
+      remote.atomic_mr->rkey,
       /*compare_add=*/1);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
@@ -1424,13 +1468,14 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeIncrement) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 68719476736);
+      remote.atomic_mr->rkey, 68719476736);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1447,16 +1492,18 @@ TEST_F(LoopbackRcQpTest, FetchAddUnaligned) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // The atomic_buffer is always an index in the first half of the 16 byte
   // vector so we can increment by 1 to get an unaligned address with enough
   // space.
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1472,15 +1519,16 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // There may be a more standard way to corrupt such a key.
   sge.lkey = sge.lkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1495,15 +1543,16 @@ TEST_F(LoopbackRcQpTest, UnsignaledFetchAddError) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // There may be a more standard way to corrupt such a key.
   sge.lkey = sge.lkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   fetch_add.send_flags = fetch_add.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
@@ -1516,12 +1565,13 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // There may be a more standard way to corrupt such a key.
-  uint32_t corrupted_rkey = remote.mr->rkey * 13 + 7;
+  uint32_t corrupted_rkey = remote.atomic_mr->rkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
       corrupted_rkey, 1);
@@ -1540,12 +1590,13 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKeyAndInvalidRKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // Corrupt the rkey.
-  uint32_t corrupted_rkey = remote.mr->rkey * 13 + 7;
+  uint32_t corrupted_rkey = remote.atomic_mr->rkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
       corrupted_rkey, 1);
@@ -1566,15 +1617,16 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidLKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // There may be a more standard way to corrupt such a key.
   sge.lkey = sge.lkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1592,12 +1644,13 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // There may be a more standard way to corrupt such a key.
-  uint32_t corrupted_rkey = remote.mr->rkey * 13 + 7;
+  uint32_t corrupted_rkey = remote.atomic_mr->rkey * 13 + 7;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
       corrupted_rkey, 1);
@@ -1619,14 +1672,15 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 9;
 
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 1);
+      remote.atomic_mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1642,13 +1696,14 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpNotEqualNoSwap) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 1, 3);
+      remote.atomic_mr->rkey, 1, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1666,13 +1721,14 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpEqualWithSwap) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1689,18 +1745,19 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwp) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   cmp_swp.send_flags = cmp_swp.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(local.qp, cmp_swp);
   cmp_swp = verbs_util::CreateCompSwapWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
                                          remote.atomic_buffer.data(),
-                                         remote.mr->rkey, 3, 2);
+                                         remote.atomic_mr->rkey, 3, 2);
   cmp_swp.wr_id = 2;
   verbs_util::PostSend(local.qp, cmp_swp);
 
@@ -1719,16 +1776,17 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidLKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // Corrupt the lkey.
   sge.lkey = sge.lkey * 13 + 7;
   ASSERT_EQ(sge.length, 8U);
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1746,16 +1804,17 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwpError) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // Corrupt the lkey.
   sge.lkey = sge.lkey * 13 + 7;
   ASSERT_EQ(sge.length, 8U);
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   cmp_swp.send_flags = cmp_swp.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
@@ -1774,15 +1833,16 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // Corrupt the lkey.
   ASSERT_EQ(sge.length, 8U);
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey + 7 * 10, 2, 3);
+      remote.atomic_mr->rkey + 7 * 10, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1799,15 +1859,16 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKeyAndInvalidLKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   sge.lkey = sge.lkey * 7 + 10;
   ASSERT_EQ(sge.length, 8U);
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey + 7 * 10, 2, 3);
+      remote.atomic_mr->rkey + 7 * 10, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1823,14 +1884,15 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnaligned) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // The data gets moved to an invalid location.
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1846,14 +1908,15 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidRKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // The data gets moved to an invalid location and the rkey is corrupted
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey * 10 + 3, 2, 3);
+      remote.atomic_mr->rkey * 10 + 3, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1869,9 +1932,10 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   // Corrupt the lkey.
   sge.lkey = sge.lkey * 10 + 7;
@@ -1879,7 +1943,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
   // The data gets moved to an invalid location.
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1896,15 +1960,16 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidSize) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   sge.length = 9;
 
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
@@ -1942,14 +2007,14 @@ TEST_F(LoopbackRcQpTest, RemoteFatalError) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   sge.length = 8;
   // The data gets moved to an invalid location.
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
 
   verbs_util::PostSend(local.qp, cmp_swp);
 
@@ -2094,12 +2159,14 @@ TEST_F(LoopbackRcQpTest, PostToRecvQueueInErrorState) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   ibv_sge cs_sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   cs_sge.length = 8;
   // The data gets moved to an invalid location.
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &cs_sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
 
   ibv_wc cmp_and_swp_completion =
@@ -2137,12 +2204,14 @@ TEST_F(LoopbackRcQpTest, ProcessRecvQueueInErrorState) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   ibv_sge cs_sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   cs_sge.length = 8;
   // The data gets moved to an invalid location.
   ibv_send_wr cmp_and_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &cs_sge, /*num_sge=*/1, remote.atomic_buffer.data() + 1,
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_and_swp);
 
   ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
@@ -2355,14 +2424,15 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   // The local SGE will be used to store the value before the update.
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 0);
+      remote.atomic_mr->rkey, 0);
   verbs_util::PostSend(local.qp, fetch_add);
 
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
@@ -2376,13 +2446,14 @@ TEST_F(LoopbackUdQpTest, CmpAndSwp) {
   auto client_pair_or = CreateConnectedClientsPair();
   ASSERT_OK(client_pair_or);
   auto [local, remote] = client_pair_or.value();
-  InitializeAtomicBuffer(local, /*content=*/1);
-  InitializeAtomicBuffer(remote, /*content=*/2);
-  ibv_sge sge = verbs_util::CreateSge(local.atomic_buffer, local.mr);
+  ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
+  ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
+  ibv_sge sge =
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
   sge.length = 8;
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
-      remote.mr->rkey, 2, 3);
+      remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
 
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();

@@ -545,5 +545,53 @@ std::pair<ibv_wc_status, ibv_wc_status> SendRecvSync(
   return std::make_pair(src_completion.status, dst_completion.status);
 }
 
+absl::StatusOr<ibv_context*> OpenUntrackedDevice(
+    const std::string device_name) {
+  ibv_device** devices = nullptr;
+  auto free_list = absl::MakeCleanup([&devices]() {
+    if (devices) {
+      ibv_free_device_list(devices);
+    }
+  });
+  int num_devices = 0;
+  devices = ibv_get_device_list(&num_devices);
+  if (num_devices <= 0 || !devices) {
+    return absl::InternalError("No devices found.");
+  }
+
+  ibv_device* device = nullptr;
+  bool device_selected = false;
+  if (device_name.empty()) {
+    LOG(INFO) << "Select devices[0] (" << device_name << ").";
+    device = devices[0];
+    device_selected = true;
+  }
+  for (int i = 0; i < num_devices; ++i) {
+    if (device_name == devices[i]->name) {
+      LOG(INFO) << "Select device " << device_name << ".";
+      device = devices[i];
+      device_selected = true;
+    }
+  }
+
+  if (!device_selected) {
+    LOG(INFO) << "Available devices for --device_name flag";
+    for (int i = 0; i < num_devices; i++) {
+      LOG(INFO) << devices[i]->name;
+    }
+    return absl::InternalError("RDMA device " + device_name + " not found.");
+  }
+  if (!device) {
+    return absl::InternalError("Selected device is nullptr.");
+  }
+
+  ibv_context* context = ibv_open_device(device);
+  if (!context) {
+    return absl::InternalError("Failed to open device.");
+  }
+
+  return context;
+}
+
 }  // namespace verbs_util
 }  // namespace rdma_unit_test

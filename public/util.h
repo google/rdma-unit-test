@@ -223,6 +223,12 @@ std::pair<ibv_wc_status, ibv_wc_status> SendRecvSync(
     ibv_qp* src_qp, ibv_qp* dst_qp, absl::Span<uint8_t> src_buffer,
     ibv_mr* src_mr, absl::Span<uint8_t> dst_buffer, ibv_mr* dst_mr);
 
+// Opens device. If device_name is not empty, tries to open the first device
+// with the name; else, tries to open devices[0]. Returns the context. This
+// function, OpenUntrackedDevice(), is mainly used as an internal util function.
+// VerbsAllocator::OpenDevice() is preferred for most end user calls.
+absl::StatusOr<ibv_context*> OpenUntrackedDevice(const std::string device_name);
+
 }  // namespace verbs_util
 }  // namespace rdma_unit_test
 

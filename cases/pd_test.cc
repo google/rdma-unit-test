@@ -366,7 +366,7 @@ TEST_F(PdRcLoopbackMrTest, SendMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -384,7 +384,7 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -402,7 +402,7 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -420,7 +420,7 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -438,7 +438,7 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -458,7 +458,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -478,7 +478,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -498,7 +498,7 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -585,7 +585,7 @@ class PdUdLoopbackTest : public BasicFixture {
 };
 
 TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
@@ -769,7 +769,7 @@ TEST_F(SrqPdTest, CreateSrq) {
 
 // When Pd of receive MR matches SRQ but not the receive QP.
 TEST_F(SrqPdTest, SrqRecvMrSrqMatch) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
 
@@ -803,7 +803,7 @@ TEST_F(SrqPdTest, SrqRecvMrSrqMatch) {
 
 // When Pd of receive MR matches the QP but not the SRQ.
 TEST_F(SrqPdTest, SrqRecvMrSrqMismatch) {
-  if (!Introspection().CorrectlyReportsPdErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());

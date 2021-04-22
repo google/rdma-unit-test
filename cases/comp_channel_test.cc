@@ -192,7 +192,7 @@ TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
   ASSERT_NE(nullptr, cq);
   int result = ibv_req_notify_cq(cq, kNotifyAny);
-  if (Introspection().CorrectlyReportsCompChannelErrors()) {
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
     ASSERT_NE(result, 0);
   }
   ASSERT_EQ(0, ibv_destroy_cq(cq));
@@ -300,7 +300,7 @@ TEST_F(CompChannelTest, RecvUnsolicitedNofitySolicited) {
 }
 
 TEST_F(CompChannelTest, AcknowledgeWithoutOutstanding) {
-  if (!Introspection().CorrectlyReportsCompChannelErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "transport hangs when acknowledging too many.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
@@ -311,7 +311,7 @@ TEST_F(CompChannelTest, AcknowledgeWithoutOutstanding) {
 }
 
 TEST_F(CompChannelTest, AcknowledgeTooMany) {
-  if (!Introspection().CorrectlyReportsCompChannelErrors()) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "transport hangs when acknowledging too many.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());

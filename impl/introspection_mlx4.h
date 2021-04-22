@@ -25,20 +25,7 @@ namespace rdma_unit_test {
 
 // Concrete class to override specific behaviour for Mellonox NIC.  The
 // following anaomolies have been observed during unit test development
-// AHTest::DeregUnknownAh
-//    blindly free's the ah. Resulting in an invalid free.
-// AHTest::DeallocPdWithOutstandingAh
-//    allows pd destruction with AH outstanding.
-// BufferTest::*
-//    has various failures.
-// CompChannelTest::AcknowledgeWithoutOutstanding
-//    hangs when acknowledging too many.
-// CompChannelTest::AcknowledgeTooMany
-//    hangs when acknowledging too many.
-// MRLoopbackTest::StressDereg
-//    does not set opcode on failure.
-// QPTest::BasicSetup
-//    appears to SIGSEGV if max_inline_data is set.
+// QpTest::BasicSetup appears to SIGSEGV if max_inline_data is set.
 class IntrospectionMlx4 : public NicIntrospection {
  public:
   // Register MLX4 NIC with the Introspection Registrar.
@@ -51,14 +38,38 @@ class IntrospectionMlx4 : public NicIntrospection {
 
   bool FullCqIdlesQp() const override { return true; }
 
-  bool CanDestroyPdWithAhOutstanding() const override { return true; }
-
-  bool CorrectlyReportsCompChannelErrors() const override { return false; }
-
-  bool CorrectlyReportsAddressHandleErrors() const override { return false; }
-
-  // This is a potential bug on CX3.
-  bool CorrectlyReportsMemoryRegionErrors() const override { return false; }
+ protected:
+  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
+    static const absl::flat_hash_set<DeviationEntry> deviations{
+        // Can dealloc PD with outstanding AHs.
+        {"AhTest", "DeallocPdWithOutstandingAh", ""},
+        // Deregistering unknown AH handles will cause client crashes.
+        {"AhTest", "DeregUnknownAh", ""},
+        // Zero byte read is an error.
+        {"BufferTest", "BasicReadZeroByte", ""},
+        {"BufferTest", "BasicReadZeroByteOutsideMr", ""},
+        {"BufferTest", "BasicReadZeroByteFromZeroByteMr", ""},
+        {"BufferTest", "BasicReadZeroByteOutsideZeroByteMr", ""},
+        // The local zero byte access errors before the invalid rkey.
+        {"BufferTest", "ZeroByteReadInvalidRKey", "local error"},
+        {"BufferMwTest", "ReadZeroByte", ""},
+        {"BufferMwTest", "ReadZeroByteOutsideMw", ""},
+        {"BufferMwTest", "MwReadZeroByteFromZeroByteMr", ""},
+        {"BufferMwTest", "ReadZeroByteOutsideZeroByteMw", ""},
+        // Zero byte write is successful.
+        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        // Hardware returns true when requesting notification on a CQ without a
+        // Completion Channel.
+        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeTooMany", ""},
+        // Does not fail with bad recv length.
+        {"LoopbackRcQpTest", "BadRecvLength", ""},
+    };
+    return deviations;
+  }
 
  private:
   IntrospectionMlx4() = delete;

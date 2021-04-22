@@ -18,38 +18,44 @@
 #include <string>
 
 #include "glog/logging.h"
+#include "gtest/gtest.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_split.h"
 #include "infiniband/verbs.h"
 #include "impl/introspection_registrar.h"
 #include "public/flags.h"
+#include "public/util.h"
 
 namespace rdma_unit_test {
 
+bool NicIntrospection::ShouldDeviateForCurrentTest(
+    const std::string& identifier) const {
+  const testing::TestInfo* const test_info =
+      testing::UnitTest::GetInstance()->current_test_info();
+  // These two modifications strip off extra bits added for parameterized tests.
+  std::string suite = std::vector<std::string>(
+                          absl::StrSplit(test_info->test_suite_name(), '/'))
+                          .back();
+  std::string name =
+      std::vector<std::string>(absl::StrSplit(test_info->name(), '/')).front();
+  return GetDeviations().contains(std::make_tuple(suite, name, identifier));
+}
+
 const NicIntrospection& Introspection() {
   static NicIntrospection* introspection = []() {
-    int num_devices = 0;
-    ibv_device** devices = ibv_get_device_list(&num_devices);
-    auto free_list = absl::MakeCleanup([devices]() {
-      if (devices) {
-        ibv_free_device_list(devices);
-      }
-    });
-    CHECK(devices);            // Crash ok
-    CHECK_LT(0, num_devices);  // Crash ok
-    // Use the first device.
-    ibv_device* device = devices[0];
-    CHECK(device);  // Crash ok
-    ibv_context* context = ibv_open_device(device);
-    CHECK(context);  // Crash ok
+    absl::StatusOr<ibv_context*> context_or =
+        rdma_unit_test::verbs_util::OpenUntrackedDevice(
+            absl::GetFlag(FLAGS_device_name));
+    CHECK(context_or.ok());  // Crash ok
+    ibv_context* context = context_or.value();
     ibv_device_attr attr;
     int query_result = ibv_query_device(context, &attr);
     CHECK_EQ(0, query_result);  // Crash ok
     std::string device_name = context->device->name;
     CHECK_EQ(0, ibv_close_device(context));  // Crash ok
 
-    LOG(INFO) << "Device name = " << device_name;
     IntrospectionRegistrar::Factory factory =
         IntrospectionRegistrar::GetInstance().GetFactory(device_name);
     if (!factory) {

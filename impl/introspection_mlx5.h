@@ -9,13 +9,9 @@ namespace rdma_unit_test {
 
 // Concrete class to override specific behaviour for Mellanox NIC.  The
 // following anaomolies have been observed during unit test development
-// AHTest::DeregUnknownAh
-//    blindly free's the ah. Resulting in an invalid free.
-// AHTest::DeallocPdWithOutstandingAh
-//    allows pd destruction with AH outstanding.
 // BufferTest::*
 //    allows mw to be bound to a range exceeding the associated mr
-// QPTest::BasicSetup
+// QpTest::BasicSetup
 //    appears to SIGSEGV if max_inline_data is set.
 class IntrospectionMlx5 : public NicIntrospection {
  public:
@@ -31,28 +27,37 @@ class IntrospectionMlx5 : public NicIntrospection {
 
   bool SupportsRcRemoteMwAtomic() const override { return false; }
 
-  // CqAdvancedTest::RecvSharedCq failure with multiple outstanding recv
-  // requests. Completions are returned but no data transferred which results
-  // in the WaitingForChange to fail.
-  // TODO(author1): determine if there is a test issue.
-  bool SupportsMultipleOutstandingRecvRequests() const override {
-    return false;
-  }
-
   bool CorrectlyReportsInvalidObjects() const override { return false; }
 
-  bool CorrectlyReportsCompChannelErrors() const override { return false; }
-
   bool CorrectlyReportsMemoryWindowErrors() const override { return false; }
-
-  bool CorrectlyReportsAddressHandleErrors() const override { return false; }
-
-  bool CorrectlyReportsInvalidRemoteKeyErrors() const override { return false; }
 
   bool CorrectlyReportsInvalidSizeErrors() const override { return false; }
 
   bool CorrectlyReportsInvalidRecvLengthErrors() const override {
     return false;
+  }
+
+ protected:
+  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
+    static const absl::flat_hash_set<DeviationEntry> deviations{
+        // Deregistering unknown AH handles will cause client crashes.
+        {"AhTest", "DeregUnknownAh", ""},
+        // Returns success completion.
+        {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
+        // Zero byte write is successful.
+        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        // Hardware returns true when requesting notification on a CQ without a
+        // Completion Channel.
+        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
+        // Will hang.
+        {"CompChannelTest", "AcknowledgeTooMany", ""},
+        // Completions are returned but no data transferred which results in the
+        // WaitingForChange to fail.
+        {"CqAdvancedTest", "RecvSharedCq", ""},
+    };
+    return deviations;
   }
 
  private:

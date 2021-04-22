@@ -25,5 +25,6 @@
 
 ABSL_DECLARE_FLAG(uint64_t, verbs_mtu);
 ABSL_DECLARE_FLAG(bool, no_ipv6_for_gid);
+ABSL_DECLARE_FLAG(std::string, device_name);
 
 #endif  // THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_FLAGS_H_

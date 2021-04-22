@@ -468,7 +468,7 @@ TEST_F(CqAdvancedTest, RecvCqOverflow) {
 
 // 2 CQs posting recv completions to a single completion queue.
 TEST_F(CqAdvancedTest, RecvSharedCq) {
-  if (!Introspection().SupportsMultipleOutstandingRecvRequests()) GTEST_SKIP();
+  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kQueueCount = 2;
   ASSERT_OK(CreateTestQps(setup, kQueueCount));

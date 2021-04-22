@@ -777,7 +777,7 @@ TEST_F(MwType2Test, ChangeQp) {
   EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
-class MWBindTest : public BasicFixture,
+class MwBindTest : public BasicFixture,
                    public ::testing::WithParamInterface<ibv_mw_type> {
  public:
   void SetUp() override {
@@ -846,7 +846,7 @@ class MWBindTest : public BasicFixture,
   }
 };
 
-TEST_P(MWBindTest, AllPermissions) {
+TEST_P(MwBindTest, AllPermissions) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
                         IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
@@ -858,7 +858,7 @@ TEST_P(MWBindTest, AllPermissions) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, MissingLocalWrite) {
+TEST_P(MwBindTest, MissingLocalWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_MW_BIND;
   const int kBindAccess = IBV_ACCESS_REMOTE_READ;
@@ -866,7 +866,7 @@ TEST_P(MWBindTest, MissingLocalWrite) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, MissingBind) {
+TEST_P(MwBindTest, MissingBind) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC |
                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
@@ -877,7 +877,7 @@ TEST_P(MWBindTest, MissingBind) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, MissingRemoteAtomic) {
+TEST_P(MwBindTest, MissingRemoteAtomic) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
@@ -886,7 +886,7 @@ TEST_P(MWBindTest, MissingRemoteAtomic) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, MissingRemoteRead) {
+TEST_P(MwBindTest, MissingRemoteRead) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
                         IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_WRITE;
@@ -895,7 +895,7 @@ TEST_P(MWBindTest, MissingRemoteRead) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, MissingRemoteWrite) {
+TEST_P(MwBindTest, MissingRemoteWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
                         IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
@@ -904,7 +904,7 @@ TEST_P(MWBindTest, MissingRemoteWrite) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, EmptyBind) {
+TEST_P(MwBindTest, EmptyBind) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
                         IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
@@ -914,7 +914,7 @@ TEST_P(MWBindTest, EmptyBind) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, ReadOnly) {
+TEST_P(MwBindTest, ReadOnly) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ;
   const int kBindAccess = IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ;
@@ -922,7 +922,7 @@ TEST_P(MWBindTest, ReadOnly) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, WriteOnly) {
+TEST_P(MwBindTest, WriteOnly) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess =
       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_WRITE;
@@ -932,7 +932,7 @@ TEST_P(MWBindTest, WriteOnly) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-TEST_P(MWBindTest, NoMrBindAccess) {
+TEST_P(MwBindTest, NoMrBindAccess) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   const int kMrAccess = IBV_ACCESS_REMOTE_READ;
   const int kBindAccess = IBV_ACCESS_REMOTE_READ;
@@ -942,7 +942,7 @@ TEST_P(MWBindTest, NoMrBindAccess) {
   AttemptBind(setup, kMrAccess, kBindAccess, kExpected);
 }
 
-INSTANTIATE_TEST_SUITE_P(MWBindTestCase, MWBindTest,
+INSTANTIATE_TEST_SUITE_P(MwBindTestCase, MwBindTest,
                          ::testing::Values(IBV_MW_TYPE_1, IBV_MW_TYPE_2));
 
 // TODO(author1): Create on one QP and destroy on another with wrong PD

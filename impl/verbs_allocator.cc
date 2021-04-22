@@ -30,6 +30,7 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
+#include "public/flags.h"
 #include "public/rdma-memblock.h"
 #include "public/util.h"
 
@@ -110,24 +111,13 @@ RdmaMemBlock VerbsAllocator::AllocBufferByBytes(size_t bytes,
 }
 
 absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
-  ibv_device** devices = nullptr;
-  auto free_list = absl::MakeCleanup([&devices]() {
-    if (devices) {
-      ibv_free_device_list(devices);
-    }
-  });
-  int num_devices = 0;
-  devices = ibv_get_device_list(&num_devices);
-  if (num_devices == 0) {
-    return absl::InternalError("No devices found.");
+  absl::StatusOr<ibv_context*> context_or =
+      rdma_unit_test::verbs_util::OpenUntrackedDevice(
+          absl::GetFlag(FLAGS_device_name));
+  if (!context_or.ok()) {
+    return context_or;
   }
-  ibv_device* device = devices[0];
-  const std::string device_name = device->name;
-  LOG(INFO) << "Opening " << device_name;
-  ibv_context* context = ibv_open_device(device);
-  if (!context) {
-    return absl::InternalError("Failed to open a context.");
-  }
+  ibv_context* context = context_or.value();
   auto enum_result = verbs_util::EnumeratePortsForContext(context);
   if (!enum_result.ok()) {
     int result = ibv_close_device(context);

@@ -218,7 +218,7 @@ TEST_F(SrqTest, PostRecvToSrqQp) {
 }
 
 TEST_F(SrqTest, OverflowSrq) {
-  if (!Introspection().CorrectlyEnforcesRequestQueueSize()) GTEST_SKIP();
+  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   static constexpr uint32_t kProposedMaxWr = verbs_util::kDefaultMaxWr;
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_srq_init_attr init_attr;
