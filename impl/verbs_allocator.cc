@@ -26,6 +26,7 @@
 #include "glog/logging.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
@@ -137,7 +138,7 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
 ibv_pd* VerbsAllocator::AllocPd(ibv_context* context) {
   auto result = ibv_alloc_pd(context);
   if (result) {
-    LOG(INFO) << "Created pd " << result;
+    VLOG(1) << "Created pd " << result;
     absl::MutexLock guard(&mtx_pds_);
     pds_.emplace_back(result, &PdDeleter);
   }
@@ -164,7 +165,7 @@ int VerbsAllocator::DeallocPd(ibv_pd* pd) {
 ibv_ah* VerbsAllocator::CreateAh(ibv_pd* pd) {
   ibv_ah* ah = CreateAhInternal(pd);
   if (ah) {
-    LOG(INFO) << "Created ah " << ah;
+    VLOG(1) << "Created ah " << ah;
     absl::MutexLock guard(&mtx_ahs_);
     ahs_.emplace_back(ah, &AhDeleter);
   }
@@ -175,7 +176,7 @@ ibv_mr* VerbsAllocator::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
                               int access) {
   ibv_mr* mr = RegMrInternal(pd, memblock, access);
   if (mr) {
-    LOG(INFO) << "Created Memory Region " << mr;
+    VLOG(1) << "Created Memory Region " << mr;
     absl::MutexLock guard(&mtx_mrs_);
     mrs_.emplace_back(mr, &MrDeleter);
   }
@@ -202,7 +203,7 @@ int VerbsAllocator::DeregMr(ibv_mr* mr) {
 ibv_mw* VerbsAllocator::AllocMw(ibv_pd* pd, ibv_mw_type type) {
   ibv_mw* mw = ibv_alloc_mw(pd, type);
   if (mw) {
-    LOG(INFO) << "Created Memory Window " << mw;
+    VLOG(1) << "Created Memory Window " << mw;
     absl::MutexLock guard(&mtx_mws_);
     mws_.emplace_back(mw, &MwDeleter);
   }
@@ -229,7 +230,7 @@ int VerbsAllocator::DeallocMw(ibv_mw* mw) {
 ibv_comp_channel* VerbsAllocator::CreateChannel(ibv_context* context) {
   auto result = ibv_create_comp_channel(context);
   if (result) {
-    LOG(INFO) << "Created channel " << result;
+    VLOG(1) << "Created channel " << result;
     absl::MutexLock guard(&mtx_channels_);
     channels_.emplace_back(result, &ChannelDeleter);
   }
@@ -257,7 +258,7 @@ ibv_cq* VerbsAllocator::CreateCq(ibv_context* context, int max_wr,
                                  ibv_comp_channel* channel) {
   auto result = ibv_create_cq(context, max_wr, nullptr, channel, 0);
   if (result) {
-    LOG(INFO) << "Created Cq " << result;
+    VLOG(1) << "Created Cq " << result;
     absl::MutexLock guard(&mtx_cqs_);
     cqs_.emplace_back(result, &CqDeleter);
   }
@@ -288,7 +289,7 @@ ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
   attr.attr.srq_limit = 0;  // not used for infiniband.
   ibv_srq* srq = ibv_create_srq(pd, &attr);
   if (srq) {
-    LOG(INFO) << "Created srq: " << srq;
+    VLOG(1) << "Created srq: " << srq;
     absl::MutexLock guard(&mtx_srqs_);
     srqs_.emplace_back(srq, &SrqDeleter);
   }
@@ -298,7 +299,7 @@ ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
 ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
   ibv_srq* srq = ibv_create_srq(pd, &attr);
   if (srq) {
-    LOG(INFO) << "Created srq: " << srq;
+    VLOG(1) << "Created srq: " << srq;
     absl::MutexLock guard(&mtx_srqs_);
     srqs_.emplace_back(srq, &SrqDeleter);
   }
@@ -352,7 +353,7 @@ ibv_qp* VerbsAllocator::CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
 ibv_qp* VerbsAllocator::CreateQp(ibv_pd* pd, ibv_qp_init_attr& attr) {
   ibv_qp* qp = CreateQpInternal(pd, attr);
   if (qp) {
-    LOG(INFO) << "Created qp " << qp;
+    VLOG(1) << "Created qp " << qp;
     absl::MutexLock guard(&mtx_qps_);
     qps_.emplace_back(qp, &QpDeleter);
   }

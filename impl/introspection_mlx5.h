@@ -56,6 +56,9 @@ class IntrospectionMlx5 : public NicIntrospection {
         // Completions are returned but no data transferred which results in the
         // WaitingForChange to fail.
         {"CqAdvancedTest", "RecvSharedCq", ""},
+        // Allows invalid SGE size for atomics.
+        {"LoopbackRcQpTest", "FetchAddSmallSge", ""},
+        {"LoopbackRcQpTest", "FetchAddLargeSge", ""},
     };
     return deviations;
   }

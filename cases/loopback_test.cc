@@ -135,14 +135,14 @@ class LoopbackTest : public BasicFixture {
   // Populates |client|.atomic_buffer and |client|.atomic_mr and fills the
   // resulting buffer with |content| repeated.
   absl::Status InitializeAtomicBuffer(Client& client, uint64_t content) {
-    DCHECK_EQ(client.atomic_buffer.size(), 0)
+    DCHECK_EQ(client.atomic_buffer.size(), 0UL)
         << "Atomic buffer already initialized";
     client.atomic_buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     DCHECK_EQ(reinterpret_cast<uintptr_t>(client.atomic_buffer.data()) % 8, 0);
-    for (int i = 0; i < client.atomic_buffer.size(); i += sizeof(content)) {
+    for (size_t i = 0; i < client.atomic_buffer.size(); i += sizeof(content)) {
       *reinterpret_cast<uint64_t*>(client.atomic_buffer.data() + i) = content;
     }
-    DCHECK_EQ(client.atomic_mr, nullptr);
+    DCHECK(!client.atomic_mr);
     client.atomic_mr = ibv_.RegMr(client.pd, client.atomic_buffer);
     if (!client.mr) {
       return absl::InternalError("Failed to register atomic_mr.");
@@ -1330,8 +1330,12 @@ TEST_F(LoopbackRcQpTest, FetchAddSmallSge) {
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  } else {
+    EXPECT_THAT(completion.status,
+                testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+  }
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
@@ -1351,8 +1355,12 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
   ibv_wc completion = verbs_util::WaitForCompletion(local.cq).value();
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  } else {
+    EXPECT_THAT(completion.status,
+                testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+  }
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
@@ -1390,21 +1398,21 @@ TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
   EXPECT_EQ(1, completion.wr_id);
   EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
   // Check destination.
-  uint64_t value = *reinterpret_cast<uint64*>(remote.atomic_buffer.data());
+  uint64_t value = *reinterpret_cast<uint64_t*>(remote.atomic_buffer.data());
   EXPECT_EQ(value, kDstContent + kIncrementAmount);
   // Check source.
-  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data());
+  value = *reinterpret_cast<uint64_t*>(local.atomic_buffer.data());
   EXPECT_EQ(value, kSrcContent);
-  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 8);
+  value = *reinterpret_cast<uint64_t*>(local.atomic_buffer.data() + 8);
   uint64_t fetched = kDstContent;
   uint64_t expected = kSrcContent;
   memcpy(&expected, &fetched, 4);
   EXPECT_EQ(value, expected);
-  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 16);
+  value = *reinterpret_cast<uint64_t*>(local.atomic_buffer.data() + 16);
   expected = kSrcContent;
   memcpy(&expected, reinterpret_cast<uint8_t*>(&fetched) + 4, 4);
   EXPECT_EQ(value, expected);
-  value = *reinterpret_cast<uint64*>(local.atomic_buffer.data() + 24);
+  value = *reinterpret_cast<uint64_t*>(local.atomic_buffer.data() + 24);
   EXPECT_EQ(value, kSrcContent);
 }
 
