@@ -21,8 +21,8 @@
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
 #include "public/flags.h"
+#include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
@@ -36,11 +36,7 @@ class AhTest : public BasicFixture {
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -68,10 +64,7 @@ TEST_F(AhTest, DeregUnknownAh) {
 
 TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = nullptr;
-  verbs_util::AddressHandleAttributes ah_attr(
-      ibv_.GetContextAddressInfo(setup.context));
-  ah = ibv_.CreateAh(setup.pd);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd);
   ASSERT_NE(nullptr, ah);
   int result = ibv_.DeallocPd(setup.pd);
   if (Introspection().ShouldDeviateForCurrentTest()) {

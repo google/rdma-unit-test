@@ -73,6 +73,7 @@ cc_library(
         "//public:util",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -82,7 +83,7 @@ cc_library(
     hdrs = ["verbs_allocator.h"],
     deps = [
         "//public:flags",
-        "//public:rdma-memblock",
+        "//public:rdma_memblock",
         "//public:util",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
@@ -100,8 +101,10 @@ cc_library(
     srcs = ["verbs_backend.cc"],
     hdrs = ["verbs_backend.h"],
     deps = [
+        "//public:status_matchers",
         "//public:util",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
     ],
 )

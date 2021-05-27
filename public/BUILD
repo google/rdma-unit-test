@@ -25,6 +25,7 @@ cc_library(
     ],
     deps = [
         ":flags",
+        ":status_matchers",
         ":util",
         "//impl:introspection_registrar",
         "@com_glog_glog//:glog",
@@ -38,9 +39,9 @@ cc_library(
 )
 
 cc_library(
-    name = "rdma-memblock",
-    srcs = ["rdma-memblock.cc"],
-    hdrs = ["rdma-memblock.h"],
+    name = "rdma_memblock",
+    srcs = ["rdma_memblock.cc"],
+    hdrs = ["rdma_memblock.h"],
     deps = [
         ":util",
         "@com_glog_glog//:glog",
@@ -56,6 +57,7 @@ cc_library(
     hdrs = ["util.h"],
     deps = [
         ":flags",
+        ":status_matchers",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/flags:flag",
@@ -64,6 +66,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
     ],
@@ -84,4 +87,11 @@ cc_library(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
     ],
+)
+
+cc_library(
+    name = "status_matchers",
+    testonly = 1,
+    hdrs = ["status_matchers.h"],
+    deps = ["@com_google_googletest//:gtest"],
 )

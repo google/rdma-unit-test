@@ -28,10 +28,10 @@
 namespace rdma_unit_test {
 
 VerbsHelperSuite::VerbsHelperSuite() {
+  backend_ = std::make_shared<RoceBackend>();
+  CHECK(backend_);  // Crash ok
   allocator_ = std::make_unique<RoceAllocator>();
   CHECK(allocator_);  // Crash ok
-  backend_ = std::make_unique<RoceBackend>();
-  CHECK(backend_);  // Crash ok
 }
 
 void VerbsHelperSuite::SetUpHelperGlobal() {
@@ -41,25 +41,38 @@ void VerbsHelperSuite::TearDownHelperGlobal() {
 }
 
 absl::Status VerbsHelperSuite::SetUpRcQp(
-    ibv_qp* local_qp, const verbs_util::LocalVerbsAddress& local_address,
+    ibv_qp* local_qp, const verbs_util::LocalEndpointAttr& local,
     ibv_gid remote_gid, uint32_t remote_qpn) {
-  return backend_->SetUpRcQp(local_qp, local_address, remote_gid, remote_qpn);
+  return backend_->SetUpRcQp(local_qp, local, remote_gid, remote_qpn);
 }
 
 void VerbsHelperSuite::SetUpSelfConnectedRcQp(
-    ibv_qp* qp, const verbs_util::LocalVerbsAddress& address) {
-  backend_->SetUpSelfConnectedRcQp(qp, address);
+    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local) {
+  backend_->SetUpSelfConnectedRcQp(qp, local);
 }
 
 void VerbsHelperSuite::SetUpLoopbackRcQps(
-    ibv_qp* qp1, ibv_qp* qp2,
-    const verbs_util::LocalVerbsAddress& local_address) {
-  backend_->SetUpLoopbackRcQps(qp1, qp2, local_address);
+    ibv_qp* qp1, ibv_qp* qp2, const verbs_util::LocalEndpointAttr& local) {
+  backend_->SetUpLoopbackRcQps(qp1, qp2, local);
 }
 
 absl::Status VerbsHelperSuite::SetUpUdQp(
-    ibv_qp* qp, const verbs_util::LocalVerbsAddress& address, uint32_t qkey) {
-  return backend_->SetUpUdQp(qp, address, qkey);
+    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local, uint32_t qkey) {
+  return backend_->SetUpUdQp(qp, local, qkey);
+}
+
+absl::Status VerbsHelperSuite::SetQpInit(ibv_qp* qp, uint8_t port) {
+  return backend_->SetQpInit(qp, port);
+}
+
+absl::Status VerbsHelperSuite::SetQpRtr(
+    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local, ibv_gid remote_gid,
+    uint32_t remote_qpn) {
+  return backend_->SetQpRtr(qp, local, remote_gid, remote_qpn);
+}
+
+absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp) {
+  return backend_->SetQpRts(qp);
 }
 
 RdmaMemBlock VerbsHelperSuite::AllocBuffer(int pages,
@@ -161,9 +174,9 @@ int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   return allocator_->DestroyQp(qp);
 }
 
-verbs_util::LocalVerbsAddress VerbsHelperSuite::GetContextAddressInfo(
+verbs_util::LocalEndpointAttr VerbsHelperSuite::GetLocalEndpointAttr(
     ibv_context* context) const {
-  return allocator_->GetContextAddressInfo(context);
+  return allocator_->GetLocalEndpointAttr(context);
 }
 
 }  // namespace rdma_unit_test

@@ -19,7 +19,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
+#include "public/status_matchers.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
@@ -53,7 +53,7 @@ class CompChannelTest : public BasicFixture {
     if (!context_or.ok()) {
       return context_or.status();
     }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, context_or);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -91,12 +91,12 @@ class CompChannelTest : public BasicFixture {
       return absl::InternalError("Failed to create remote qp.");
     }
     ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp,
-                            ibv_.GetContextAddressInfo(setup.context));
+                            ibv_.GetLocalEndpointAttr(setup.context));
     return setup;
   }
 
   void DoAtomic(BasicSetup& setup, ibv_qp* qp) {
-    DCHECK_GT(setup.sge.length, 32UL);
+    ASSERT_GT(setup.sge.length, 32UL);
     ibv_sge sg = setup.sge;
     sg.addr += sg.addr % 8;
     sg.length = 8;
@@ -109,7 +109,7 @@ class CompChannelTest : public BasicFixture {
         /*wr_id=*/1, &sg, /*num_sge=*/1, target, setup.mr->rkey, 0);
     ibv_send_wr* bad_wr = nullptr;
     int result = ibv_post_send(qp, &fetch_add, &bad_wr);
-    CHECK_EQ(result, 0);
+    ASSERT_EQ(result, 0);
   }
 
   void DoWrite(BasicSetup& setup, ibv_qp* qp) {
@@ -118,7 +118,7 @@ class CompChannelTest : public BasicFixture {
                                   setup.buffer.data(), setup.mr->rkey);
     ibv_send_wr* bad_wr = nullptr;
     int result = ibv_post_send(qp, &write, &bad_wr);
-    CHECK_EQ(result, 0);
+    ASSERT_EQ(result, 0);
   }
 
   void DoSend(BasicSetup& setup, ibv_qp* qp, bool solicited) {
@@ -145,13 +145,13 @@ class CompChannelTest : public BasicFixture {
   }
 
   static void CheckSend(ibv_cq* cq) {
-    ibv_wc completion = verbs_util::WaitForCompletion(cq).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(cq));
     ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
     ASSERT_EQ(IBV_WC_SEND, completion.opcode);
   }
 
   static void CheckRecv(ibv_cq* cq) {
-    ibv_wc completion = verbs_util::WaitForCompletion(cq).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(cq));
     ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
     ASSERT_EQ(IBV_WC_RECV, completion.opcode);
   }
@@ -168,14 +168,14 @@ class CompChannelTest : public BasicFixture {
 };
 
 TEST_F(CompChannelTest, CreateDestroy) {
-  ibv_context* context = ibv_.OpenDevice().value();
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
   ASSERT_NE(nullptr, channel);
   ASSERT_EQ(0, ibv_destroy_comp_channel(channel));
 }
 
 TEST_F(CompChannelTest, DestroyChannelWithCqRef) {
-  ibv_context* context = ibv_.OpenDevice().value();
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
   ASSERT_NE(nullptr, channel);
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, channel, 0);
@@ -188,7 +188,7 @@ TEST_F(CompChannelTest, DestroyChannelWithCqRef) {
 }
 
 TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
-  ibv_context* context = ibv_.OpenDevice().value();
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
   ASSERT_NE(nullptr, cq);
   int result = ibv_req_notify_cq(cq, kNotifyAny);
@@ -204,7 +204,8 @@ TEST_F(CompChannelTest, Atomic) {
   ASSERT_EQ(result, 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoAtomic(setup, setup.local.qp);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
@@ -220,9 +221,11 @@ TEST_F(CompChannelTest, Bind) {
   ASSERT_EQ(result, 0);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_NE(mw, nullptr);
-  ASSERT_EQ(IBV_WC_SUCCESS, verbs_util::BindType2MwSync(
-                                setup.local.qp, mw, setup.buffer.span(), kRKey,
-                                setup.mr, IBV_ACCESS_REMOTE_READ));
+  ASSERT_OK_AND_ASSIGN(
+      ibv_wc_status status,
+      verbs_util::BindType2MwSync(setup.local.qp, mw, setup.buffer.span(),
+                                  kRKey, setup.mr, IBV_ACCESS_REMOTE_READ));
+  ASSERT_EQ(IBV_WC_SUCCESS, status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
@@ -234,7 +237,8 @@ TEST_F(CompChannelTest, Write) {
   ASSERT_EQ(result, 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
@@ -319,7 +323,8 @@ TEST_F(CompChannelTest, AcknowledgeTooMany) {
   ASSERT_EQ(result, 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
@@ -332,7 +337,8 @@ TEST_F(CompChannelTest, DeleteWithUnacked) {
   ASSERT_EQ(result, 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
@@ -346,13 +352,15 @@ TEST_F(CompChannelTest, SameQueueMultipleOutstanding) {
   ASSERT_EQ(result, 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   // Queue up a second event before processing the first.
   result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
   ASSERT_EQ(result, 0);
   DoWrite(setup, setup.local.qp);
-  completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+  ASSERT_OK_AND_ASSIGN(completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
   ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   ASSERT_TRUE(IsReady(setup.local.channel));
   // Hardware collapses events into 1.
@@ -379,7 +387,7 @@ TEST_F(CompChannelTest, MuxOntoSingleChannel) {
     new_pair.qp1 = ibv_.CreateQp(setup.pd, new_pair.cq1);
     new_pair.qp2 = ibv_.CreateQp(setup.pd, new_pair.cq2);
     ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2,
-                            ibv_.GetContextAddressInfo(setup.context));
+                            ibv_.GetLocalEndpointAttr(setup.context));
     qps.push_back(new_pair);
   }
   for (auto& pair : qps) {
@@ -388,7 +396,8 @@ TEST_F(CompChannelTest, MuxOntoSingleChannel) {
     DoWrite(setup, pair.qp1);
   }
   for (auto& pair : qps) {
-    ibv_wc completion = verbs_util::WaitForCompletion(pair.cq1).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(pair.cq1));
     ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   }
   ASSERT_TRUE(IsReady(channel));
@@ -418,7 +427,8 @@ TEST_F(CompChannelTest, ManyOutstanding) {
     int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
     ASSERT_EQ(result, 0);
     DoWrite(setup, setup.local.qp);
-    ibv_wc completion = verbs_util::WaitForCompletion(setup.local.cq).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.local.cq));
     ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
   }
   ASSERT_TRUE(IsReady(setup.local.channel));

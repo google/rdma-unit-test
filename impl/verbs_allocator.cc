@@ -32,7 +32,7 @@
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 #include "public/flags.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
 #include "public/util.h"
 
 namespace rdma_unit_test {
@@ -125,13 +125,13 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
     LOG_IF(DFATAL, result != 0) << "Failed to close device";
     return enum_result.status();
   }
-  std::vector<verbs_util::LocalVerbsAddress> addresses = enum_result.value();
+  std::vector<verbs_util::LocalEndpointAttr> endpoints = enum_result.value();
   {
     absl::MutexLock guard(&mtx_contexts_);
     contexts_.emplace_back(context, &ContextDeleter);
   }
-  absl::MutexLock guard(&mtx_address_info_);
-  address_info_[context] = addresses;
+  absl::MutexLock guard(&mtx_endpoints_);
+  endpoint_attrs_[context] = endpoints;
   return context;
 }
 
@@ -377,11 +377,11 @@ int VerbsAllocator::DestroyQp(ibv_qp* qp) {
   return result;
 }
 
-verbs_util::LocalVerbsAddress VerbsAllocator::GetContextAddressInfo(
+verbs_util::LocalEndpointAttr VerbsAllocator::GetLocalEndpointAttr(
     ibv_context* context) const {
-  absl::MutexLock guard(&mtx_address_info_);
-  auto iter = address_info_.find(context);
-  CHECK(iter != address_info_.end());  // Crash ok
+  absl::MutexLock guard(&mtx_endpoints_);
+  auto iter = endpoint_attrs_.find(context);
+  CHECK(iter != endpoint_attrs_.end());  // Crash ok
   auto& info_array = iter->second;
   return info_array[0];
 }

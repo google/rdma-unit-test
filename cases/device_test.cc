@@ -21,7 +21,7 @@
 #include "gtest/gtest.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
+#include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
@@ -73,8 +73,7 @@ TEST_F(DeviceTest, OpenInManyThreads) {
 }
 
 TEST_F(DeviceTest, QueryDevice) {
-  ibv_context* context = ibv_.OpenDevice().value();
-
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_device_attr dev_attr = {};
   int query_result = ibv_query_device(context, &dev_attr);
   ASSERT_EQ(0, query_result);
@@ -83,8 +82,8 @@ TEST_F(DeviceTest, QueryDevice) {
 }
 
 TEST_F(DeviceTest, ContextTomfoolery) {
-  ibv_context* context1 = ibv_.OpenDevice().value();
-  ibv_context* context2 = ibv_.OpenDevice().value();
+  ASSERT_OK_AND_ASSIGN(ibv_context * context1, ibv_.OpenDevice());
+  ASSERT_OK_AND_ASSIGN(ibv_context * context2, ibv_.OpenDevice());
   auto* pd = ibv_alloc_pd(context1);
   ASSERT_NE(nullptr, pd);
   // Try to delete with the other context.

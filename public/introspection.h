@@ -74,18 +74,6 @@ class NicIntrospection {
   // Returns true if the NIC supports RC Remote Memory Window Atomic.
   virtual bool SupportsRcRemoteMwAtomic() const { return true; }
 
-  // Returns true if NIC robustly handles destruction of invalid verbs objects.
-  virtual bool CorrectlyReportsInvalidObjects() const { return true; }
-
-  // Returns true if NIC robustly handles memory window errors.
-  virtual bool CorrectlyReportsMemoryWindowErrors() const { return true; }
-
-  // Reports true if NIC robustly handles invalid size on atomic operations.
-  virtual bool CorrectlyReportsInvalidSizeErrors() const { return true; }
-
-  // Reports true if NIC robustly handles invalid receive length.
-  virtual bool CorrectlyReportsInvalidRecvLengthErrors() const { return true; }
-
   // Returns true if the provider requires the use of file backed shared
   // memory.
   virtual bool RequiresSharedMemory() const { return false; }

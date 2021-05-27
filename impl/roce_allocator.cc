@@ -25,7 +25,8 @@ ibv_mr* RoceAllocator::RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
 }
 
 ibv_ah* RoceAllocator::CreateAhInternal(ibv_pd* pd) {
-  verbs_util::AddressHandleAttributes attr(GetContextAddressInfo(pd->context));
+  verbs_util::LocalEndpointAttr local = GetLocalEndpointAttr(pd->context);
+  verbs_util::AddressHandleAttr attr(local, /*remote_gid=*/local.gid());
   ibv_ah_attr ibv_attr = attr.GetAttributes();
   return ibv_create_ah(pd, &ibv_attr);
 }

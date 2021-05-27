@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
@@ -53,15 +54,18 @@ class VerbsHelperSuite {
 
   // See VerbsBackend.
   absl::Status SetUpRcQp(ibv_qp* local_qp,
-                         const verbs_util::LocalVerbsAddress& local_address,
+                         const verbs_util::LocalEndpointAttr& local,
                          ibv_gid remote_gid, uint32_t remote_qpn);
   void SetUpSelfConnectedRcQp(ibv_qp* qp,
-                              const verbs_util::LocalVerbsAddress& address);
+                              const verbs_util::LocalEndpointAttr& local);
   void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::LocalVerbsAddress& local_address);
-  absl::Status SetUpUdQp(ibv_qp* qp,
-                         const verbs_util::LocalVerbsAddress& address,
+                          const verbs_util::LocalEndpointAttr& local);
+  absl::Status SetUpUdQp(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
                          uint32_t qkey);
+  absl::Status SetQpInit(ibv_qp* qp, uint8_t port);
+  absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
+                        ibv_gid remote_gid, uint32_t remote_qpn);
+  absl::Status SetQpRts(ibv_qp* qp);
 
   // See VerbsAllocator.
   RdmaMemBlock AllocBuffer(int pages, bool requires_shared_memory = false);
@@ -95,12 +99,12 @@ class VerbsHelperSuite {
                    ibv_qp_type qp_type, int sig_all);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
-  verbs_util::LocalVerbsAddress GetContextAddressInfo(
+  verbs_util::LocalEndpointAttr GetLocalEndpointAttr(
       ibv_context* context) const;
 
  private:
   std::unique_ptr<VerbsAllocator> allocator_;
-  std::unique_ptr<VerbsBackend> backend_;
+  std::shared_ptr<VerbsBackend> backend_;
 };
 
 }  // namespace rdma_unit_test

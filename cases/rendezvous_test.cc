@@ -36,8 +36,8 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
+#include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 
 #define ASSERT_NOT_NULL(p) ASSERT_TRUE((p) != nullptr)
@@ -174,8 +174,8 @@ class RpcControl {
   }
 
   void Init(VerbsHelperSuite& ibv, RpcControl& other) {
-    CHECK_OK(ibv.SetUpRcQp(qp_, ibv.GetContextAddressInfo(qp_->context),
-                           ibv.GetContextAddressInfo(other.qp_->context).gid(),
+    CHECK_OK(ibv.SetUpRcQp(qp_, ibv.GetLocalEndpointAttr(qp_->context),
+                           ibv.GetLocalEndpointAttr(other.qp_->context).gid(),
                            other.qp_->qp_num));
     other_rkey_ = other.mr_->rkey;
   }
@@ -333,8 +333,8 @@ class RpcBase {
 
   void Init(VerbsHelperSuite& ibv, RpcBase& other) {
     CHECK_OK(ibv.SetUpRcQp(data_qp_,
-                           ibv.GetContextAddressInfo(data_qp_->context),
-                           ibv.GetContextAddressInfo(data_qp_->context).gid(),
+                           ibv.GetLocalEndpointAttr(data_qp_->context),
+                           ibv.GetLocalEndpointAttr(data_qp_->context).gid(),
                            other.data_qp_->qp_num));
     control_.Init(ibv, other.control_);
   }

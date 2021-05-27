@@ -21,10 +21,10 @@
 
 // A set of helpers to test the result of absl::Status
 #ifndef TESTING_BASE_PUBLIC_GMOCK_UTILS_STATUS_MATCHERS_H_
-#define CHECK_OK(expression) CHECK(((expression).ok()))  // Crash OK
-#define DCHECK_OK(expression) DCHECK(((expression).ok()))
-#define EXPECT_OK(expression) EXPECT_TRUE(((expression).ok()))
-#define ASSERT_OK(expression) ASSERT_TRUE(((expression).ok()))
+#define CHECK_OK(expr) CHECK_EQ((expr), absl::OkStatus())  // Crash ok
+#define DCHECK_OK(expr) DCHECK_EQ((expr), absl::OkStatus())
+#define EXPECT_OK(expr) EXPECT_EQ((expr), absl::OkStatus())
+#define ASSERT_OK(expr) ASSERT_EQ((expr), absl::OkStatus())
 
 #define CONCAT_IMPL(x, y) x##y
 #define CONCAT_MACRO(x, y) CONCAT_IMPL(x, y)
@@ -46,6 +46,15 @@
     return statusor.status();                       \
   }                                                 \
   lhs = std::move(statusor.value())
+
+#define RETURN_IF_ERROR(expr)                                                \
+  do {                                                                       \
+    const ::absl::Status _status = (expr);                                   \
+    if (!_status.ok()) {                                                     \
+      LOG(ERROR) << "Return Error: " << #expr << " failed with " << _status; \
+      return _status;                                                        \
+    }                                                                        \
+  } while (0)
 
 #endif
 

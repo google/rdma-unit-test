@@ -27,9 +27,9 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
 #include "public/introspection.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
+#include "public/status_matchers.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
@@ -66,11 +66,7 @@ class SrqTest : public BasicFixture {
     std::fill(setup.recv_buffer.data(),
               setup.recv_buffer.data() + setup.send_buffer.size(),
               kRecvContent);
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -108,13 +104,13 @@ class SrqTest : public BasicFixture {
       return absl::InternalError("Failed to create recv qp.");
     }
     ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp,
-                            ibv_.GetContextAddressInfo(setup.context));
+                            ibv_.GetLocalEndpointAttr(setup.context));
     return setup;
   }
 };
 
 TEST_F(SrqTest, Create) {
-  ibv_context* context = ibv_.OpenDevice().value();
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ASSERT_NE(nullptr, context);
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_NE(nullptr, pd);
@@ -138,10 +134,12 @@ TEST_F(SrqTest, Loopback) {
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
   verbs_util::PostSend(setup.send_qp, send);
-  ibv_wc completion = verbs_util::WaitForCompletion(setup.send_cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.send_cq));
   EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
   EXPECT_EQ(1, completion.wr_id);
-  completion = verbs_util::WaitForCompletion(setup.recv_cq).value();
+  ASSERT_OK_AND_ASSIGN(completion,
+                       verbs_util::WaitForCompletion(setup.recv_cq));
   EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
   EXPECT_EQ(0, completion.wr_id);
   EXPECT_THAT(setup.recv_buffer.span(), testing::Each(kSendContent));
@@ -186,16 +184,18 @@ TEST_F(SrqTest, MultiThreadedSrqLoopback) {
   }
   // Poll send completions.
   for (int i = 0; i < kTotalWr; i++) {
-    ibv_wc wc = verbs_util::WaitForCompletion(setup.send_cq).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc wc,
+                         verbs_util::WaitForCompletion(setup.send_cq));
     EXPECT_EQ(wc.status, IBV_WC_SUCCESS);
   }
   // The last send_wr should get an RnR.
-  ibv_wc wc = verbs_util::WaitForCompletion(setup.send_cq).value();
+  ASSERT_OK_AND_ASSIGN(ibv_wc wc, verbs_util::WaitForCompletion(setup.send_cq));
   EXPECT_EQ(wc.status, IBV_WC_RNR_RETRY_EXC_ERR) << "too many rr in srq";
 
   std::vector<bool> succeeded(kTotalWr, false);
   for (int i = 0; i < kTotalWr; i++) {
-    ibv_wc wc = verbs_util::WaitForCompletion(setup.recv_cq).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc wc,
+                         verbs_util::WaitForCompletion(setup.recv_cq));
     EXPECT_FALSE(succeeded[wc.wr_id]);
     succeeded[wc.wr_id] = wc.status == IBV_WC_SUCCESS;
     EXPECT_EQ(wc.status, IBV_WC_SUCCESS)
@@ -260,6 +260,22 @@ TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
   EXPECT_THAT(result, testing::AnyOf(-1, ENOMEM, -ENOMEM));
 }
 
+TEST_F(SrqTest, ExceedsDeviceCap) {
+  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
+  const ibv_device_attr& device_attr = Introspection().device_attr();
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_srq_init_attr init_attr_bad_wr = {
+      .srq_context = nullptr,
+      .attr = {.max_wr = static_cast<uint32_t>(device_attr.max_srq_wr) + 1,
+               .max_sge = verbs_util::kDefaultMaxSge}};
+  EXPECT_EQ(ibv_.CreateSrq(setup.pd, init_attr_bad_wr), nullptr) << "max_wr";
+  ibv_srq_init_attr init_attr_bad_sge = {
+      .srq_context = nullptr,
+      .attr = {.max_wr = verbs_util::kDefaultMaxWr,
+               .max_sge = static_cast<uint32_t>(device_attr.max_srq_sge) + 1}};
+  EXPECT_EQ(ibv_.CreateSrq(setup.pd, init_attr_bad_sge), nullptr) << "max_sge";
+}
+
 TEST_F(SrqTest, ExceedsMaxSge) {
   static constexpr uint32_t kProposedMaxSge = verbs_util::kDefaultMaxSge;
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
@@ -295,10 +311,10 @@ TEST_F(SrqTest, RnR) {
   ibv_sge sge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
   ibv_send_wr send = verbs_util::CreateSendWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   verbs_util::PostSend(setup.send_qp, send);
-  ibv_wc completion =
-      verbs_util::WaitForCompletion(setup.send_cq,
-                                    verbs_util::kDefaultErrorCompletionTimeout)
-          .value();
+  ASSERT_OK_AND_ASSIGN(
+      ibv_wc completion,
+      verbs_util::WaitForCompletion(
+          setup.send_cq, verbs_util::kDefaultErrorCompletionTimeout));
   EXPECT_THAT(completion.status,
               testing::AnyOf(IBV_WC_RNR_RETRY_EXC_ERR, IBV_WC_RETRY_EXC_ERR));
   EXPECT_THAT(setup.recv_buffer.span(), ::testing::Each(kRecvContent));

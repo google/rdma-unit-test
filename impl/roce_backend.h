@@ -35,10 +35,9 @@ class RoceBackend : public VerbsBackend {
   RoceBackend& operator=(const RoceBackend& backend) = delete;
   ~RoceBackend() override = default;
 
-  // See verbs_backend.h.
-  absl::Status SetUpRcQp(ibv_qp* local_qp,
-                         const verbs_util::LocalVerbsAddress& local_address,
-                         ibv_gid remote_gid, uint32_t remote_qpn) override;
+  absl::Status SetQpRtr(ibv_qp* qp,
+                        const verbs_util::LocalEndpointAttr& local_endpoint,
+                        ibv_gid remote_gid, uint32_t remote_qpn) override;
 };
 
 }  // namespace rdma_unit_test

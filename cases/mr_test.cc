@@ -19,6 +19,7 @@
 #include <exception>
 #include <functional>
 #include <thread>  // NOLINT
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,8 +32,8 @@
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
+#include "public/status_matchers.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
@@ -52,11 +53,7 @@ class MrTest : public BasicFixture {
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -84,7 +81,7 @@ TEST_F(MrTest, DeregInvalidMr) {
   ibv_mr* fake_mr = reinterpret_cast<ibv_mr*>(cq);
   fake_mr->context = setup.context;
   fake_mr->handle = original.handle;
-  EXPECT_EQ(EINVAL, ibv_dereg_mr(fake_mr));
+  EXPECT_THAT(ibv_dereg_mr(fake_mr), testing::AnyOf(EINVAL, ENOENT));
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -117,7 +114,7 @@ TEST_F(MrTest, DestroyPdWithOutstandingMr) {
 // TODO(author1): Threaded MR creation/closure
 // TODO(author1): Threaded rkey user (IBV_WC_REM_ACCESS_ERR)
 
-class MRLoopbackTest : public BasicFixture {
+class MrLoopbackTest : public BasicFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
   static constexpr int kQueueSize = 200;
@@ -125,7 +122,7 @@ class MRLoopbackTest : public BasicFixture {
 
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::LocalVerbsAddress address;
+    verbs_util::LocalEndpointAttr endpoint;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     // RC qp.
@@ -140,12 +137,8 @@ class MRLoopbackTest : public BasicFixture {
     Client client;
     client.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     memset(client.buffer.data(), buf_content, client.buffer.size());
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    client.context = context_or.value();
-    client.address = ibv_.GetContextAddressInfo(client.context);
+    ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
+    client.endpoint = ibv_.GetLocalEndpointAttr(client.context);
     client.pd = ibv_.AllocPd(client.context);
     if (!client.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -168,17 +161,9 @@ class MRLoopbackTest : public BasicFixture {
   }
 
   absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair() {
-    auto local_or = CreateClient(/*buf_content=*/'a');
-    if (!local_or.ok()) {
-      return local_or.status();
-    }
-    Client local = local_or.value();
-    auto remote_or = CreateClient(/*buf_content=*/'b');
-    if (!remote_or.ok()) {
-      return remote_or.status();
-    }
-    Client remote = remote_or.value();
-    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.address);
+    ASSIGN_OR_RETURN(Client local, CreateClient(/*buf_content=*/'a'));
+    ASSIGN_OR_RETURN(Client remote, CreateClient(/*buf_content=*/'b'));
+    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.endpoint);
     return std::make_pair(local, remote);
   }
 
@@ -241,10 +226,9 @@ class MRLoopbackTest : public BasicFixture {
   }
 };
 
-TEST_F(MRLoopbackTest, OutstandingRecv) {
-  auto clients_or = CreateConnectedClientsPair();
-  ASSERT_OK(clients_or);
-  auto [local, remote] = clients_or.value();
+TEST_F(MrLoopbackTest, OutstandingRecv) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_sge sg = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sg, /*num_sge=*/1);
   verbs_util::PostRecv(remote.qp, recv);
@@ -255,10 +239,9 @@ TEST_F(MRLoopbackTest, OutstandingRecv) {
   EXPECT_EQ(0, count);
 }
 
-TEST_F(MRLoopbackTest, OutstandingRead) {
-  auto clients_or = CreateConnectedClientsPair();
-  ASSERT_OK(clients_or);
-  auto [local, remote] = clients_or.value();
+TEST_F(MrLoopbackTest, OutstandingRead) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_sge sg = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sg, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
@@ -275,10 +258,9 @@ TEST_F(MRLoopbackTest, OutstandingRead) {
   EXPECT_GT(results[IBV_WC_LOC_PROT_ERR], 0);
 }
 
-TEST_F(MRLoopbackTest, OutstandingWrite) {
-  auto clients_or = CreateConnectedClientsPair();
-  ASSERT_OK(clients_or);
-  auto [local, remote] = clients_or.value();
+TEST_F(MrLoopbackTest, OutstandingWrite) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_sge sg = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
       /*wr_id=*/1, &sg, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);

@@ -25,7 +25,7 @@
 #include "infiniband/verbs.h"
 #include "public/flags.h"
 #include "public/introspection.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
 

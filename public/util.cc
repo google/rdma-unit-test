@@ -49,6 +49,7 @@
 
 #include "infiniband/verbs.h"
 #include "public/flags.h"
+#include "public/status_matchers.h"
 
 namespace rdma_unit_test {
 namespace verbs_util {
@@ -82,26 +83,34 @@ int GetIpAddressType(const ibv_gid& gid) {
 
 }  // namespace
 
-LocalVerbsAddress::LocalVerbsAddress() {
-}
+LocalEndpointAttr::LocalEndpointAttr(uint8_t port, ibv_gid gid,
+                                     uint8_t gid_index)
+    : port_(port), gid_(gid), gid_index_(gid_index) {}
 
-AddressHandleAttributes::AddressHandleAttributes(
-    const verbs_util::LocalVerbsAddress& verbs_address) {
+uint8_t LocalEndpointAttr::port() const { return port_; }
+
+ibv_gid LocalEndpointAttr::gid() const { return gid_; }
+
+uint8_t LocalEndpointAttr::gid_index() const { return gid_index_; }
+
+
+AddressHandleAttr::AddressHandleAttr(const verbs_util::LocalEndpointAttr& local,
+                                     ibv_gid remote_gid) {
   // Set base ibv_ah parameters as the source of truth.  Then
   // copy those into custom transport settings when requested.
   ibv_ah_attr_.sl = 0;
   ibv_ah_attr_.is_global = 1;
-  ibv_ah_attr_.port_num = verbs_address.port();
-  ibv_ah_attr_.grh.dgid = verbs_address.gid();
+  ibv_ah_attr_.port_num = local.port();
+  ibv_ah_attr_.grh.dgid = remote_gid;
   ibv_ah_attr_.grh.flow_label = 0;
-  ibv_ah_attr_.grh.sgid_index = verbs_address.gid_index();
+  ibv_ah_attr_.grh.sgid_index = local.gid_index();
   ibv_ah_attr_.grh.hop_limit = 10;
   ibv_ah_attr_.grh.traffic_class = 0;
 
 }
 
 // Only allow return of ibv_ah_attr if not in GOOGLE3 build.
-ibv_ah_attr AddressHandleAttributes::GetAttributes() const {
+ibv_ah_attr AddressHandleAttr::GetAttributes() const {
   return ibv_ah_attr_;
 }
 
@@ -169,9 +178,9 @@ std::string GidToString(const ibv_gid& gid) {
                          gid.raw[12], gid.raw[13], gid.raw[14], gid.raw[15]);
 }
 
-absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
     ibv_context* context) {
-  std::vector<LocalVerbsAddress> result;
+  std::vector<LocalEndpointAttr> result;
   bool no_ipv6_for_gid = absl::GetFlag(FLAGS_no_ipv6_for_gid);
   LOG(INFO) << "Enumerating Ports for " << context
             << "no_ipv6: " << no_ipv6_for_gid;
@@ -214,10 +223,7 @@ absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
                    << VerbsMtuToValue(port_attr.active_mtu);
       }
       VLOG(2) << "Adding: " << GidToString(gid);
-      LocalVerbsAddress match;
-      match.set_port(port_idx);
-      match.set_gid(gid);
-      match.set_gid_index(gid_idx);
+      LocalEndpointAttr match(port_idx, gid, gid_idx);
       result.push_back(match);
     }
   }
@@ -275,26 +281,6 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
   bind.bind_mw.rkey = rkey;
   bind.bind_mw.bind_info = CreateMwBindInfo(buffer, mr, access);
   return bind;
-}
-
-absl::Status BindType1Mw(ibv_mw* mw, ibv_qp* qp, ibv_mw_bind bind_arg,
-                         ibv_cq* cq) {
-  int result = ibv_bind_mw(qp, mw, &bind_arg);
-  if (result != 0) {
-    return absl::InternalError(absl::StrCat("Library call returned ", result));
-  }
-  auto completion_result = verbs_util::WaitForCompletion(cq);
-  if (!completion_result.ok()) return completion_result.status();
-  ibv_wc completion = completion_result.value();
-  if (IBV_WC_SUCCESS != completion.status) {
-    return absl::InternalError(
-        absl::StrCat("Completion error code ", completion.status));
-  }
-  if (IBV_WC_BIND_MW != completion.opcode) {
-    return absl::InternalError(
-        absl::StrCat("Wrong completion type ", completion.opcode));
-  }
-  return absl::OkStatus();
 }
 
 ibv_send_wr CreateInvalidateWr(uint64_t wr_id, uint32_t rkey) {
@@ -437,9 +423,9 @@ void PrintCompletion(const ibv_wc& completion) {
   LOG(INFO) << "  qp_num = " << completion.qp_num;
 }
 
-ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
-                              absl::Span<uint8_t> buffer, ibv_mr* mr,
-                              int access) {
+absl::StatusOr<ibv_wc_status> BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
+                                              absl::Span<uint8_t> buffer,
+                                              ibv_mr* mr, int access) {
   ibv_mw_bind bind = CreateType1MwBind(/*wr_id=*/1, buffer, mr, access);
   PostType1Bind(qp, mw, bind);
   ibv_wc completion = WaitForCompletion(qp->send_cq).value();
@@ -449,9 +435,10 @@ ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
   return completion.status;
 }
 
-ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
-                              absl::Span<uint8_t> buffer, uint32_t rkey,
-                              ibv_mr* mr, int access) {
+absl::StatusOr<ibv_wc_status> BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
+                                              absl::Span<uint8_t> buffer,
+                                              uint32_t rkey, ibv_mr* mr,
+                                              int access) {
   ibv_send_wr bind =
       CreateType2BindWr(/*wr_id=*/1, mw, buffer, rkey, mr, access);
   PostSend(qp, bind);
@@ -463,35 +450,40 @@ ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
   return completion.status;
 }
 
-ibv_wc_status ReadSync(ibv_qp* qp, absl::Span<uint8_t> local_buffer,
-                       ibv_mr* local_mr, void* remote_buffer, uint32_t rkey) {
+absl::StatusOr<ibv_wc_status> ReadSync(ibv_qp* qp,
+                                       absl::Span<uint8_t> local_buffer,
+                                       ibv_mr* local_mr, void* remote_buffer,
+                                       uint32_t rkey) {
   ibv_sge sge = CreateSge(local_buffer, local_mr);
   ibv_send_wr read =
       CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1, remote_buffer, rkey);
   PostSend(qp, read);
-  ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
   }
   return completion.status;
 }
 
-ibv_wc_status WriteSync(ibv_qp* qp, absl::Span<uint8_t> local_buffer,
-                        ibv_mr* local_mr, void* remote_buffer, uint32_t rkey) {
+absl::StatusOr<ibv_wc_status> WriteSync(ibv_qp* qp,
+                                        absl::Span<uint8_t> local_buffer,
+                                        ibv_mr* local_mr, void* remote_buffer,
+                                        uint32_t rkey) {
   ibv_sge sge = CreateSge(local_buffer, local_mr);
   ibv_send_wr read =
       CreateWriteWr(/*wr_id=*/1, &sge, /*num_sge=*/1, remote_buffer, rkey);
   PostSend(qp, read);
-  ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
   }
   return completion.status;
 }
 
-ibv_wc_status FetchAddSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
-                           void* remote_buffer, uint32_t rkey,
-                           uint64_t comp_add) {
+absl::StatusOr<ibv_wc_status> FetchAddSync(ibv_qp* qp, void* local_buffer,
+                                           ibv_mr* local_mr,
+                                           void* remote_buffer, uint32_t rkey,
+                                           uint64_t comp_add) {
   ibv_sge sge;
   sge.addr = reinterpret_cast<uint64_t>(local_buffer);
   sge.length = 8;
@@ -499,16 +491,17 @@ ibv_wc_status FetchAddSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
   ibv_send_wr read = CreateFetchAddWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
                                       remote_buffer, rkey, comp_add);
   PostSend(qp, read);
-  ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_FETCH_ADD, completion.opcode);
   }
   return completion.status;
 }
 
-ibv_wc_status CompSwapSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
-                           void* remote_buffer, uint32_t rkey,
-                           uint64_t comp_add, uint64_t swap) {
+absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
+                                           ibv_mr* local_mr,
+                                           void* remote_buffer, uint32_t rkey,
+                                           uint64_t comp_add, uint64_t swap) {
   ibv_sge sge;
   sge.addr = reinterpret_cast<uint64_t>(local_buffer);
   sge.length = 8;
@@ -516,14 +509,14 @@ ibv_wc_status CompSwapSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
   ibv_send_wr read = CreateCompSwapWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
                                       remote_buffer, rkey, comp_add, swap);
   PostSend(qp, read);
-  ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_COMP_SWAP, completion.opcode);
   }
   return completion.status;
 }
 
-std::pair<ibv_wc_status, ibv_wc_status> SendRecvSync(
+absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
     ibv_qp* src_qp, ibv_qp* dst_qp, absl::Span<uint8_t> src_buffer,
     ibv_mr* src_mr, absl::Span<uint8_t> dst_buffer, ibv_mr* dst_mr) {
   ibv_sge dst_sge = CreateSge(dst_buffer, dst_mr);
@@ -534,11 +527,11 @@ std::pair<ibv_wc_status, ibv_wc_status> SendRecvSync(
   ibv_send_wr send = CreateSendWr(/*wr_id=*/1, &src_sge, /*num_sge=*/1);
   PostSend(src_qp, send);
 
-  ibv_wc src_completion = WaitForCompletion(src_qp->send_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc src_completion, WaitForCompletion(src_qp->send_cq));
   if (src_completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_SEND, src_completion.opcode);
   }
-  ibv_wc dst_completion = WaitForCompletion(dst_qp->recv_cq).value();
+  ASSIGN_OR_RETURN(ibv_wc dst_completion, WaitForCompletion(dst_qp->recv_cq));
   if (dst_completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_RECV, dst_completion.opcode);
   }

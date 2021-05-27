@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <cstdint>
+#include <tuple>
 #include <utility>
 
 #include "gmock/gmock.h"
@@ -22,9 +23,9 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
 #include "public/introspection.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
+#include "public/status_matchers.h"
 #include "public/util.h"
 
 namespace rdma_unit_test {
@@ -46,7 +47,7 @@ class AccessTest : public BasicFixture,
  protected:
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::LocalVerbsAddress address;
+    verbs_util::LocalEndpointAttr endpoint;
     ibv_pd* pd;
     RdmaMemBlock src_buffer;
     RdmaMemBlock dst_buffer;
@@ -58,12 +59,8 @@ class AccessTest : public BasicFixture,
     BasicSetup setup;
     setup.src_buffer = ibv_.AllocBuffer(/*pages=*/2);
     setup.dst_buffer = ibv_.AllocBuffer(/*pages=*/2);
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
-    setup.address = ibv_.GetContextAddressInfo(setup.context);
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.endpoint = ibv_.GetLocalEndpointAttr(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allcoate pd.");
@@ -86,9 +83,10 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_wc_status actual =
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
         verbs_util::ReadSync(src_qp, setup.src_buffer.span(), src_mr,
-                             setup.dst_buffer.data(), dst_mr->rkey);
+                             setup.dst_buffer.data(), dst_mr->rkey));
     EXPECT_EQ(actual, expected);
   }
 
@@ -99,12 +97,13 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_mw* dst_mw =
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access);
-    ASSERT_NE(nullptr, dst_mw);
-    ibv_wc_status actual =
+    ASSERT_OK_AND_ASSIGN(
+        ibv_mw * dst_mw,
+        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
         verbs_util::ReadSync(src_qp, setup.src_buffer.span(), src_mr,
-                             setup.dst_buffer.data(), dst_mw->rkey);
+                             setup.dst_buffer.data(), dst_mw->rkey));
     EXPECT_EQ(actual, expected);
   }
 
@@ -115,9 +114,10 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_wc_status actual =
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
         verbs_util::WriteSync(src_qp, setup.src_buffer.span(), src_mr,
-                              setup.dst_buffer.data(), dst_mr->rkey);
+                              setup.dst_buffer.data(), dst_mr->rkey));
     EXPECT_EQ(actual, expected);
   }
 
@@ -128,12 +128,13 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_mw* dst_mw =
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access);
-    ASSERT_NE(nullptr, dst_mw);
-    ibv_wc_status actual =
+    ASSERT_OK_AND_ASSIGN(
+        ibv_mw * dst_mw,
+        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
         verbs_util::WriteSync(src_qp, setup.src_buffer.span(), src_mr,
-                              setup.dst_buffer.data(), dst_mw->rkey);
+                              setup.dst_buffer.data(), dst_mw->rkey));
     EXPECT_EQ(actual, expected);
   }
 
@@ -144,9 +145,11 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_wc_status actual = verbs_util::FetchAddSync(
-        src_qp, setup.src_buffer.data(), src_mr, setup.dst_buffer.data(),
-        dst_mr->rkey, /*comp_add=*/1);
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
+        verbs_util::FetchAddSync(src_qp, setup.src_buffer.data(), src_mr,
+                                 setup.dst_buffer.data(), dst_mr->rkey,
+                                 /*comp_add=*/1));
     EXPECT_EQ(actual, expected);
   }
 
@@ -158,12 +161,14 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    ibv_mw* dst_mw =
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access);
-    ASSERT_NE(nullptr, dst_mw);
-    ibv_wc_status actual = verbs_util::FetchAddSync(
-        src_qp, setup.src_buffer.data(), src_mr, setup.dst_buffer.data(),
-        dst_mw->rkey, /*comp_add=*/1);
+    ASSERT_OK_AND_ASSIGN(
+        ibv_mw * dst_mw,
+        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
+    ASSERT_OK_AND_ASSIGN(
+        ibv_wc_status actual,
+        verbs_util::FetchAddSync(src_qp, setup.src_buffer.data(), src_mr,
+                                 setup.dst_buffer.data(), dst_mw->rkey,
+                                 /*comp_add=*/1));
     EXPECT_EQ(actual, expected);
   }
 
@@ -174,9 +179,12 @@ class AccessTest : public BasicFixture,
     auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
     ASSERT_NE(nullptr, src_qp);
     ASSERT_NE(nullptr, dst_qp);
-    auto [src_status, dst_status] =
+    ibv_wc_status src_status;
+    ibv_wc_status dst_status;
+    ASSERT_OK_AND_ASSIGN(
+        std::tie(src_status, dst_status),
         verbs_util::SendRecvSync(src_qp, dst_qp, setup.src_buffer.span(),
-                                 src_mr, setup.dst_buffer.span(), dst_mr);
+                                 src_mr, setup.dst_buffer.span(), dst_mr));
     ASSERT_EQ(src_status, expected);
   }
 
@@ -186,32 +194,35 @@ class AccessTest : public BasicFixture,
     ibv_qp* src_qp = ibv_.CreateQp(setup.pd, setup.src_cq);
     ibv_qp* dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
     if (src_qp && dst_qp) {
-      ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.address);
+      ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.endpoint);
     }
     return {src_qp, dst_qp};
   }
 
-  ibv_mw* CreateAndBindMw(ibv_qp* dst_qp, RdmaMemBlock dst_buffer,
-                          ibv_mr* dst_mr, int access) {
+  absl::StatusOr<ibv_mw*> CreateAndBindMw(ibv_qp* dst_qp,
+                                          RdmaMemBlock dst_buffer,
+                                          ibv_mr* dst_mr, int access) {
     static int type2_rkey = 17;
     ibv_mw* mw = ibv_.AllocMw(dst_qp->pd, GetParam());
     if (!mw) {
-      LOG(ERROR) << "Failed to allocate mw.";
-      return nullptr;
+      return absl::InternalError("Failed to allocate mw.");
     }
 
     switch (GetParam()) {
       case IBV_MW_TYPE_1: {
-        ibv_wc_status status = verbs_util::BindType1MwSync(
-            dst_qp, mw, dst_buffer.span(), dst_mr, access);
+        ASSIGN_OR_RETURN(ibv_wc_status status,
+                         verbs_util::BindType1MwSync(
+                             dst_qp, mw, dst_buffer.span(), dst_mr, access));
         if (status != IBV_WC_SUCCESS) {
           LOG(ERROR) << "Cannot bind mw.";
           return nullptr;
         }
       } break;
       case IBV_MW_TYPE_2: {
-        ibv_wc_status status = verbs_util::BindType2MwSync(
-            dst_qp, mw, dst_buffer.span(), ++type2_rkey, dst_mr, access);
+        ASSIGN_OR_RETURN(
+            ibv_wc_status status,
+            verbs_util::BindType2MwSync(dst_qp, mw, dst_buffer.span(),
+                                        ++type2_rkey, dst_mr, access));
         if (status != IBV_WC_SUCCESS) {
           LOG(ERROR) << "Cannot bind mw.";
           return nullptr;

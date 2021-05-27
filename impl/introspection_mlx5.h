@@ -27,16 +27,6 @@ class IntrospectionMlx5 : public NicIntrospection {
 
   bool SupportsRcRemoteMwAtomic() const override { return false; }
 
-  bool CorrectlyReportsInvalidObjects() const override { return false; }
-
-  bool CorrectlyReportsMemoryWindowErrors() const override { return false; }
-
-  bool CorrectlyReportsInvalidSizeErrors() const override { return false; }
-
-  bool CorrectlyReportsInvalidRecvLengthErrors() const override {
-    return false;
-  }
-
  protected:
   const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
     static const absl::flat_hash_set<DeviationEntry> deviations{
@@ -46,6 +36,10 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
         // Zero byte write is successful.
         {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        // MW address not checked at bind.
+        {"BufferMwTest", "ExceedFront", ""},
+        // MW address not checked at bind.
+        {"BufferMwTest", "ExceedRear", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
         {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
@@ -57,8 +51,25 @@ class IntrospectionMlx5 : public NicIntrospection {
         // WaitingForChange to fail.
         {"CqAdvancedTest", "RecvSharedCq", ""},
         // Allows invalid SGE size for atomics.
+        {"LoopbackRcQpTest", "FetchAddInvalidSize", ""},
         {"LoopbackRcQpTest", "FetchAddSmallSge", ""},
         {"LoopbackRcQpTest", "FetchAddLargeSge", ""},
+        {"LoopbackRcQpTest", "CmpAndSwpInvalidSize", ""},
+        // Bad recv length larger than region does not cause a failure.
+        {"LoopbackRcQpTest", "BadRecvLength", ""},
+        // Permissions not checked at bind.
+        {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
+        {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
+        // Deregistering a bound window reports success.
+        {"MwTest", "DeregMrWhenBound", ""},
+        // Allows binding when MR is missing bind permissions.
+        {"MwBindTest", "MissingBind", ""},
+        // Allows binding when MR is missing bind permissions.
+        {"MwBindTest", "NoMrBindAccess", ""},
+        // User API misuse causes crash.
+        {"PdTest", "DeleteUnknownPd", ""},
+        // User API misuse causes crash.
+        {"PdTest", "DeleteInvalidPd", ""},
     };
     return deviations;
   }

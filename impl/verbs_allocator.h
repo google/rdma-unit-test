@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
@@ -28,7 +29,7 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
 #include "public/util.h"
 
 namespace rdma_unit_test {
@@ -91,11 +92,11 @@ class VerbsAllocator {
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   // Returns the first available GID from the device context.
-  verbs_util::LocalVerbsAddress GetContextAddressInfo(
+  verbs_util::LocalEndpointAttr GetLocalEndpointAttr(
       ibv_context* context) const;
 
  private:
-  // This only creates Ah/Qp/Mr without putting it into qps_ for auto-cleanup.
+  // This only creates Ah/Qp/Mr without setting it up for auto-cleanup.
   virtual ibv_mr* RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
                                 int access) = 0;
   virtual ibv_ah* CreateAhInternal(ibv_pd* pd) = 0;
@@ -123,8 +124,8 @@ class VerbsAllocator {
   std::vector<std::unique_ptr<ibv_mw, decltype(&MwDeleter)>> mws_
       ABSL_GUARDED_BY(mtx_mws_);
   // Tracks address info for a given context.
-  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::LocalVerbsAddress>>
-      address_info_ ABSL_GUARDED_BY(mtx_address_info_);
+  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::LocalEndpointAttr>>
+      endpoint_attrs_ ABSL_GUARDED_BY(mtx_endpoints_);
 
   // locks for containers above.
   absl::Mutex mtx_memblocks_;
@@ -137,7 +138,7 @@ class VerbsAllocator {
   absl::Mutex mtx_qps_;
   absl::Mutex mtx_mrs_;
   absl::Mutex mtx_mws_;
-  mutable absl::Mutex mtx_address_info_;
+  mutable absl::Mutex mtx_endpoints_;
 };
 
 }  // namespace rdma_unit_test

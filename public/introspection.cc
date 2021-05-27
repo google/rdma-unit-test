@@ -26,6 +26,7 @@
 #include "infiniband/verbs.h"
 #include "impl/introspection_registrar.h"
 #include "public/flags.h"
+#include "public/status_matchers.h"
 #include "public/util.h"
 
 namespace rdma_unit_test {
@@ -48,7 +49,7 @@ const NicIntrospection& Introspection() {
     absl::StatusOr<ibv_context*> context_or =
         rdma_unit_test::verbs_util::OpenUntrackedDevice(
             absl::GetFlag(FLAGS_device_name));
-    CHECK(context_or.ok());  // Crash ok
+    CHECK_OK(context_or.status());  // Crash ok
     ibv_context* context = context_or.value();
     ibv_device_attr attr;
     int query_result = ibv_query_device(context, &attr);

@@ -32,6 +32,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "absl/types/span.h"
 
 
@@ -47,48 +48,37 @@ namespace verbs_util {
 
 // Encapsulates the various attributes that are used to define a local verbs
 // endpoint. Note: a remote endpoint is solely defined by an ibv_gid.
-class LocalVerbsAddress {
+class LocalEndpointAttr {
  public:
-  LocalVerbsAddress();
-  ~LocalVerbsAddress() = default;
-  LocalVerbsAddress(const LocalVerbsAddress& other) = default;
-  LocalVerbsAddress& operator=(const LocalVerbsAddress& other) = default;
-  LocalVerbsAddress(LocalVerbsAddress&& other) = default;
-  LocalVerbsAddress& operator=(LocalVerbsAddress&& other) = default;
+  LocalEndpointAttr() = default;
+  LocalEndpointAttr(uint8_t port, ibv_gid gid, uint8_t gid_index);
+  ~LocalEndpointAttr() = default;
+  // Copyable.
+  LocalEndpointAttr(const LocalEndpointAttr& other) = default;
+  LocalEndpointAttr& operator=(const LocalEndpointAttr& other) = default;
+  LocalEndpointAttr(LocalEndpointAttr&& other) = default;
+  LocalEndpointAttr& operator=(LocalEndpointAttr&& other) = default;
 
-  int port() const { return port_; }
-  LocalVerbsAddress& set_port(int port) {
-    port_ = port;
-    return *this;
-  }
-  ibv_gid gid() const { return gid_; }
-  LocalVerbsAddress& set_gid(const ibv_gid& gid) {
-    gid_ = gid;
-    return *this;
-  }
-
-  int gid_index() const { return gid_index_; }
-  LocalVerbsAddress& set_gid_index(int gid_index) {
-    gid_index_ = gid_index;
-    return *this;
-  }
+  uint8_t port() const;
+  ibv_gid gid() const;
+  uint8_t gid_index() const;
 
 
  private:
-  int port_;
+  uint8_t port_;
   ibv_gid gid_;
-  int gid_index_;
+  uint8_t gid_index_;
 };
 
 // Creates an abstraction for ibv_ah_attr.
-class AddressHandleAttributes {
+class AddressHandleAttr {
  public:
-  AddressHandleAttributes() = delete;
+  AddressHandleAttr() = delete;
   // Creates an AddressHandle with default attributes with the info from the
-  // passed address.
-  explicit AddressHandleAttributes(
-      const verbs_util::LocalVerbsAddress& verbs_address);
-  ~AddressHandleAttributes() = default;
+  // passed endpoint attributes.
+  explicit AddressHandleAttr(const verbs_util::LocalEndpointAttr& local,
+                             ibv_gid remote_gid);
+  ~AddressHandleAttr() = default;
 
   // Returns the underlying ibv_ah_attr.
   ibv_ah_attr GetAttributes() const;
@@ -140,7 +130,7 @@ ibv_mtu ToVerbsMtu(uint64_t mtu);
 std::string GidToString(const ibv_gid& gid);
 
 // Enumerate all ports with (one of) their sgid(s).
-absl::StatusOr<std::vector<LocalVerbsAddress>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
     ibv_context* context);
 
 // Verbs utilities:
@@ -193,33 +183,39 @@ void PrintCompletion(const ibv_wc& completion);
 // 1. Create WR.
 // 2. Post WR to QP.
 // 3. Wait for completion and return completion status.
-ibv_wc_status BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
-                              absl::Span<uint8_t> buffer, ibv_mr* mr,
-                              int access = IBV_ACCESS_REMOTE_READ |
-                                           IBV_ACCESS_REMOTE_WRITE |
-                                           IBV_ACCESS_REMOTE_ATOMIC);
-ibv_wc_status BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
-                              absl::Span<uint8_t> buffer, uint32_t rkey,
-                              ibv_mr* mr,
-                              int access = IBV_ACCESS_REMOTE_READ |
-                                           IBV_ACCESS_REMOTE_WRITE |
-                                           IBV_ACCESS_REMOTE_ATOMIC);
-ibv_wc_status ReadSync(ibv_qp* qp, absl::Span<uint8_t> local_buffer,
-                       ibv_mr* local_mr, void* remote_buffer, uint32_t rkey);
+absl::StatusOr<ibv_wc_status> BindType1MwSync(
+    ibv_qp* qp, ibv_mw* mw, absl::Span<uint8_t> buffer, ibv_mr* mr,
+    int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+                 IBV_ACCESS_REMOTE_ATOMIC);
 
-ibv_wc_status WriteSync(ibv_qp* qp, absl::Span<uint8_t> local_buffer,
-                        ibv_mr* local_mr, void* remote_buffer, uint32_t rkey);
+absl::StatusOr<ibv_wc_status> BindType2MwSync(
+    ibv_qp* qp, ibv_mw* mw, absl::Span<uint8_t> buffer, uint32_t rkey,
+    ibv_mr* mr,
+    int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+                 IBV_ACCESS_REMOTE_ATOMIC);
 
-ibv_wc_status FetchAddSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
-                           void* remote_buffer, uint32_t rkey,
-                           uint64_t comp_add);
+absl::StatusOr<ibv_wc_status> ReadSync(ibv_qp* qp,
+                                       absl::Span<uint8_t> local_buffer,
+                                       ibv_mr* local_mr, void* remote_buffer,
+                                       uint32_t rkey);
 
-ibv_wc_status CompSwapSync(ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
-                           void* remote_buffer, uint32_t rkey,
-                           uint64_t comp_add, uint64_t swap);
+absl::StatusOr<ibv_wc_status> WriteSync(ibv_qp* qp,
+                                        absl::Span<uint8_t> local_buffer,
+                                        ibv_mr* local_mr, void* remote_buffer,
+                                        uint32_t rkey);
+
+absl::StatusOr<ibv_wc_status> FetchAddSync(ibv_qp* qp, void* local_buffer,
+                                           ibv_mr* local_mr,
+                                           void* remote_buffer, uint32_t rkey,
+                                           uint64_t comp_add);
+
+absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
+                                           ibv_mr* local_mr,
+                                           void* remote_buffer, uint32_t rkey,
+                                           uint64_t comp_add, uint64_t swap);
 // The return pair consists of first the send side completion status then the
 // recv side completion status.
-std::pair<ibv_wc_status, ibv_wc_status> SendRecvSync(
+absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
     ibv_qp* src_qp, ibv_qp* dst_qp, absl::Span<uint8_t> src_buffer,
     ibv_mr* src_mr, absl::Span<uint8_t> dst_buffer, ibv_mr* dst_mr);
 

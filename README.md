@@ -20,7 +20,7 @@ These are practical tests designed to understand the behavior of a stack. In
 many places they check constraints beyond what is stated in the Infiniband
 specification. Do not assume test failures indicate bad hardware, it could be
 that your device diverged in an undefined area of the specification. Patches
-to fix overly-specificified tests are encouraged.
+to fix overly-specified tests are encouraged.
 
 ## Installation
 

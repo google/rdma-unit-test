@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
 
 #include <errno.h>
 #include <fcntl.h>

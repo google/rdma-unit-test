@@ -33,9 +33,9 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
-#include "cases/status_matchers.h"
 #include "public/introspection.h"
-#include "public/rdma-memblock.h"
+#include "public/rdma_memblock.h"
+#include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
@@ -50,11 +50,7 @@ class CqTest : public BasicFixture {
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -71,7 +67,6 @@ TEST_F(CqTest, Basic) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
   ASSERT_NE(nullptr, cq);
-
   ASSERT_EQ(0, ibv_destroy_cq(cq));
 }
 
@@ -189,7 +184,7 @@ class CqAdvancedTest : public BasicFixture {
       qp.next_send_wr_id = qp_id << kQueueIdShift;
       qp.next_recv_wr_id = qp_id << kQueueIdShift;
       ibv_.SetUpSelfConnectedRcQp(qp.qp,
-                                  ibv_.GetContextAddressInfo(setup.context));
+                                  ibv_.GetLocalEndpointAttr(setup.context));
       setup.qps.push_back(qp);
     }
     return absl::OkStatus();
@@ -340,11 +335,7 @@ class CqAdvancedTest : public BasicFixture {
     setup.src_memblock =
         ibv_.AllocBufferByBytes(kMaxOpsPerQp * sizeof(uint16_t));
     setup.dst_memblock = ibv_.AllocBufferByBytes(256 * sizeof(uint16_t));
-    auto context_or = ibv_.OpenDevice();
-    if (!context_or.ok()) {
-      return context_or.status();
-    }
-    setup.context = context_or.value();
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
