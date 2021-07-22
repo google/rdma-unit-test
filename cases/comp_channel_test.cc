@@ -31,6 +31,7 @@ class CompChannelTest : public BasicFixture {
   static constexpr int kNotifySolicited = 1;
   static constexpr uint32_t kRKey = 17;
   static constexpr uint32_t kCqMaxWr = 10;
+  static constexpr absl::Duration kSelectRetryTimeout = absl::Milliseconds(10);
 
   struct BasicSetup {
     struct QpEnd {
@@ -161,8 +162,12 @@ class CompChannelTest : public BasicFixture {
     FD_ZERO(&fds);
     FD_SET(channel->fd, &fds);
     timeval no_block = {.tv_sec = 0, .tv_usec = 0};
-    int result = select(FD_SETSIZE, &fds, nullptr, nullptr, &no_block);
-    CHECK_GE(result, 0);
+    absl::Time stop = absl::Now() + kSelectRetryTimeout;
+    int result;
+    do {
+      result = select(FD_SETSIZE, &fds, nullptr, nullptr, &no_block);
+      LOG_IF(INFO, result < 0) << "select failed error=" << errno;
+    } while ((result < 0) && (errno == EINTR) && (absl::Now() < stop));
     return result == 1;
   }
 };
@@ -195,6 +200,21 @@ TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
   if (!Introspection().ShouldDeviateForCurrentTest()) {
     ASSERT_NE(result, 0);
   }
+  ASSERT_EQ(0, ibv_destroy_cq(cq));
+}
+
+TEST_F(CompChannelTest, RequestNotificationInvalidCq) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP() << "allows request notification with invalid cq.";
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
+  ASSERT_NE(nullptr, cq);
+  ibv_cq original = *cq;
+  cq->handle = ~cq->handle;
+  int result = ibv_req_notify_cq(cq, kNotifyAny);
+  EXPECT_THAT(result, testing::AnyOf(ENOENT, EFAULT));
+  *cq = original;
   ASSERT_EQ(0, ibv_destroy_cq(cq));
 }
 

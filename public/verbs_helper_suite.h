@@ -66,6 +66,8 @@ class VerbsHelperSuite {
   absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
                         ibv_gid remote_gid, uint32_t remote_qpn);
   absl::Status SetQpRts(ibv_qp* qp);
+  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr, int mask);
+  absl::Status SetQpError(ibv_qp* qp);
 
   // See VerbsAllocator.
   RdmaMemBlock AllocBuffer(int pages, bool requires_shared_memory = false);
@@ -94,9 +96,12 @@ class VerbsHelperSuite {
   int DestroySrq(ibv_srq* srq);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* cq);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* cq, ibv_srq* srq);
-  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq, ibv_srq* srq,
-                   uint32_t max_send_wr, uint32_t max_recv_wr,
-                   ibv_qp_type qp_type, int sig_all);
+  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq, ibv_srq* srq);
+  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
+                   ibv_srq* srq = nullptr,
+                   uint32_t max_send_wr = verbs_util::kDefaultMaxWr,
+                   uint32_t max_recv_wr = verbs_util::kDefaultMaxWr,
+                   ibv_qp_type qp_type = IBV_QPT_RC, int sig_all = 0);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   verbs_util::LocalEndpointAttr GetLocalEndpointAttr(

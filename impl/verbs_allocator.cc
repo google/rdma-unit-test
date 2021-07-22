@@ -28,6 +28,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
@@ -111,21 +112,48 @@ RdmaMemBlock VerbsAllocator::AllocBufferByBytes(size_t bytes,
   return result;
 }
 
-absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
-  absl::StatusOr<ibv_context*> context_or =
-      rdma_unit_test::verbs_util::OpenUntrackedDevice(
-          absl::GetFlag(FLAGS_device_name));
-  if (!context_or.ok()) {
-    return context_or;
+absl::StatusOr<ibv_context*> VerbsAllocator::OpenDeviceWithActivePorts(
+    bool no_ipv6_for_gid) {
+  std::vector<std::string> device_names;
+  if (!absl::GetFlag(FLAGS_device_name).empty()) {
+    device_names.push_back(absl::GetFlag(FLAGS_device_name));
+  } else {
+    absl::StatusOr<std::vector<std::string>> enum_results =
+        verbs_util::EnumerateDeviceNames();
+    if (!enum_results.ok()) return enum_results.status();
+    device_names = enum_results.value();
   }
-  ibv_context* context = context_or.value();
-  auto enum_result = verbs_util::EnumeratePortsForContext(context);
-  if (!enum_result.ok()) {
+
+  ibv_context* context = nullptr;
+  std::vector<verbs_util::LocalEndpointAttr> endpoints;
+  for (auto& device_name : device_names) {
+    absl::StatusOr<ibv_context*> context_or =
+        verbs_util::OpenUntrackedDevice(device_name);
+    LOG(INFO) << "Opening device: " << device_name;
+    if (!context_or.ok()) {
+      LOG(INFO) << "Failed to open device: " << device_name;
+      continue;
+    }
+    context = context_or.value();
+    absl::StatusOr<std::vector<verbs_util::LocalEndpointAttr>> enum_result =
+        verbs_util::EnumeratePortsForContext(context);
+    if (enum_result.ok() && !enum_result.value().empty()) {
+      endpoints = enum_result.value();
+      VLOG(1) << "Found (" << endpoints.size()
+              << ") active ports for device: " << device_name;
+      // Just need one device with active ports. Break at this point.
+      break;
+    }
+    LOG(INFO) << "Failed to get ports for device: " << device_name;
     int result = ibv_close_device(context);
-    LOG_IF(DFATAL, result != 0) << "Failed to close device";
-    return enum_result.status();
+    LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
+    context = nullptr;
   }
-  std::vector<verbs_util::LocalEndpointAttr> endpoints = enum_result.value();
+
+  if (!context || endpoints.empty()) {
+    return absl::InternalError("Failed to open a device with active ports.");
+  }
+
   {
     absl::MutexLock guard(&mtx_contexts_);
     contexts_.emplace_back(context, &ContextDeleter);

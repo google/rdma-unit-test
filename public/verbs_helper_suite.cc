@@ -75,6 +75,15 @@ absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp) {
   return backend_->SetQpRts(qp);
 }
 
+absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr,
+                                        int mask) {
+  return backend_->SetQpRts(qp, custom_attr, mask);
+}
+
+absl::Status VerbsHelperSuite::SetQpError(ibv_qp* qp) {
+  return backend_->SetQpError(qp);
+}
+
 RdmaMemBlock VerbsHelperSuite::AllocBuffer(int pages,
                                            bool requires_shared_memory) {
   return allocator_->AllocBuffer(pages, requires_shared_memory);
@@ -91,7 +100,7 @@ RdmaMemBlock VerbsHelperSuite::AllocBufferByBytes(size_t bytes,
 
 absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
     bool no_ipv6_for_gid) {
-  return allocator_->OpenDevice(no_ipv6_for_gid);
+  return allocator_->OpenDeviceWithActivePorts(no_ipv6_for_gid);
 }
 
 ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd) {

@@ -610,15 +610,17 @@ class RpcServer : public RpcBase {
     switch (completion.opcode) {
       case IBV_WC_RDMA_WRITE:
         CHECK(Operation::kRead == req.operation);
-        // Validate Writes
-        if (completion.status == IBV_WC_SUCCESS) {
-          CHECK(ValidateBuffer(
-              absl::MakeSpan(reinterpret_cast<uint8_t*>(req.addr), req.length),
-              req.seed));
-        }
         break;
       case IBV_WC_RDMA_READ:
         CHECK(Operation::kWrite == req.operation);
+        // Validate Writes
+        if (completion.status == IBV_WC_SUCCESS) {
+          CHECK(ValidateBuffer(
+              absl::MakeSpan(reinterpret_cast<uint8_t*>(
+                                 outstanding_rma.local_buffer_start),
+                             req.length),
+              req.seed));
+        }
         break;
       default:
         LOG(FATAL) << "Unexpected opcode: " << completion.opcode;

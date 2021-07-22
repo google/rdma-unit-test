@@ -40,6 +40,8 @@ class IntrospectionRxe : public NicIntrospection {
  protected:
   const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
     static const absl::flat_hash_set<DeviationEntry> deviations{
+        // Supports multiple SGEs for atomics.
+        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
         // Returns success completion.
         {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
         // Zero byte write is successful.

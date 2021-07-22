@@ -129,8 +129,73 @@ TEST_F(CqTest, LargeCompVector) {
   ASSERT_EQ(nullptr, cq);
 }
 
+TEST_F(CqTest, ThreadedCreate) {
+  static constexpr int kThreadCount = 5;
+  static constexpr int kCqsPerThread = 50;
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  std::array<std::array<ibv_cq*, kCqsPerThread>, kThreadCount> cqs;
+  cqs = {{{nullptr}}};
+  auto create_qps = [this, &setup, &cqs](int thread_id) {
+    // No CQs can share the same position in the array, so no need for thread
+    // synchronization.
+    for (int i = 0; i < kCqsPerThread; ++i) {
+      cqs[thread_id][i] = ibv_.CreateCq(setup.context, 10);
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
+    threads.push_back(std::thread(create_qps, thread_id));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  for (const auto& thread_cqs : cqs) {
+    for (const auto& cq : thread_cqs) {
+      EXPECT_NE(nullptr, cq);
+    }
+  }
+}
+
+TEST_F(CqTest, ThreadedCreateAndDestroy) {
+  static constexpr int kThreadCount = 5;
+  static constexpr int kCqsPerThread = 50;
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  // Initialize to 1 since we are expecting the values to be 0 after destroying
+  // CQs.
+  std::array<std::array<int, kCqsPerThread>, kThreadCount> destroy_results;
+  destroy_results = {{{1}}};
+  auto create_destroy_cqs = [this, &setup, &destroy_results](int thread_id) {
+    for (int i = 0; i < kCqsPerThread; ++i) {
+      ibv_cq* cq = ibv_.CreateCq(setup.context, 10);
+      ASSERT_NE(nullptr, cq);
+      destroy_results[thread_id][i] = ibv_.DestroyCq(cq);
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
+    threads.push_back(std::thread(create_destroy_cqs, thread_id));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  for (const auto& thread_results : destroy_results) {
+    for (const auto& destroy_result : thread_results) {
+      EXPECT_EQ(0, destroy_result);
+    }
+  }
+}
+
 // TODO(author1): Many/Max channels
-// TODO(author1): Threaded creation
 // TODO(author1): Test lookup/delete with a different kind of object.
 // TODO(author1): (likely in a different test) messing with comp vectors.
 
@@ -249,7 +314,7 @@ class CqAdvancedTest : public BasicFixture {
         wqe = verbs_util::CreateWriteWr(
             /*wr_id=*/1, &sge, /*num_sge=*/1,
             reinterpret_cast<uint8_t*>(&dst_buffer[target_index]),
-            setup.dst_mr->lkey);
+            setup.dst_mr->rkey);
         break;
     }
     wqe.wr_id = qp->next_send_wr_id;

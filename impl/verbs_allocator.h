@@ -64,8 +64,10 @@ class VerbsAllocator {
                                   size_t alignment = verbs_util::kPageSize);
   RdmaMemBlock AllocBufferByBytes(
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-  // Opens an ibv device. Uses the first device listed.
-  absl::StatusOr<ibv_context*> OpenDevice(bool no_ipv6_for_gid = false);
+  // Opens an ibv device. Uses the device specified by the --device_name flag or
+  // falls back to the first device with active port(s).
+  absl::StatusOr<ibv_context*> OpenDeviceWithActivePorts(
+      bool no_ipv6_for_gid = false);
   ibv_ah* CreateAh(ibv_pd* pd);
   ibv_pd* AllocPd(ibv_context* context);
   int DeallocPd(ibv_pd* pd);

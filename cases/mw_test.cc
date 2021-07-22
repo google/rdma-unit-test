@@ -247,6 +247,24 @@ TEST_F(MwTest, InvalidMw) {
   EXPECT_EQ(EINVAL, result);
 }
 
+TEST_F(MwTest, InvalidQp) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
+  ASSERT_NE(nullptr, mw);
+
+  // Only modify the handle of the qp instance as the underlying ibv_qp is a
+  // cast of an internal structure.
+  uint32_t original_handle = setup.qp->handle;
+  setup.qp->handle = -1;
+  ibv_mw_bind bind_arg =
+      verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
+  int result = ibv_bind_mw(setup.qp, mw, &bind_arg);
+  setup.qp->handle = original_handle;
+  const int kExpected =
+      Introspection().ShouldDeviateForCurrentTest() ? 0 : EINVAL;
+  EXPECT_EQ(result, kExpected);
+}
+
 TEST_F(MwTest, DeregMrWhenBound) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);

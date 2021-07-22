@@ -124,6 +124,21 @@ TEST_F(SrqTest, Create) {
   EXPECT_EQ(0, ibv_destroy_srq(srq));
 }
 
+TEST_F(SrqTest, CreateWithInvalidPd) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ASSERT_NE(nullptr, context);
+  ibv_pd pd = {};
+  pd.context = context;
+  pd.handle = -1;
+  ibv_srq_init_attr attr;
+  attr.srq_context = context;
+  attr.attr.max_sge = verbs_util::kDefaultMaxSge;
+  attr.attr.max_wr = verbs_util::kDefaultMaxWr;
+  attr.attr.srq_limit = 0;
+  ibv_srq* srq = ibv_create_srq(&pd, &attr);
+  ASSERT_EQ(nullptr, srq);
+}
+
 TEST_F(SrqTest, Loopback) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge rsge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
@@ -261,7 +276,6 @@ TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
 }
 
 TEST_F(SrqTest, ExceedsDeviceCap) {
-  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   const ibv_device_attr& device_attr = Introspection().device_attr();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_srq_init_attr init_attr_bad_wr = {

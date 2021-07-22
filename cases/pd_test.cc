@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <thread>  // NOLINT
 #include <vector>
 
 #include "glog/logging.h"
@@ -53,6 +54,72 @@ TEST_F(PdTest, OpenManyPd) {
   for (int i = 0; i < 500; ++i) {
     auto* pd = ibv_.AllocPd(context);
     EXPECT_NE(nullptr, pd);
+  }
+}
+
+TEST_F(PdTest, ThreadedAlloc) {
+  static constexpr int kThreadCount = 5;
+  static constexpr int kPdsPerThread = 50;
+
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+
+  std::array<std::array<ibv_pd*, kPdsPerThread>, kThreadCount> pds;
+  pds = {{{nullptr}}};
+  auto alloc_pds = [this, &context, &pds](int thread_id) {
+    // No PDs can share the same position in the array, so no need for thread
+    // synchronization.
+    for (int i = 0; i < kPdsPerThread; ++i) {
+      pds[thread_id][i] = ibv_.AllocPd(context);
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
+    threads.push_back(std::thread(alloc_pds, thread_id));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  for (const auto& thread_pds : pds) {
+    for (const auto& pd : thread_pds) {
+      EXPECT_NE(nullptr, pd);
+    }
+  }
+}
+
+TEST_F(PdTest, ThreadedAllocAndDealloc) {
+  static constexpr int kThreadCount = 5;
+  static constexpr int kPdsPerThread = 50;
+
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+
+  // Initialize to 1 since we are expecting the values to be 0 after
+  // deallocating PDs.
+  std::array<std::array<int, kPdsPerThread>, kThreadCount> dealloc_results;
+  dealloc_results = {{{1}}};
+  auto alloc_dealloc_pds = [this, &context, &dealloc_results](int thread_id) {
+    for (int i = 0; i < kPdsPerThread; ++i) {
+      ibv_pd* pd = ibv_.AllocPd(context);
+      ASSERT_NE(nullptr, pd);
+      dealloc_results[thread_id][i] = ibv_.DeallocPd(pd);
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
+    threads.push_back(std::thread(alloc_dealloc_pds, thread_id));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  for (const auto& thread_results : dealloc_results) {
+    for (const auto& dealloc_result : thread_results) {
+      EXPECT_EQ(0, dealloc_result);
+    }
   }
 }
 
@@ -530,6 +597,13 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
 }
 
 class PdUdLoopbackTest : public BasicFixture {
+ public:
+  void SetUp() override {
+    if (!Introspection().SupportsUdQp()) {
+      GTEST_SKIP() << "Nic does not support UD QP";
+    }
+  }
+
  protected:
   static constexpr uint32_t kClientMemoryPages = 1;
   static constexpr uint32_t kMaxQpWr = 200;
@@ -614,7 +688,7 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
               ::testing::AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_SUCCESS));
 }
 
-class Type1MwPdTest : public BasicFixture {
+class PdType1MwTest : public BasicFixture {
  public:
   void SetUp() override {
     if (!Introspection().SupportsType1()) {
@@ -690,7 +764,7 @@ class Type1MwPdTest : public BasicFixture {
   }
 };
 
-TEST_F(Type1MwPdTest, ReadMwOtherPd) {
+TEST_F(PdType1MwTest, ReadMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
@@ -701,7 +775,7 @@ TEST_F(Type1MwPdTest, ReadMwOtherPd) {
   EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
-TEST_F(Type1MwPdTest, WriteMwOtherPd) {
+TEST_F(PdType1MwTest, WriteMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
@@ -712,7 +786,7 @@ TEST_F(Type1MwPdTest, WriteMwOtherPd) {
   EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
-TEST_F(Type1MwPdTest, FetchAddMwOtherPd) {
+TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   sge.length = 8;
@@ -725,7 +799,7 @@ TEST_F(Type1MwPdTest, FetchAddMwOtherPd) {
   EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
-TEST_F(Type1MwPdTest, CompSwapMwOtherPd) {
+TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   sge.length = 8;
@@ -738,7 +812,7 @@ TEST_F(Type1MwPdTest, CompSwapMwOtherPd) {
   EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
 }
 
-class SrqPdTest : public BasicFixture {
+class PdSrqTest : public BasicFixture {
  protected:
   static constexpr size_t kBufferMemoryPages = 1;
 
@@ -760,7 +834,7 @@ class SrqPdTest : public BasicFixture {
   }
 };
 
-TEST_F(SrqPdTest, CreateSrq) {
+TEST_F(PdSrqTest, CreateSrq) {
   // Fun fact: SRQ can be of different QP with its associated QP(s).
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_pd* pd1 = ibv_.AllocPd(setup.context);
@@ -774,7 +848,7 @@ TEST_F(SrqPdTest, CreateSrq) {
 }
 
 // When Pd of receive MR matches SRQ but not the receive QP.
-TEST_F(SrqPdTest, SrqRecvMrSrqMatch) {
+TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
   if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
@@ -809,7 +883,7 @@ TEST_F(SrqPdTest, SrqRecvMrSrqMatch) {
 }
 
 // When Pd of receive MR matches the QP but not the SRQ.
-TEST_F(SrqPdTest, SrqRecvMrSrqMismatch) {
+TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
   if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
@@ -847,6 +921,5 @@ TEST_F(SrqPdTest, SrqRecvMrSrqMismatch) {
 }
 
 // TODO(author1): Create Max
-// TODO(author1): Threaded Pd creation/closure
 
 }  // namespace rdma_unit_test

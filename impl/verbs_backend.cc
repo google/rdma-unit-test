@@ -122,4 +122,39 @@ absl::Status VerbsBackend::SetQpRts(ibv_qp* qp) {
   return absl::OkStatus();
 }
 
+absl::Status VerbsBackend::SetQpRts(ibv_qp* qp, ibv_qp_attr optional_attr,
+                                    int mask) {
+  ibv_qp_attr mod_rts = {};
+  mod_rts.qp_state = IBV_QPS_RTS;
+  mod_rts.sq_psn = mask & IBV_QP_SQ_PSN ? optional_attr.sq_psn : 1225;
+  mod_rts.timeout =
+      mask & IBV_QP_TIMEOUT ? optional_attr.timeout : 17;  // ~500 ms
+  mod_rts.retry_cnt = mask & IBV_QP_RETRY_CNT ? optional_attr.timeout : 7;
+  mod_rts.rnr_retry = mask & IBV_QP_RNR_RETRY ? optional_attr.rnr_retry : 5;
+  mod_rts.max_rd_atomic =
+      mask & IBV_QP_MAX_QP_RD_ATOMIC ? optional_attr.max_rd_atomic : 5;
+
+  constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
+                           IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
+                           IBV_QP_MAX_QP_RD_ATOMIC;
+  int result_code = ibv_modify_qp(qp, &mod_rts, kRtsMask);
+  if (result_code != 0) {
+    return absl::InternalError(
+        absl::StrCat("Modify QP (Rts) failed (", result_code, ")."));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status VerbsBackend::SetQpError(ibv_qp* qp) {
+  ibv_qp_attr modify_error = {};
+  modify_error.qp_state = IBV_QPS_ERR;
+  constexpr int kEerorMask = IBV_QP_STATE;
+  int result_code = ibv_modify_qp(qp, &modify_error, kEerorMask);
+  if (result_code != 0) {
+    return absl::InternalError(
+        absl::StrCat("Modify QP (Error) failed (", result_code, ")."));
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace rdma_unit_test

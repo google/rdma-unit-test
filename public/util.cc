@@ -178,6 +178,27 @@ std::string GidToString(const ibv_gid& gid) {
                          gid.raw[12], gid.raw[13], gid.raw[14], gid.raw[15]);
 }
 
+absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
+  ibv_device** devices = nullptr;
+  auto free_list = absl::MakeCleanup([&devices]() {
+    if (devices) {
+      ibv_free_device_list(devices);
+    }
+  });
+  int num_devices = 0;
+  devices = ibv_get_device_list(&num_devices);
+  std::vector<std::string> device_names;
+  if (num_devices <= 0 || !devices) {
+    return device_names;
+  }
+  for (int i = 0; i < num_devices; ++i) {
+    ibv_device* device = devices[i];
+    VLOG(1) << "Found device " << device->name << ".";
+    device_names.push_back(device->name);
+  }
+  return device_names;
+}
+
 absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
     ibv_context* context) {
   std::vector<LocalEndpointAttr> result;
@@ -198,6 +219,8 @@ absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
       return absl::InternalError("Failed to query port attributes.");
     }
     if (port_attr.state != IBV_PORT_ACTIVE) {
+      VLOG(1) << "Port is not active, port: " << port_idx
+              << ", state: " << port_attr.state;
       continue;
     }
     for (int gid_idx = 0; gid_idx < port_attr.gid_tbl_len; ++gid_idx) {
@@ -227,7 +250,6 @@ absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
       result.push_back(match);
     }
   }
-  CHECK(!result.empty()) << "No active ports detected.";  // Crash ok
   return result;
 }
 
@@ -246,6 +268,12 @@ ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr) {
   sge.length = buffer.length();
   sge.lkey = mr->lkey;
   return sge;
+}
+
+ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr) {
+  DCHECK_EQ(reinterpret_cast<uint64_t>(addr) % 8, 0)
+      << "Address is not 8 byte aligned.";
+  return CreateSge(absl::MakeSpan(reinterpret_cast<uint8_t*>(addr), 8), mr);
 }
 
 ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
@@ -555,8 +583,8 @@ absl::StatusOr<ibv_context*> OpenUntrackedDevice(
   ibv_device* device = nullptr;
   bool device_selected = false;
   if (device_name.empty()) {
-    LOG(INFO) << "Select devices[0] (" << device_name << ").";
     device = devices[0];
+    LOG(INFO) << "Select devices[0] (" << device->name << ").";
     device_selected = true;
   }
   for (int i = 0; i < num_devices; ++i) {

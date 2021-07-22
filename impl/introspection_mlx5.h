@@ -40,6 +40,8 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"BufferMwTest", "ExceedFront", ""},
         // MW address not checked at bind.
         {"BufferMwTest", "ExceedRear", ""},
+        // No check for invalid cq.
+        {"CompChannelTest", "RequestNotificationInvalidCq", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
         {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
@@ -57,11 +59,17 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"LoopbackRcQpTest", "CmpAndSwpInvalidSize", ""},
         // Bad recv length larger than region does not cause a failure.
         {"LoopbackRcQpTest", "BadRecvLength", ""},
+        // Supports multiple SGEs for atomics.
+        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
+        // Fails to send completion when qp in error state.
+        {"LoopbackRcQpTest", "ReqestOnFailedQp", ""},
         // Permissions not checked at bind.
         {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
         {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
         // Deregistering a bound window reports success.
         {"MwTest", "DeregMrWhenBound", ""},
+        // Allows bind to invalid qp.
+        {"MwTest", "InvalidQp", ""},
         // Allows binding when MR is missing bind permissions.
         {"MwBindTest", "MissingBind", ""},
         // Allows binding when MR is missing bind permissions.
@@ -70,6 +78,11 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"PdTest", "DeleteUnknownPd", ""},
         // User API misuse causes crash.
         {"PdTest", "DeleteInvalidPd", ""},
+        // Allows qp creation when exceeding max_recv_wr, max_send_sge,
+        // and max_recv_sge.
+        {"QpTest", "ExceedsDeviceCap", ""},
+        // Allows creation over max qp.
+        {"QpTest", "ExceedsMaxQp", ""},
     };
     return deviations;
   }

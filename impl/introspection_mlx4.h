@@ -58,6 +58,8 @@ class IntrospectionMlx4 : public NicIntrospection {
         {"BufferMwTest", "ReadZeroByteOutsideZeroByteMw", ""},
         // Zero byte write is successful.
         {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        // No check for invalid cq.
+        {"CompChannelTest", "RequestNotificationInvalidCq", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
         {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
@@ -67,6 +69,12 @@ class IntrospectionMlx4 : public NicIntrospection {
         {"CompChannelTest", "AcknowledgeTooMany", ""},
         // Does not fail with bad recv length.
         {"LoopbackRcQpTest", "BadRecvLength", ""},
+        // Supports multiple SGEs for atomics.
+        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
+        // Allows bind to invalid qp.
+        {"MwTest", "InvalidQp", ""},
+        // Allows creation over max qp.
+        {"QpTest", "ExceedsMaxQp", ""},
     };
     return deviations;
   }

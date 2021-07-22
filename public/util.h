@@ -129,6 +129,9 @@ ibv_mtu ToVerbsMtu(uint64_t mtu);
 // Convert Gid to a string
 std::string GidToString(const ibv_gid& gid);
 
+// Enumerates the names of all the devices available for the host.
+absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames();
+
 // Enumerate all ports with (one of) their sgid(s).
 absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
     ibv_context* context);
@@ -140,6 +143,9 @@ absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
 ibv_qp_state GetQpState(ibv_qp* qp);
 
 ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr);
+
+// Create an SGE for atomic operation. Addr must be 8-byte aligned.
+ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr);
 ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
                                   int access = IBV_ACCESS_REMOTE_READ |
                                                IBV_ACCESS_REMOTE_WRITE |

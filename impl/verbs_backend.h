@@ -67,6 +67,14 @@ class VerbsBackend {
 
   // Modify the QP to RTS(ready to send) state.
   absl::Status SetQpRts(ibv_qp* qp);
+
+  // Modify the QP to RTS(ready to send) state, also setting a set of optional
+  // attributes: sq_psn, timeout, retry_cnt, rnr_retry, max_rd_atomic.
+  // Any other attributes will be ignored.
+  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr optional_attr, int mask);
+
+  // Modify the Qp to ERROR state.
+  absl::Status SetQpError(ibv_qp* qp);
 };
 
 }  // namespace rdma_unit_test
