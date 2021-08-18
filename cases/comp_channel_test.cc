@@ -19,6 +19,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
 #include "public/status_matchers.h"
 #include "public/util.h"
 #include "public/verbs_helper_suite.h"
@@ -27,7 +28,6 @@ namespace rdma_unit_test {
 
 using ::testing::_;
 using ::testing::AnyOf;
-using ::testing::Conditional;
 using ::testing::Ne;
 using ::testing::NotNull;
 
@@ -200,9 +200,10 @@ TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
-  ASSERT_THAT(
-      ibv_req_notify_cq(cq, kNotifyAny),
-      Conditional(Introspection().ShouldDeviateForCurrentTest(), _, Ne(0)));
+  int result = ibv_req_notify_cq(cq, kNotifyAny);
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
+    ASSERT_THAT(result, Ne(0));
+  }
   ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 

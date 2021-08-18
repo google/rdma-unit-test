@@ -88,6 +88,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//public:introspection",
         "//public:status_matchers",
         "//public:util",
         "//public:verbs_helper_suite",

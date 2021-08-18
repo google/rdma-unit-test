@@ -39,9 +39,7 @@
 
 namespace rdma_unit_test {
 
-using ::testing::_;
 using ::testing::AnyOf;
-using ::testing::Conditional;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
@@ -241,9 +239,10 @@ TEST_F(QpTest, UnknownType) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_qp_init_attr attr = setup.basic_attr;
   attr.qp_type = static_cast<ibv_qp_type>(0xf0);
-  EXPECT_THAT(
-      ibv_.CreateQp(setup.pd, attr),
-      Conditional(Introspection().ShouldDeviateForCurrentTest(), _, IsNull()));
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
+    EXPECT_THAT(qp, IsNull());
+  }
 }
 
 TEST_F(QpTest, CreateUd) {
