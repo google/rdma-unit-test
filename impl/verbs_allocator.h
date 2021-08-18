@@ -26,6 +26,7 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
@@ -41,8 +42,9 @@ namespace rdma_unit_test {
 class VerbsAllocator {
  public:
   VerbsAllocator() = default;
-  VerbsAllocator(const VerbsAllocator&& allocator) = delete;
-  VerbsAllocator& operator=(const VerbsAllocator&& allocator) = delete;
+  // Movable but not copyable.
+  VerbsAllocator(VerbsAllocator&& allocator) = default;
+  VerbsAllocator& operator=(VerbsAllocator&& allocator) = default;
   VerbsAllocator(const VerbsAllocator& allocator) = delete;
   VerbsAllocator& operator=(const VerbsAllocator& allocator) = delete;
   virtual ~VerbsAllocator() = default;
@@ -66,9 +68,9 @@ class VerbsAllocator {
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__);
   // Opens an ibv device. Uses the device specified by the --device_name flag or
   // falls back to the first device with active port(s).
-  absl::StatusOr<ibv_context*> OpenDeviceWithActivePorts(
-      bool no_ipv6_for_gid = false);
-  ibv_ah* CreateAh(ibv_pd* pd);
+  absl::StatusOr<ibv_context*> OpenDevice(bool no_ipv6_for_gid = false);
+  ibv_ah* CreateAh(ibv_pd* pd, ibv_gid remote_gid);
+  int DestroyAh(ibv_ah* ah);
   ibv_pd* AllocPd(ibv_context* context);
   int DeallocPd(ibv_pd* pd);
   ibv_mr* RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
@@ -94,40 +96,40 @@ class VerbsAllocator {
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   // Returns the first available GID from the device context.
-  verbs_util::LocalEndpointAttr GetLocalEndpointAttr(
-      ibv_context* context) const;
+  verbs_util::PortGid GetLocalPortGid(ibv_context* context) const;
 
  private:
   // This only creates Ah/Qp/Mr without setting it up for auto-cleanup.
   virtual ibv_mr* RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
                                 int access) = 0;
-  virtual ibv_ah* CreateAhInternal(ibv_pd* pd) = 0;
+  virtual ibv_ah* CreateAhInternal(ibv_pd* pd, ibv_gid remote_gid) = 0;
   virtual ibv_qp* CreateQpInternal(ibv_pd* pd,
                                    ibv_qp_init_attr& basic_attr) = 0;
 
   std::vector<std::unique_ptr<RdmaMemBlock>> memblocks_
       ABSL_GUARDED_BY(mtx_memblocks_);
-  std::vector<std::unique_ptr<ibv_context, decltype(&ContextDeleter)>> contexts_
-      ABSL_GUARDED_BY(mtx_contexts_);
-  std::vector<std::unique_ptr<ibv_pd, decltype(&PdDeleter)>> pds_
+  absl::flat_hash_set<std::unique_ptr<ibv_context, decltype(&ContextDeleter)>>
+      contexts_ ABSL_GUARDED_BY(mtx_contexts_);
+  absl::flat_hash_set<std::unique_ptr<ibv_pd, decltype(&PdDeleter)>> pds_
       ABSL_GUARDED_BY(mtx_pds_);
-  std::vector<std::unique_ptr<ibv_ah, decltype(&AhDeleter)>> ahs_
+  absl::flat_hash_set<std::unique_ptr<ibv_ah, decltype(&AhDeleter)>> ahs_
       ABSL_GUARDED_BY(mtx_ahs_);
-  std::vector<std::unique_ptr<ibv_comp_channel, decltype(&ChannelDeleter)>>
+  absl::flat_hash_set<
+      std::unique_ptr<ibv_comp_channel, decltype(&ChannelDeleter)>>
       channels_ ABSL_GUARDED_BY(mtx_channels_);
-  std::vector<std::unique_ptr<ibv_cq, decltype(&CqDeleter)>> cqs_
+  absl::flat_hash_set<std::unique_ptr<ibv_cq, decltype(&CqDeleter)>> cqs_
       ABSL_GUARDED_BY(mtx_cqs_);
-  std::vector<std::unique_ptr<ibv_srq, decltype(&SrqDeleter)>> srqs_
+  absl::flat_hash_set<std::unique_ptr<ibv_srq, decltype(&SrqDeleter)>> srqs_
       ABSL_GUARDED_BY(mtx_srqs_);
-  std::vector<std::unique_ptr<ibv_qp, decltype(&QpDeleter)>> qps_
+  absl::flat_hash_set<std::unique_ptr<ibv_qp, decltype(&QpDeleter)>> qps_
       ABSL_GUARDED_BY(mtx_qps_);
-  std::vector<std::unique_ptr<ibv_mr, decltype(&MrDeleter)>> mrs_
+  absl::flat_hash_set<std::unique_ptr<ibv_mr, decltype(&MrDeleter)>> mrs_
       ABSL_GUARDED_BY(mtx_mrs_);
-  std::vector<std::unique_ptr<ibv_mw, decltype(&MwDeleter)>> mws_
+  absl::flat_hash_set<std::unique_ptr<ibv_mw, decltype(&MwDeleter)>> mws_
       ABSL_GUARDED_BY(mtx_mws_);
   // Tracks address info for a given context.
-  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::LocalEndpointAttr>>
-      endpoint_attrs_ ABSL_GUARDED_BY(mtx_endpoints_);
+  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::PortGid>> port_gids_
+      ABSL_GUARDED_BY(mtx_port_gids_);
 
   // locks for containers above.
   absl::Mutex mtx_memblocks_;
@@ -140,7 +142,7 @@ class VerbsAllocator {
   absl::Mutex mtx_qps_;
   absl::Mutex mtx_mrs_;
   absl::Mutex mtx_mws_;
-  mutable absl::Mutex mtx_endpoints_;
+  mutable absl::Mutex mtx_port_gids_;
 };
 
 }  // namespace rdma_unit_test

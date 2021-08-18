@@ -36,9 +36,13 @@
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
+#include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
+
+using ::testing::IsNull;
+using ::testing::NotNull;
 
 class CqTest : public BasicFixture {
  protected:
@@ -66,67 +70,61 @@ class CqTest : public BasicFixture {
 TEST_F(CqTest, Basic) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
-  ASSERT_NE(nullptr, cq);
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
+  ASSERT_THAT(cq, NotNull());
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CqTest, NegativeCqe) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, -1, nullptr, nullptr, 0);
-  ASSERT_EQ(nullptr, cq);
+  EXPECT_THAT(ibv_create_cq(setup.context, -1, nullptr, nullptr, 0), IsNull());
 }
 
 TEST_F(CqTest, ZeroCqe) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, 0, nullptr, nullptr, 0);
-  ASSERT_EQ(nullptr, cq);
+  EXPECT_THAT(ibv_create_cq(setup.context, 0, nullptr, nullptr, 0), IsNull());
 }
 
 TEST_F(CqTest, MaxCqe) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, std::numeric_limits<int>::max(),
-                             nullptr, nullptr, 0);
-  ASSERT_EQ(nullptr, cq);
+  EXPECT_THAT(ibv_create_cq(setup.context, std::numeric_limits<int>::max(),
+                            nullptr, nullptr, 0),
+              IsNull());
 }
 
 TEST_F(CqTest, WithChannel) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, setup.channel, 0);
-  ASSERT_NE(nullptr, cq);
-
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
+  ASSERT_THAT(cq, NotNull());
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CqTest, ShareChannel) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq1 = ibv_create_cq(setup.context, 10, nullptr, setup.channel, 0);
-  ASSERT_NE(nullptr, cq1);
+  ASSERT_THAT(cq1, NotNull());
   ibv_cq* cq2 = ibv_create_cq(setup.context, 10, nullptr, setup.channel, 0);
-  ASSERT_NE(nullptr, cq2);
-
-  ASSERT_EQ(0, ibv_destroy_cq(cq1));
-  ASSERT_EQ(0, ibv_destroy_cq(cq2));
+  ASSERT_THAT(cq2, NotNull());
+  ASSERT_EQ(ibv_destroy_cq(cq1), 0);
+  ASSERT_EQ(ibv_destroy_cq(cq2), 0);
 }
 
 TEST_F(CqTest, SmallCompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, -1);
-  ASSERT_EQ(nullptr, cq);
+  ASSERT_THAT(ibv_create_cq(setup.context, 10, nullptr, nullptr, -1), IsNull());
 }
 
 TEST_F(CqTest, CompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
-  ASSERT_NE(nullptr, cq);
-
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
+  ASSERT_THAT(cq, NotNull());
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CqTest, LargeCompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr,
-                             setup.context->num_comp_vectors);
-  ASSERT_EQ(nullptr, cq);
+  ASSERT_THAT(ibv_create_cq(setup.context, 10, nullptr, nullptr,
+                            setup.context->num_comp_vectors),
+              IsNull());
 }
 
 TEST_F(CqTest, ThreadedCreate) {
@@ -156,7 +154,7 @@ TEST_F(CqTest, ThreadedCreate) {
 
   for (const auto& thread_cqs : cqs) {
     for (const auto& cq : thread_cqs) {
-      EXPECT_NE(nullptr, cq);
+      EXPECT_THAT(cq, NotNull());
     }
   }
 }
@@ -174,7 +172,7 @@ TEST_F(CqTest, ThreadedCreateAndDestroy) {
   auto create_destroy_cqs = [this, &setup, &destroy_results](int thread_id) {
     for (int i = 0; i < kCqsPerThread; ++i) {
       ibv_cq* cq = ibv_.CreateCq(setup.context, 10);
-      ASSERT_NE(nullptr, cq);
+      ASSERT_THAT(cq, NotNull());
       destroy_results[thread_id][i] = ibv_.DestroyCq(cq);
     }
   };
@@ -190,7 +188,7 @@ TEST_F(CqTest, ThreadedCreateAndDestroy) {
 
   for (const auto& thread_results : destroy_results) {
     for (const auto& destroy_result : thread_results) {
-      EXPECT_EQ(0, destroy_result);
+      EXPECT_EQ(destroy_result, 0);
     }
   }
 }
@@ -223,6 +221,7 @@ class CqAdvancedTest : public BasicFixture {
     // of dst_memblock which corresponds to the QP.
     RdmaMemBlock dst_memblock;
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_pd* pd;
     ibv_mr* src_mr;
     ibv_mr* dst_mr;
@@ -248,8 +247,7 @@ class CqAdvancedTest : public BasicFixture {
       CHECK(qp.qp) << "failed to create qp - " << errno;
       qp.next_send_wr_id = qp_id << kQueueIdShift;
       qp.next_recv_wr_id = qp_id << kQueueIdShift;
-      ibv_.SetUpSelfConnectedRcQp(qp.qp,
-                                  ibv_.GetLocalEndpointAttr(setup.context));
+      ibv_.SetUpSelfConnectedRcQp(qp.qp, setup.port_gid);
       setup.qps.push_back(qp);
     }
     return absl::OkStatus();
@@ -286,7 +284,7 @@ class CqAdvancedTest : public BasicFixture {
         verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
     wqe.wr_id = qp->next_recv_wr_id;
     ibv_recv_wr* bad_wr;
-    EXPECT_EQ(0, ibv_post_recv(qp->qp, &wqe, &bad_wr));
+    EXPECT_EQ(ibv_post_recv(qp->qp, &wqe, &bad_wr), 0);
     qp->next_recv_wr_id = NextId(qp->next_recv_wr_id);
   }
 
@@ -319,7 +317,7 @@ class CqAdvancedTest : public BasicFixture {
     }
     wqe.wr_id = qp->next_send_wr_id;
     ibv_send_wr* bad_wr;
-    EXPECT_EQ(0, ibv_post_send(qp->qp, &wqe, &bad_wr));
+    EXPECT_EQ(ibv_post_send(qp->qp, &wqe, &bad_wr), 0);
     qp->next_send_wr_id = NextId(qp->next_send_wr_id);
   }
 
@@ -330,7 +328,7 @@ class CqAdvancedTest : public BasicFixture {
     std::vector<uint64_t> result;
     for (int i = 0; i < returned; ++i) {
       ibv_wc& completion = completions[i];
-      EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
       result.push_back(completion.wr_id);
     }
     return result;
@@ -401,6 +399,7 @@ class CqAdvancedTest : public BasicFixture {
         ibv_.AllocBufferByBytes(kMaxOpsPerQp * sizeof(uint16_t));
     setup.dst_memblock = ibv_.AllocBufferByBytes(256 * sizeof(uint16_t));
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");

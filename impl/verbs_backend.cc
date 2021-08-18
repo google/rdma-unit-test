@@ -26,34 +26,33 @@
 namespace rdma_unit_test {
 
 absl::Status VerbsBackend::SetUpRcQp(ibv_qp* qp,
-                                     const verbs_util::LocalEndpointAttr& local,
+                                     const verbs_util::PortGid& local,
                                      ibv_gid remote_gid, uint32_t remote_qpn) {
-  RETURN_IF_ERROR(SetQpInit(qp, local.port()));
+  RETURN_IF_ERROR(SetQpInit(qp, local.port));
   RETURN_IF_ERROR(SetQpRtr(qp, local, remote_gid, remote_qpn));
   return SetQpRts(qp);
 }
 
-void VerbsBackend::SetUpSelfConnectedRcQp(
-    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local) {
-  absl::Status result = SetUpRcQp(qp, local, local.gid(), qp->qp_num);
+void VerbsBackend::SetUpSelfConnectedRcQp(ibv_qp* qp,
+                                          const verbs_util::PortGid& local) {
+  absl::Status result = SetUpRcQp(qp, local, local.gid, qp->qp_num);
   CHECK(result.ok());  // Crash ok
 }
 
-void VerbsBackend::SetUpLoopbackRcQps(
-    ibv_qp* qp1, ibv_qp* qp2, const verbs_util::LocalEndpointAttr& local) {
-  absl::Status result = SetUpRcQp(qp1, local, local.gid(), qp2->qp_num);
+void VerbsBackend::SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
+                                      const verbs_util::PortGid& local) {
+  absl::Status result = SetUpRcQp(qp1, local, local.gid, qp2->qp_num);
   CHECK(result.ok());  // Crash ok
-  result = SetUpRcQp(qp2, local, local.gid(), qp1->qp_num);
+  result = SetUpRcQp(qp2, local, local.gid, qp1->qp_num);
   CHECK(result.ok());  // Crash ok
 }
 
-absl::Status VerbsBackend::SetUpUdQp(ibv_qp* qp,
-                                     verbs_util::LocalEndpointAttr local,
+absl::Status VerbsBackend::SetUpUdQp(ibv_qp* qp, verbs_util::PortGid local,
                                      uint32_t qkey) {
   ibv_qp_attr mod_init = {};
   mod_init.qp_state = IBV_QPS_INIT;
   mod_init.pkey_index = 0;
-  mod_init.port_num = local.port();
+  mod_init.port_num = local.port;
   mod_init.qkey = qkey;
   constexpr int kInitMask =
       IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
@@ -107,7 +106,7 @@ absl::Status VerbsBackend::SetQpRts(ibv_qp* qp) {
   mod_rts.sq_psn =
       1225;              // TODO(author1): Eventually randomize for reality.
   mod_rts.timeout = 17;  // ~500 ms
-  mod_rts.retry_cnt = 7;
+  mod_rts.retry_cnt = 5;
   mod_rts.rnr_retry = 5;
   mod_rts.max_rd_atomic = 5;
 
@@ -129,7 +128,7 @@ absl::Status VerbsBackend::SetQpRts(ibv_qp* qp, ibv_qp_attr optional_attr,
   mod_rts.sq_psn = mask & IBV_QP_SQ_PSN ? optional_attr.sq_psn : 1225;
   mod_rts.timeout =
       mask & IBV_QP_TIMEOUT ? optional_attr.timeout : 17;  // ~500 ms
-  mod_rts.retry_cnt = mask & IBV_QP_RETRY_CNT ? optional_attr.timeout : 7;
+  mod_rts.retry_cnt = mask & IBV_QP_RETRY_CNT ? optional_attr.retry_cnt : 5;
   mod_rts.rnr_retry = mask & IBV_QP_RNR_RETRY ? optional_attr.rnr_retry : 5;
   mod_rts.max_rd_atomic =
       mask & IBV_QP_MAX_QP_RD_ATOMIC ? optional_attr.max_rd_atomic : 5;

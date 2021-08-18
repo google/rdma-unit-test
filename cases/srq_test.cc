@@ -35,6 +35,11 @@
 
 namespace rdma_unit_test {
 
+using ::testing::AnyOf;
+using ::testing::Each;
+using ::testing::IsNull;
+using ::testing::NotNull;
+
 class SrqTest : public BasicFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
@@ -104,29 +109,29 @@ class SrqTest : public BasicFixture {
       return absl::InternalError("Failed to create recv qp.");
     }
     ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp,
-                            ibv_.GetLocalEndpointAttr(setup.context));
+                            ibv_.GetLocalPortGid(setup.context));
     return setup;
   }
 };
 
 TEST_F(SrqTest, Create) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ASSERT_NE(nullptr, context);
+  ASSERT_THAT(context, NotNull());
   ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_NE(nullptr, pd);
+  ASSERT_THAT(pd, NotNull());
   ibv_srq_init_attr attr;
   attr.srq_context = context;
   attr.attr.max_sge = verbs_util::kDefaultMaxSge;
   attr.attr.max_wr = verbs_util::kDefaultMaxWr;
   attr.attr.srq_limit = 0;
   ibv_srq* srq = ibv_create_srq(pd, &attr);
-  ASSERT_NE(nullptr, srq);
-  EXPECT_EQ(0, ibv_destroy_srq(srq));
+  ASSERT_THAT(srq, NotNull());
+  EXPECT_EQ(ibv_destroy_srq(srq), 0);
 }
 
 TEST_F(SrqTest, CreateWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ASSERT_NE(nullptr, context);
+  ASSERT_THAT(context, NotNull());
   ibv_pd pd = {};
   pd.context = context;
   pd.handle = -1;
@@ -135,8 +140,7 @@ TEST_F(SrqTest, CreateWithInvalidPd) {
   attr.attr.max_sge = verbs_util::kDefaultMaxSge;
   attr.attr.max_wr = verbs_util::kDefaultMaxWr;
   attr.attr.srq_limit = 0;
-  ibv_srq* srq = ibv_create_srq(&pd, &attr);
-  ASSERT_EQ(nullptr, srq);
+  ASSERT_THAT(ibv_create_srq(&pd, &attr), IsNull());
 }
 
 TEST_F(SrqTest, Loopback) {
@@ -151,13 +155,13 @@ TEST_F(SrqTest, Loopback) {
   verbs_util::PostSend(setup.send_qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.send_cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion,
                        verbs_util::WaitForCompletion(setup.recv_cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(setup.recv_buffer.span(), testing::Each(kSendContent));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
 }
 
 TEST_F(SrqTest, MultiThreadedSrqLoopback) {
@@ -169,7 +173,6 @@ TEST_F(SrqTest, MultiThreadedSrqLoopback) {
   static_assert(kTotalWr <= kBufferMemoryPages * verbs_util::kPageSize,
                 "Buffer too small for one byte send. Reduce total WRs or "
                 "increase buffer size.");
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kRequestMaxWr));
 
   // Concurrently post buffers into the SRQ using multiple threads
@@ -219,8 +222,7 @@ TEST_F(SrqTest, MultiThreadedSrqLoopback) {
   for (int i = 0; i < kTotalWr; ++i) {
     EXPECT_TRUE(succeeded[i]) << "WR # " << i << " not succeeded.";
   }
-  EXPECT_THAT(setup.recv_buffer.subspan(0, kTotalWr),
-              ::testing::Each(kSendContent));
+  EXPECT_THAT(setup.recv_buffer.subspan(0, kTotalWr), Each(kSendContent));
 }
 
 TEST_F(SrqTest, PostRecvToSrqQp) {
@@ -228,8 +230,8 @@ TEST_F(SrqTest, PostRecvToSrqQp) {
   ibv_sge sge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
-  int result = ibv_post_recv(setup.recv_qp, &recv, &bad_wr);
-  EXPECT_THAT(result, testing::AnyOf(EINVAL, ENOMEM));
+  EXPECT_THAT(ibv_post_recv(setup.recv_qp, &recv, &bad_wr),
+              AnyOf(EINVAL, ENOMEM));
 }
 
 TEST_F(SrqTest, OverflowSrq) {
@@ -241,7 +243,7 @@ TEST_F(SrqTest, OverflowSrq) {
   init_attr.attr.max_wr = kProposedMaxWr;
   init_attr.attr.srq_limit = 0;  // Not used by infiniband.
   ibv_srq* srq = ibv_create_srq(setup.pd, &init_attr);
-  ASSERT_NE(nullptr, srq);
+  ASSERT_THAT(srq, NotNull());
   uint32_t queue_size = init_attr.attr.max_wr;
   ASSERT_GE(queue_size, kProposedMaxWr);
 
@@ -256,9 +258,9 @@ TEST_F(SrqTest, OverflowSrq) {
   ibv_recv_wr* bad_wr = nullptr;
   // mlx4 uses -1, mlx5 uses ENOMEM
   EXPECT_THAT(ibv_post_srq_recv(srq, recv_wrs.data(), &bad_wr),
-              testing::AnyOf(-1, ENOMEM));
-  EXPECT_EQ(&recv_wrs[queue_size], bad_wr);
-  EXPECT_EQ(0, ibv_destroy_srq(srq));
+              AnyOf(-1, ENOMEM));
+  EXPECT_EQ(bad_wr, &recv_wrs[queue_size]);
+  EXPECT_EQ(ibv_destroy_srq(srq), 0);
 }
 
 TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
@@ -269,10 +271,10 @@ TEST_F(SrqTest, ExceedsMaxWrInfinitChain) {
   recv.next = &recv;
 
   ibv_recv_wr* bad_wr = nullptr;
-  int result = ibv_post_srq_recv(setup.srq, &recv, &bad_wr);
-  EXPECT_EQ(bad_wr, &recv);
   // mlx4 uses -1, mlx5 uses ENOMEM
-  EXPECT_THAT(result, testing::AnyOf(-1, ENOMEM, -ENOMEM));
+  EXPECT_THAT(ibv_post_srq_recv(setup.srq, &recv, &bad_wr),
+              AnyOf(-1, ENOMEM, -ENOMEM));
+  EXPECT_EQ(bad_wr, &recv);
 }
 
 TEST_F(SrqTest, ExceedsDeviceCap) {
@@ -298,7 +300,7 @@ TEST_F(SrqTest, ExceedsMaxSge) {
   init_attr.attr.max_wr = verbs_util::kDefaultMaxWr;
   init_attr.attr.srq_limit = 0;  // Not used by infiniband.
   ibv_srq* srq = ibv_.CreateSrq(setup.pd, init_attr);
-  ASSERT_NE(nullptr, srq);
+  ASSERT_THAT(srq, NotNull());
   uint32_t sge_cap = init_attr.attr.max_sge;
   ASSERT_GE(sge_cap, kProposedMaxSge);
 
@@ -316,8 +318,8 @@ TEST_F(SrqTest, ExceedsMaxSge) {
   ibv_recv_wr* bad_wr = nullptr;
   // mlx4 uses -1, mlx5 uses EINVAL
   EXPECT_THAT(ibv_post_srq_recv(srq, &recv_invalid, &bad_wr),
-              testing::AnyOf(-1, EINVAL, -EINVAL));
-  EXPECT_EQ(&recv_invalid, bad_wr);
+              AnyOf(-1, EINVAL, -EINVAL));
+  EXPECT_EQ(bad_wr, &recv_invalid);
 }
 
 TEST_F(SrqTest, RnR) {
@@ -330,8 +332,8 @@ TEST_F(SrqTest, RnR) {
       verbs_util::WaitForCompletion(
           setup.send_cq, verbs_util::kDefaultErrorCompletionTimeout));
   EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_RNR_RETRY_EXC_ERR, IBV_WC_RETRY_EXC_ERR));
-  EXPECT_THAT(setup.recv_buffer.span(), ::testing::Each(kRecvContent));
+              AnyOf(IBV_WC_RNR_RETRY_EXC_ERR, IBV_WC_RETRY_EXC_ERR));
+  EXPECT_THAT(setup.recv_buffer.span(), Each(kRecvContent));
 }
 
 }  // namespace rdma_unit_test

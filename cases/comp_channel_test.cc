@@ -25,6 +25,12 @@
 
 namespace rdma_unit_test {
 
+using ::testing::_;
+using ::testing::AnyOf;
+using ::testing::Conditional;
+using ::testing::Ne;
+using ::testing::NotNull;
+
 class CompChannelTest : public BasicFixture {
  protected:
   static constexpr int kNotifyAny = 0;
@@ -40,6 +46,7 @@ class CompChannelTest : public BasicFixture {
       ibv_qp* qp;
     };
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_pd* pd;
     RdmaMemBlock buffer;
     ibv_mr* mr;
@@ -55,6 +62,7 @@ class CompChannelTest : public BasicFixture {
       return context_or.status();
     }
     ASSIGN_OR_RETURN(setup.context, context_or);
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -91,8 +99,7 @@ class CompChannelTest : public BasicFixture {
     if (!setup.remote.qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp,
-                            ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp, setup.port_gid);
     return setup;
   }
 
@@ -109,8 +116,7 @@ class CompChannelTest : public BasicFixture {
     ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
         /*wr_id=*/1, &sg, /*num_sge=*/1, target, setup.mr->rkey, 0);
     ibv_send_wr* bad_wr = nullptr;
-    int result = ibv_post_send(qp, &fetch_add, &bad_wr);
-    ASSERT_EQ(result, 0);
+    ASSERT_EQ(ibv_post_send(qp, &fetch_add, &bad_wr), 0);
   }
 
   void DoWrite(BasicSetup& setup, ibv_qp* qp) {
@@ -118,8 +124,7 @@ class CompChannelTest : public BasicFixture {
         verbs_util::CreateWriteWr(/*wr_id=*/1, &setup.sge, /*num_sge=*/1,
                                   setup.buffer.data(), setup.mr->rkey);
     ibv_send_wr* bad_wr = nullptr;
-    int result = ibv_post_send(qp, &write, &bad_wr);
-    ASSERT_EQ(result, 0);
+    ASSERT_EQ(ibv_post_send(qp, &write, &bad_wr), 0);
   }
 
   void DoSend(BasicSetup& setup, ibv_qp* qp, bool solicited) {
@@ -139,22 +144,21 @@ class CompChannelTest : public BasicFixture {
   static void CheckEvent(ibv_comp_channel* channel, ibv_cq* expected_cq) {
     ibv_cq* cq;
     void* cq_context;
-    int result = ibv_get_cq_event(channel, &cq, &cq_context);
-    ASSERT_EQ(0, result);
+    ASSERT_EQ(ibv_get_cq_event(channel, &cq, &cq_context), 0);
     ASSERT_EQ(cq, expected_cq);
     ASSERT_EQ(cq->context, expected_cq->context);
   }
 
   static void CheckSend(ibv_cq* cq) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(cq));
-    ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
-    ASSERT_EQ(IBV_WC_SEND, completion.opcode);
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+    ASSERT_EQ(completion.opcode, IBV_WC_SEND);
   }
 
   static void CheckRecv(ibv_cq* cq) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(cq));
-    ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
-    ASSERT_EQ(IBV_WC_RECV, completion.opcode);
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+    ASSERT_EQ(completion.opcode, IBV_WC_RECV);
   }
 
   static bool IsReady(ibv_comp_channel* channel) {
@@ -175,32 +179,31 @@ class CompChannelTest : public BasicFixture {
 TEST_F(CompChannelTest, CreateDestroy) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
-  ASSERT_NE(nullptr, channel);
-  ASSERT_EQ(0, ibv_destroy_comp_channel(channel));
+  ASSERT_THAT(channel, NotNull());
+  ASSERT_EQ(ibv_destroy_comp_channel(channel), 0);
 }
 
 TEST_F(CompChannelTest, DestroyChannelWithCqRef) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
-  ASSERT_NE(nullptr, channel);
+  ASSERT_THAT(channel, NotNull());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, channel, 0);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   // Expected failure due to outstanding ref from CQ.
-  ASSERT_EQ(EBUSY, ibv_destroy_comp_channel(channel));
+  ASSERT_EQ(ibv_destroy_comp_channel(channel), EBUSY);
 
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
-  ASSERT_EQ(0, ibv_destroy_comp_channel(channel));
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
+  ASSERT_EQ(ibv_destroy_comp_channel(channel), 0);
 }
 
 TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
-  ASSERT_NE(nullptr, cq);
-  int result = ibv_req_notify_cq(cq, kNotifyAny);
-  if (!Introspection().ShouldDeviateForCurrentTest()) {
-    ASSERT_NE(result, 0);
-  }
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
+  ASSERT_THAT(cq, NotNull());
+  ASSERT_THAT(
+      ibv_req_notify_cq(cq, kNotifyAny),
+      Conditional(Introspection().ShouldDeviateForCurrentTest(), _, Ne(0)));
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CompChannelTest, RequestNotificationInvalidCq) {
@@ -209,24 +212,22 @@ TEST_F(CompChannelTest, RequestNotificationInvalidCq) {
   }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq original = *cq;
   cq->handle = ~cq->handle;
-  int result = ibv_req_notify_cq(cq, kNotifyAny);
-  EXPECT_THAT(result, testing::AnyOf(ENOENT, EFAULT));
+  ASSERT_THAT(ibv_req_notify_cq(cq, kNotifyAny), AnyOf(ENOENT, EFAULT));
   *cq = original;
-  ASSERT_EQ(0, ibv_destroy_cq(cq));
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CompChannelTest, Atomic) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoAtomic(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
@@ -237,15 +238,13 @@ TEST_F(CompChannelTest, Bind) {
     GTEST_SKIP() << "Nic does not support Type2 MW";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
-  ASSERT_NE(mw, nullptr);
-  ASSERT_OK_AND_ASSIGN(
-      ibv_wc_status status,
+  ASSERT_THAT(mw, NotNull());
+  ASSERT_THAT(
       verbs_util::BindType2MwSync(setup.local.qp, mw, setup.buffer.span(),
-                                  kRKey, setup.mr, IBV_ACCESS_REMOTE_READ));
-  ASSERT_EQ(IBV_WC_SUCCESS, status);
+                                  kRKey, setup.mr, IBV_ACCESS_REMOTE_READ),
+      IsOkAndHolds(IBV_WC_SUCCESS));
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
@@ -253,13 +252,12 @@ TEST_F(CompChannelTest, Bind) {
 
 TEST_F(CompChannelTest, Write) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
@@ -267,8 +265,7 @@ TEST_F(CompChannelTest, Write) {
 
 TEST_F(CompChannelTest, RecvSolicitedNofityAny) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/true);
@@ -282,8 +279,7 @@ TEST_F(CompChannelTest, RecvSolicitedNofityAny) {
 
 TEST_F(CompChannelTest, RecvSolicitedNofitySolicited) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifySolicited);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifySolicited), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/true);
@@ -297,8 +293,7 @@ TEST_F(CompChannelTest, RecvSolicitedNofitySolicited) {
 
 TEST_F(CompChannelTest, RecvUnsolicitedNofityAny) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/false);
@@ -312,8 +307,7 @@ TEST_F(CompChannelTest, RecvUnsolicitedNofityAny) {
 
 TEST_F(CompChannelTest, RecvUnsolicitedNofitySolicited) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifySolicited);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifySolicited), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/false);
@@ -329,7 +323,7 @@ TEST_F(CompChannelTest, AcknowledgeWithoutOutstanding) {
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_comp_channel* channel = ibv_.CreateChannel(setup.context);
-  ASSERT_NE(nullptr, channel);
+  ASSERT_THAT(channel, NotNull());
   ibv_cq* cq = ibv_.CreateCq(setup.context, kCqMaxWr, channel);
   ibv_ack_cq_events(cq, 1);
 }
@@ -339,13 +333,12 @@ TEST_F(CompChannelTest, AcknowledgeTooMany) {
     GTEST_SKIP() << "transport hangs when acknowledging too many.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/10);
@@ -353,35 +346,32 @@ TEST_F(CompChannelTest, AcknowledgeTooMany) {
 
 TEST_F(CompChannelTest, DeleteWithUnacked) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
-  ASSERT_NE(0, ibv_destroy_cq(setup.local.cq));
+  ASSERT_NE(ibv_destroy_cq(setup.local.cq), 0);
   ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
 }
 
 TEST_F(CompChannelTest, SameQueueMultipleOutstanding) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.local.channel));
   DoWrite(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   // Queue up a second event before processing the first.
-  result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
   DoWrite(setup, setup.local.qp);
   ASSERT_OK_AND_ASSIGN(completion,
                        verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_TRUE(IsReady(setup.local.channel));
   // Hardware collapses events into 1.
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
@@ -406,26 +396,23 @@ TEST_F(CompChannelTest, MuxOntoSingleChannel) {
     new_pair.cq2 = ibv_.CreateCq(setup.context, kCqMaxWr, channel);
     new_pair.qp1 = ibv_.CreateQp(setup.pd, new_pair.cq1);
     new_pair.qp2 = ibv_.CreateQp(setup.pd, new_pair.cq2);
-    ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2,
-                            ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2, setup.port_gid);
     qps.push_back(new_pair);
   }
   for (auto& pair : qps) {
-    int result = ibv_req_notify_cq(pair.cq1, kNotifyAny);
-    ASSERT_EQ(result, 0);
+    ASSERT_EQ(ibv_req_notify_cq(pair.cq1, kNotifyAny), 0);
     DoWrite(setup, pair.qp1);
   }
   for (auto& pair : qps) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(pair.cq1));
-    ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   }
   ASSERT_TRUE(IsReady(channel));
   for (int i = 0; i < kNumberOfPairs; ++i) {
     ibv_cq* cq;
     void* cq_context;
-    int result = ibv_get_cq_event(channel, &cq, &cq_context);
-    ASSERT_EQ(0, result);
+    ASSERT_EQ(ibv_get_cq_event(channel, &cq, &cq_context), 0);
     bool found = false;
     for (const auto& pair : qps) {
       if (pair.cq1 == cq) {
@@ -444,12 +431,11 @@ TEST_F(CompChannelTest, ManyOutstanding) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ASSERT_FALSE(IsReady(setup.local.channel));
   for (int i = 0; i < kTargetOutstanding; ++i) {
-    int result = ibv_req_notify_cq(setup.local.cq, kNotifyAny);
-    ASSERT_EQ(result, 0);
+    ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
     DoWrite(setup, setup.local.qp);
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(setup.local.cq));
-    ASSERT_EQ(IBV_WC_SUCCESS, completion.status);
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   }
   ASSERT_TRUE(IsReady(setup.local.channel));
   // Hardware collapses events into 1.
@@ -459,11 +445,9 @@ TEST_F(CompChannelTest, ManyOutstanding) {
 
 TEST_F(CompChannelTest, DowngradeRequest) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifyAny);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifyAny), 0);
   // Change to only notifying on solicited. Which is ignored.
-  result = ibv_req_notify_cq(setup.remote.cq, kNotifySolicited);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifySolicited), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/false);
@@ -475,10 +459,9 @@ TEST_F(CompChannelTest, DowngradeRequest) {
 
 TEST_F(CompChannelTest, UpgradeRequest) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  int result = ibv_req_notify_cq(setup.remote.cq, kNotifySolicited);
-  ASSERT_EQ(result, 0);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifySolicited), 0);
   // Change to notifying on Any.
-  result = ibv_req_notify_cq(setup.remote.cq, kNotifyAny);
+  ASSERT_EQ(ibv_req_notify_cq(setup.remote.cq, kNotifyAny), 0);
   ASSERT_FALSE(IsReady(setup.remote.channel));
   DoRecv(setup, setup.remote.qp);
   DoSend(setup, setup.local.qp, /*solicited=*/false);

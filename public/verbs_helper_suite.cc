@@ -19,6 +19,7 @@
 #include "glog/logging.h"
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
+#include "infiniband/verbs.h"
 #include "impl/roce_allocator.h"
 #include "impl/roce_backend.h"
 #include "impl/verbs_allocator.h"
@@ -28,36 +29,32 @@
 namespace rdma_unit_test {
 
 VerbsHelperSuite::VerbsHelperSuite() {
-  backend_ = std::make_shared<RoceBackend>();
+  backend_ = std::make_unique<RoceBackend>();
   CHECK(backend_);  // Crash ok
   allocator_ = std::make_unique<RoceAllocator>();
   CHECK(allocator_);  // Crash ok
 }
 
-void VerbsHelperSuite::SetUpHelperGlobal() {
-}
-
-void VerbsHelperSuite::TearDownHelperGlobal() {
-}
-
-absl::Status VerbsHelperSuite::SetUpRcQp(
-    ibv_qp* local_qp, const verbs_util::LocalEndpointAttr& local,
-    ibv_gid remote_gid, uint32_t remote_qpn) {
+absl::Status VerbsHelperSuite::SetUpRcQp(ibv_qp* local_qp,
+                                         const verbs_util::PortGid& local,
+                                         ibv_gid remote_gid,
+                                         uint32_t remote_qpn) {
   return backend_->SetUpRcQp(local_qp, local, remote_gid, remote_qpn);
 }
 
 void VerbsHelperSuite::SetUpSelfConnectedRcQp(
-    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local) {
+    ibv_qp* qp, const verbs_util::PortGid& local) {
   backend_->SetUpSelfConnectedRcQp(qp, local);
 }
 
-void VerbsHelperSuite::SetUpLoopbackRcQps(
-    ibv_qp* qp1, ibv_qp* qp2, const verbs_util::LocalEndpointAttr& local) {
+void VerbsHelperSuite::SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
+                                          const verbs_util::PortGid& local) {
   backend_->SetUpLoopbackRcQps(qp1, qp2, local);
 }
 
-absl::Status VerbsHelperSuite::SetUpUdQp(
-    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local, uint32_t qkey) {
+absl::Status VerbsHelperSuite::SetUpUdQp(ibv_qp* qp,
+                                         const verbs_util::PortGid& local,
+                                         uint32_t qkey) {
   return backend_->SetUpUdQp(qp, local, qkey);
 }
 
@@ -65,9 +62,10 @@ absl::Status VerbsHelperSuite::SetQpInit(ibv_qp* qp, uint8_t port) {
   return backend_->SetQpInit(qp, port);
 }
 
-absl::Status VerbsHelperSuite::SetQpRtr(
-    ibv_qp* qp, const verbs_util::LocalEndpointAttr& local, ibv_gid remote_gid,
-    uint32_t remote_qpn) {
+absl::Status VerbsHelperSuite::SetQpRtr(ibv_qp* qp,
+                                        const verbs_util::PortGid& local,
+                                        ibv_gid remote_gid,
+                                        uint32_t remote_qpn) {
   return backend_->SetQpRtr(qp, local, remote_gid, remote_qpn);
 }
 
@@ -100,11 +98,15 @@ RdmaMemBlock VerbsHelperSuite::AllocBufferByBytes(size_t bytes,
 
 absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
     bool no_ipv6_for_gid) {
-  return allocator_->OpenDeviceWithActivePorts(no_ipv6_for_gid);
+  return allocator_->OpenDevice(no_ipv6_for_gid);
 }
 
-ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd) {
-  return allocator_->CreateAh(pd);
+ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid) {
+  return allocator_->CreateAh(pd, remote_gid);
+}
+
+int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
+  return allocator_->DestroyAh(ah);
 }
 
 ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
@@ -183,9 +185,9 @@ int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   return allocator_->DestroyQp(qp);
 }
 
-verbs_util::LocalEndpointAttr VerbsHelperSuite::GetLocalEndpointAttr(
+verbs_util::PortGid VerbsHelperSuite::GetLocalPortGid(
     ibv_context* context) const {
-  return allocator_->GetLocalEndpointAttr(context);
+  return allocator_->GetLocalPortGid(context);
 }
 
 }  // namespace rdma_unit_test

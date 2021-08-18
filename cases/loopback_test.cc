@@ -42,6 +42,7 @@
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
+namespace {
 
 // TODO(author1): UD send with invalid AH.
 // TODO(author1): UD send with invalid qpn.
@@ -55,6 +56,11 @@ namespace rdma_unit_test {
 // TODO(author1): Add tests stressing SGEs.
 // TODO(author1): Send with insufficient recv buffering (RC and UD).
 
+using ::testing::AnyOf;
+using ::testing::Each;
+using ::testing::NotNull;
+using ::testing::status::StatusIs;
+
 class LoopbackTest : public BasicFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
@@ -63,7 +69,7 @@ class LoopbackTest : public BasicFixture {
 
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::LocalEndpointAttr endpoint;
+    verbs_util::PortGid port_gid;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     ibv_qp* qp = nullptr;
@@ -92,7 +98,7 @@ class LoopbackTest : public BasicFixture {
     client.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     memset(client.buffer.data(), buf_content, client.buffer.size());
     ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
-    client.endpoint = ibv_.GetLocalEndpointAttr(client.context);
+    client.port_gid = ibv_.GetLocalPortGid(client.context);
     client.pd = ibv_.AllocPd(client.context);
     if (!client.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -112,7 +118,7 @@ class LoopbackTest : public BasicFixture {
     if (!client.control_qp) {
       return absl::InternalError("Failed to create qp.");
     }
-    ibv_.SetUpSelfConnectedRcQp(client.control_qp, client.endpoint);
+    ibv_.SetUpSelfConnectedRcQp(client.control_qp, client.port_gid);
     // memory setup.
     client.mr = ibv_.RegMr(client.pd, client.buffer);
     if (!client.mr) {
@@ -154,9 +160,9 @@ class LoopbackTest : public BasicFixture {
     DCHECK(client.control_qp);
     DCHECK(client.type1_mw);
     DCHECK(client.mr);
-    DCHECK_EQ(IBV_QPT_RC, client.control_qp->qp_type);
-    DCHECK_EQ(IBV_QPS_RTS, verbs_util::GetQpState(client.control_qp));
-    DCHECK_EQ(IBV_QPS_RTS, verbs_util::GetQpState(client.qp));
+    DCHECK_EQ(client.control_qp->qp_type, IBV_QPT_RC);
+    DCHECK_EQ(verbs_util::GetQpState(client.control_qp), IBV_QPS_RTS);
+    DCHECK_EQ(verbs_util::GetQpState(client.qp), IBV_QPS_RTS);
     ASSIGN_OR_RETURN(
         ibv_wc_status status,
         verbs_util::BindType1MwSync(client.control_qp, client.type1_mw,
@@ -200,7 +206,7 @@ class LoopbackRcQpTest : public LoopbackTest {
   ibv_qp_type QpType() const override { return IBV_QPT_RC; }
 
   absl::Status SetUpInterconnection(Client& local, Client& remote) {
-    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, remote.endpoint);
+    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, remote.port_gid);
     return absl::OkStatus();
   }
 
@@ -225,13 +231,13 @@ class LoopbackUdQpTest : public LoopbackTest {
 
   absl::Status SetUpInterconnection(Client& local, Client& remote) {
     // Set up UD connection.
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(local.qp, local.endpoint, kQKey));
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(remote.qp, remote.endpoint, kQKey));
-    local.other_ah = ibv_.CreateAh(local.pd);
+    RETURN_IF_ERROR(ibv_.SetUpUdQp(local.qp, local.port_gid, kQKey));
+    RETURN_IF_ERROR(ibv_.SetUpUdQp(remote.qp, remote.port_gid, kQKey));
+    local.other_ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
     if (!local.other_ah) {
       return absl::InternalError("Failed to create local ah.");
     }
-    remote.other_ah = ibv_.CreateAh(remote.pd);
+    remote.other_ah = ibv_.CreateAh(remote.pd, local.port_gid.gid);
     if (!remote.other_ah) {
       return absl::InternalError("Failed to create remote ah.");
     }
@@ -254,17 +260,45 @@ TEST_F(LoopbackRcQpTest, Send) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_EQ(0, completion.wc_flags);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
+}
+
+TEST_F(LoopbackRcQpTest, SendEmptySgl) {
+  if (!Introspection().AllowsEmptySgl()) {
+    GTEST_SKIP() << "Device does not allow empty SGL.";
+  }
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, nullptr, /*num_sge=*/0);
+  verbs_util::PostRecv(remote.qp, recv);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, nullptr, /*num_sge=*/0);
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, 0);
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledSend) {
@@ -284,14 +318,14 @@ TEST_F(LoopbackRcQpTest, UnsignaledSend) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_EQ(0, completion.wc_flags);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 
-  EXPECT_EQ(0, ibv_poll_cq(local.cq, 1, &completion));
+  EXPECT_EQ(ibv_poll_cq(local.cq, 1, &completion), 0);
 }
 
 TEST_F(LoopbackRcQpTest, SendZeroSize) {
@@ -309,16 +343,16 @@ TEST_F(LoopbackRcQpTest, SendZeroSize) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 // Send a 64MB chunk from local to remote
@@ -345,16 +379,16 @@ TEST_F(LoopbackRcQpTest, SendLargeChunk) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(recv_buf.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(recv_buf.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, SendInlineData) {
@@ -384,20 +418,19 @@ TEST_F(LoopbackRcQpTest, SendInlineData) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), kSendSize),
-              ::testing::Each('c'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), kSendSize), Each('c'));
   EXPECT_THAT(absl::MakeSpan(remote.buffer.data() + kSendSize,
                              remote.buffer.data() + remote.buffer.size()),
-              ::testing::Each('b'));
+              Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, SendImmData) {
@@ -421,19 +454,19 @@ TEST_F(LoopbackRcQpTest, SendImmData) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_NE(0, completion.wc_flags & IBV_WC_WITH_IMM);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_NE(completion.wc_flags & IBV_WC_WITH_IMM, 0);
   EXPECT_EQ(kImm, completion.imm_data);
 
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
@@ -457,23 +490,19 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(0, completion.wc_flags);
-    EXPECT_EQ(0, completion.invalidated_rkey);
-  } else {
-    EXPECT_EQ(IBV_WC_WITH_INV, completion.wc_flags);
-    EXPECT_EQ(remote.type2_mw->rkey, completion.invalidated_rkey);
-  }
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, IBV_WC_WITH_INV);
+  EXPECT_EQ(remote.type2_mw->rkey, completion.invalidated_rkey);
+
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 
   // Check that rkey is invalid.
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
@@ -483,9 +512,56 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
   read.wr_id = 2;
   verbs_util::PostSend(local.qp, read);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
+}
+
+TEST_F(LoopbackRcQpTest, SendWithInvalidateEmptySgl) {
+  if (!Introspection().SupportsType2() ||
+      !Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
+  }
+  if (!Introspection().AllowsEmptySgl()) {
+    GTEST_SKIP() << "NIC does not allow empty SGL.";
+  }
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, nullptr, /*num_sge=*/0);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, nullptr, /*num_sge=*/0);
+  send.opcode = IBV_WR_SEND_WITH_INV;
+  send.invalidate_rkey = remote.type2_mw->rkey;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, IBV_WC_WITH_INV);
+  EXPECT_EQ(remote.type2_mw->rkey, completion.invalidated_rkey);
+
+  // Check that rkey is invalid.
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr read =
+      verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
+                               remote.buffer.data(), remote.type2_mw->rkey);
+  read.wr_id = 2;
+  verbs_util::PostSend(local.qp, read);
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
@@ -504,10 +580,10 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_RNR_RETRY_EXC_ERR, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_RNR_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 
   // Check that rkey is valid.
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
@@ -517,9 +593,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
   read.wr_id = 2;
   verbs_util::PostSend(local.qp, read);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
@@ -544,16 +620,16 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_EQ(0, completion.wc_flags);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, 0);
 
 }
 
@@ -579,16 +655,16 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_EQ(0, completion.wc_flags);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_EQ(completion.wc_flags, 0);
 
 }
 
@@ -602,8 +678,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_qp* qp = ibv_.CreateQp(local.pd, local.cq, local.cq, nullptr, kQueueSize,
                              kQueueSize, QpType(), /*sig_all=*/0);
-  ASSERT_NE(nullptr, qp);
-  ibv_.SetUpSelfConnectedRcQp(qp, local.endpoint);
+  ASSERT_THAT(qp, NotNull());
+  ibv_.SetUpSelfConnectedRcQp(qp, local.port_gid);
 
   ibv_sge rsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_recv_wr recv =
@@ -619,13 +695,13 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
   EXPECT_TRUE(completion.opcode == IBV_WC_SEND ||
               completion.opcode == IBV_WC_RECV);
   EXPECT_EQ(qp->qp_num, completion.qp_num);
   EXPECT_TRUE(completion.wr_id == 0 || completion.wr_id == 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
   EXPECT_TRUE(completion.opcode == IBV_WC_SEND ||
               completion.opcode == IBV_WC_RECV);
   EXPECT_EQ(qp->qp_num, completion.qp_num);
@@ -649,11 +725,11 @@ TEST_F(LoopbackRcQpTest, SendWithTooSmallRecv) {
   verbs_util::PostSend(local.qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  ASSERT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
-  ASSERT_EQ(local.qp->qp_num, completion.qp_num);
-  ASSERT_EQ(1, completion.wr_id);
-  ASSERT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
-  ASSERT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 }
 
 TEST_F(LoopbackRcQpTest, SendRnr) {
@@ -667,9 +743,9 @@ TEST_F(LoopbackRcQpTest, SendRnr) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_RNR_RETRY_EXC_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_RNR_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, SendRnrInfinteRetries) {
@@ -683,11 +759,11 @@ TEST_F(LoopbackRcQpTest, SendRnrInfinteRetries) {
       .rnr_retry = 7,
   };
   int mask = IBV_QP_RNR_RETRY;
-  ASSERT_OK(ibv_.SetQpInit(local.qp, local.endpoint.port()));
-  ASSERT_OK(ibv_.SetQpInit(remote.qp, remote.endpoint.port()));
-  ASSERT_OK(ibv_.SetQpRtr(local.qp, local.endpoint, remote.endpoint.gid(),
+  ASSERT_OK(ibv_.SetQpInit(local.qp, local.port_gid.port));
+  ASSERT_OK(ibv_.SetQpInit(remote.qp, remote.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(local.qp, local.port_gid, remote.port_gid.gid,
                           remote.qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRtr(remote.qp, remote.endpoint, local.endpoint.gid(),
+  ASSERT_OK(ibv_.SetQpRtr(remote.qp, remote.port_gid, local.port_gid.gid,
                           local.qp->qp_num));
   ASSERT_OK(ibv_.SetQpRts(local.qp, custom_attr, mask));
   ASSERT_OK(ibv_.SetQpRts(remote.qp, custom_attr, mask));
@@ -717,13 +793,13 @@ TEST_F(LoopbackRcQpTest, BadRecvAddr) {
   verbs_util::PostSend(local.qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
 }
 
 TEST_F(LoopbackRcQpTest, RecvOnDeregisteredRegion) {
@@ -734,12 +810,12 @@ TEST_F(LoopbackRcQpTest, RecvOnDeregisteredRegion) {
       verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
   verbs_util::PostRecv(remote.qp, recv);
 
-  ASSERT_EQ(0, ibv_.DeallocMw(remote.type1_mw));
+  ASSERT_EQ(ibv_.DeallocMw(remote.type1_mw), 0);
   // If the NIC supports type 2 windows both windows must be deallocated.
   if (Introspection().SupportsType2()) {
-    ASSERT_EQ(0, ibv_.DeallocMw(remote.type2_mw));
+    ASSERT_EQ(ibv_.DeallocMw(remote.type2_mw), 0);
   }
-  ASSERT_EQ(0, ibv_.DeregMr(remote.mr));
+  ASSERT_EQ(ibv_.DeregMr(remote.mr), 0);
 
   ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr send =
@@ -749,17 +825,17 @@ TEST_F(LoopbackRcQpTest, RecvOnDeregisteredRegion) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   // The op code isn't set by the hardware in the error case.
-  EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 }
 
 TEST_F(LoopbackRcQpTest, BadRecvLength) {
@@ -778,18 +854,18 @@ TEST_F(LoopbackRcQpTest, BadRecvLength) {
                        verbs_util::WaitForCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion2,
                        verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(0, completion2.wr_id);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion2.wr_id, 0);
   if (!Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
-    EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion2.status);
+    EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
+    EXPECT_EQ(completion2.status, IBV_WC_LOC_PROT_ERR);
   } else {
-    EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-    EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-    EXPECT_EQ(IBV_WC_SUCCESS, completion2.status);
-    EXPECT_EQ(IBV_WC_RECV, completion2.opcode);
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+    EXPECT_EQ(completion2.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion2.opcode, IBV_WC_RECV);
   }
 }
 
@@ -808,13 +884,13 @@ TEST_F(LoopbackRcQpTest, BadRecvLkey) {
   verbs_util::PostSend(local.qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
 }
 
 TEST_F(LoopbackRcQpTest, SendInvalidLkey) {
@@ -827,9 +903,9 @@ TEST_F(LoopbackRcQpTest, SendInvalidLkey) {
   verbs_util::PostSend(local.qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
   // Existing hardware does not set opcode on error.
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledSendError) {
@@ -843,9 +919,9 @@ TEST_F(LoopbackRcQpTest, UnsignaledSendError) {
   verbs_util::PostSend(local.qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
   // Existing hardware does not set opcode on error.
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeAfterTransition) {
@@ -866,13 +942,13 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeAfterTransition) {
   if (!Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
   }
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_WR_FLUSH_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeBeforeTransition) {
@@ -891,14 +967,14 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeBeforeTransition) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_WR_FLUSH_ERR, IBV_WC_RETRY_EXC_ERR));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+              AnyOf(IBV_WC_WR_FLUSH_ERR, IBV_WC_RETRY_EXC_ERR));
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
   EXPECT_EQ(IBV_WC_WR_FLUSH_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateNoRecvWqe) {
@@ -913,9 +989,9 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateNoRecvWqe) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_WR_FLUSH_ERR, IBV_WC_RETRY_EXC_ERR));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+              AnyOf(IBV_WC_WR_FLUSH_ERR, IBV_WC_RETRY_EXC_ERR));
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, BasicRead) {
@@ -928,11 +1004,11 @@ TEST_F(LoopbackRcQpTest, BasicRead) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledRead) {
@@ -949,10 +1025,10 @@ TEST_F(LoopbackRcQpTest, UnsignaledRead) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
 }
 
 TEST_F(LoopbackRcQpTest, QpSigAll) {
@@ -960,8 +1036,8 @@ TEST_F(LoopbackRcQpTest, QpSigAll) {
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_qp* qp = ibv_.CreateQp(local.pd, local.cq, local.cq, nullptr, kQueueSize,
                              kQueueSize, QpType(), /*sig_all=*/1);
-  ASSERT_NE(nullptr, qp);
-  ibv_.SetUpSelfConnectedRcQp(qp, local.endpoint);
+  ASSERT_THAT(qp, NotNull());
+  ibv_.SetUpSelfConnectedRcQp(qp, local.port_gid);
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, local.buffer.data(), local.mr->rkey);
@@ -970,8 +1046,8 @@ TEST_F(LoopbackRcQpTest, QpSigAll) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
   EXPECT_EQ(qp->qp_num, completion.qp_num);
 }
 
@@ -986,11 +1062,11 @@ TEST_F(LoopbackRcQpTest, Type1MWRead) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, Type2MWRead) {
@@ -1007,11 +1083,11 @@ TEST_F(LoopbackRcQpTest, Type2MWRead) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, Type1MWUnbind) {
@@ -1021,33 +1097,31 @@ TEST_F(LoopbackRcQpTest, Type1MWUnbind) {
 
   // Rebind to get a new rkey.
   uint32_t original_rkey = remote.type1_mw->rkey;
-  ASSERT_OK_AND_ASSIGN(
-      ibv_wc_status result,
-      verbs_util::BindType1MwSync(remote.control_qp, remote.type1_mw,
-                                  remote.buffer.span(), remote.mr));
-  EXPECT_EQ(IBV_WC_SUCCESS, result);
-  uint32_t new_rkey = remote.type1_mw->rkey;
-  EXPECT_NE(original_rkey, new_rkey);
+  ASSERT_THAT(verbs_util::BindType1MwSync(remote.control_qp, remote.type1_mw,
+                                          remote.buffer.span(), remote.mr),
+              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_NE(original_rkey, remote.type1_mw->rkey);
 
   // Issue a read with the new rkey.
-  ibv_send_wr read = verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
-                                              remote.buffer.data(), new_rkey);
+  ibv_send_wr read =
+      verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
+                               remote.buffer.data(), remote.type1_mw->rkey);
   verbs_util::PostSend(local.qp, read);
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('b'));
 
   // Issue a read with the old rkey.
   read.wr.rdma.rkey = original_rkey;
   verbs_util::PostSend(local.qp, read);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(LoopbackRcQpTest, ReadInvalidLkey) {
@@ -1062,13 +1136,13 @@ TEST_F(LoopbackRcQpTest, ReadInvalidLkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Verify buffer is unchanged.
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('a'));
+  EXPECT_THAT(local.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledReadError) {
@@ -1084,11 +1158,11 @@ TEST_F(LoopbackRcQpTest, UnsignaledReadError) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, ReadInvalidRkey) {
@@ -1103,13 +1177,13 @@ TEST_F(LoopbackRcQpTest, ReadInvalidRkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Verify buffer is unchanged.
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('a'));
+  EXPECT_THAT(local.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, ReadInvalidRKeyAndInvalidLKey) {
@@ -1126,10 +1200,10 @@ TEST_F(LoopbackRcQpTest, ReadInvalidRKeyAndInvalidLKey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, ReadRemoteQpInErrorState) {
@@ -1143,10 +1217,10 @@ TEST_F(LoopbackRcQpTest, ReadRemoteQpInErrorState) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, BasicWrite) {
@@ -1159,11 +1233,11 @@ TEST_F(LoopbackRcQpTest, BasicWrite) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledWrite) {
@@ -1180,10 +1254,10 @@ TEST_F(LoopbackRcQpTest, UnsignaledWrite) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
 }
 
 TEST_F(LoopbackRcQpTest, WriteInlineData) {
@@ -1208,15 +1282,14 @@ TEST_F(LoopbackRcQpTest, WriteInlineData) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), kWriteSize),
-              ::testing::Each('c'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), kWriteSize), Each('c'));
   EXPECT_THAT(absl::MakeSpan(remote.buffer.data() + kWriteSize,
                              remote.buffer.data() + remote.buffer.size()),
-              ::testing::Each('b'));
+              Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteImmData) {
@@ -1252,23 +1325,23 @@ TEST_F(LoopbackRcQpTest, WriteImmData) {
   // Verify WRITE completion.
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 
   // Verify RECV completion.
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV_RDMA_WITH_IMM, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
-  EXPECT_NE(0, completion.wc_flags & IBV_WC_WITH_IMM);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV_RDMA_WITH_IMM);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_NE(completion.wc_flags & IBV_WC_WITH_IMM, 0);
   EXPECT_EQ(kImm, completion.imm_data);
 
   // Verify that data written to the correct buffer.
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
-  EXPECT_THAT(dummy_buf.span(), ::testing::Each('d'));
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
+  EXPECT_THAT(dummy_buf.span(), Each('d'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteImmDataRnR) {
@@ -1287,9 +1360,9 @@ TEST_F(LoopbackRcQpTest, WriteImmDataRnR) {
   // Verify WRITE completion.
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_RNR_RETRY_EXC_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_RNR_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackRcQpTest, Type1MWWrite) {
@@ -1303,11 +1376,11 @@ TEST_F(LoopbackRcQpTest, Type1MWWrite) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, Type2MWWrite) {
@@ -1324,11 +1397,11 @@ TEST_F(LoopbackRcQpTest, Type2MWWrite) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('a'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteInvalidLkey) {
@@ -1343,14 +1416,14 @@ TEST_F(LoopbackRcQpTest, WriteInvalidLkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Verify buffer is unchanged.
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteInvalidRkey) {
@@ -1365,13 +1438,13 @@ TEST_F(LoopbackRcQpTest, WriteInvalidRkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Verify buffer is unchanged.
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, UnsignaledWriteInvalidRkey) {
@@ -1387,13 +1460,13 @@ TEST_F(LoopbackRcQpTest, UnsignaledWriteInvalidRkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
   // Existing hardware does not set this on error.
-  // EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Verify buffer is unchanged.
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteInvalidRKeyAndInvalidLKey) {
@@ -1411,10 +1484,10 @@ TEST_F(LoopbackRcQpTest, WriteInvalidRKeyAndInvalidLKey) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   // On a write the local key is checked first.
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteRemoteQpInErrorState) {
@@ -1428,10 +1501,10 @@ TEST_F(LoopbackRcQpTest, WriteRemoteQpInErrorState) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
@@ -1449,9 +1522,9 @@ TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   // The remote should remain b/c we added 0.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1474,13 +1547,13 @@ TEST_F(LoopbackRcQpTest, FetchAddSmallSge) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   } else {
     EXPECT_THAT(completion.status,
-                testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+                AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
   }
 }
 
@@ -1499,13 +1572,13 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeSge) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   if (Introspection().ShouldDeviateForCurrentTest()) {
     EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   } else {
     EXPECT_THAT(completion.status,
-                testing::AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
+                AnyOf(IBV_WC_LOC_LEN_ERR, IBV_WC_REM_ACCESS_ERR));
   }
 }
 
@@ -1543,10 +1616,10 @@ TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
     // Check destination.
     uint64_t value = *reinterpret_cast<uint64_t*>(remote.atomic_buffer.data());
     EXPECT_EQ(value, kDstContent + kIncrementAmount);
@@ -1565,7 +1638,7 @@ TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
     value = *reinterpret_cast<uint64_t*>(local.atomic_buffer.data() + 24);
     EXPECT_EQ(value, kSrcContent);
   } else {
-    EXPECT_NE(IBV_WC_SUCCESS, completion.status);
+    EXPECT_NE(completion.status, IBV_WC_SUCCESS);
   }
 }
 
@@ -1590,9 +1663,9 @@ TEST_F(LoopbackRcQpTest, UnsignaledFetchAdd) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   // Remote = 2 (orig) + 10 + 1 = 14.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 13);
   // Local = 2 (orig) + 10 = 12.
@@ -1615,9 +1688,9 @@ TEST_F(LoopbackRcQpTest, FetchAddIncrementBy1) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 3);
   // The local buffer should be the same as the remote before update.
@@ -1639,9 +1712,9 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeIncrement) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())),
             68719476738);
@@ -1667,9 +1740,9 @@ TEST_F(LoopbackRcQpTest, FetchAddUnaligned) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // The buffers should be unmodified.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
@@ -1692,9 +1765,9 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKey) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 3);
@@ -1717,9 +1790,9 @@ TEST_F(LoopbackRcQpTest, UnsignaledFetchAddError) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
@@ -1738,9 +1811,9 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1765,9 +1838,9 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKeyAndInvalidRKey) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1790,11 +1863,11 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidLKey) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Our implementation checks the key first. The hardware may check the
   // alignment first.
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1817,11 +1890,11 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   // Our implementation will check the key first. The hardware may or may not
   // behave the same way.
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1844,9 +1917,9 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_LEN_ERR);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1870,9 +1943,9 @@ TEST_F(LoopbackRcQpTest, FetchAddRemoteQpInErrorState) {
   verbs_util::PostSend(local.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
 
   // The local buffer should remain the same.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
@@ -1894,9 +1967,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpNotEqualNoSwap) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   // The remote buffer should not have changed because the compare value != 2.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1919,9 +1992,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpEqualWithSwap) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   // The remote buffer should get updated.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 3);
@@ -1950,9 +2023,9 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwp) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 
   // The remote buffer should get updated.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -1977,9 +2050,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidLKey) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 
   // The remote buffer should be updated because the lkey is not eagerly
   // checked.
@@ -2006,9 +2079,9 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwpError) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 
   // The remote buffer should be updated because the lkey is not eagerly
   // checked.
@@ -2033,9 +2106,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKey) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 
   // The remote buffer should not have changed because it will be caught by the
   // invalid rkey.
@@ -2059,9 +2132,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKeyAndInvalidLKey) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 
   // The buffers shouldn't change because the rkey will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -2083,9 +2156,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnaligned) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -2107,9 +2180,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidRKey) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -2134,9 +2207,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -2160,9 +2233,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidSize) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_LOC_LEN_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_LEN_ERR);
 
   // The buffers should not be updated.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
@@ -2184,9 +2257,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpRemoteQpInErrorState) {
   verbs_util::PostSend(local.qp, cmp_swp);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
 
   // The local buffer should remain the same.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
@@ -2207,11 +2280,11 @@ TEST_F(LoopbackRcQpTest, SgePointerChase) {
   }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('b'));
 }
 
 // Should be qp-fatal under custom transport and roce meaning that the queue
@@ -2232,15 +2305,15 @@ TEST_F(LoopbackRcQpTest, RemoteFatalError) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 
   // Both should have transitioned now that the completion has been received.
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 
   // Reset the buffer values.
   memset(local.buffer.data(), 'a', local.buffer.size());
@@ -2256,13 +2329,13 @@ TEST_F(LoopbackRcQpTest, RemoteFatalError) {
 
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
   // This write should not have landed.
-  EXPECT_EQ(IBV_WC_WR_FLUSH_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(2, completion.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 
   ibv_wc result;
   EXPECT_EQ(ibv_poll_cq(local.cq, 1, &result), 0);
@@ -2293,10 +2366,10 @@ TEST_F(LoopbackRcQpTest, RequestOnFailedQp) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_THAT(local.buffer.span(), ::testing::Each('a'));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each('a'));
 
   // Send a request from the remote to the local failed qp.
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -2306,10 +2379,10 @@ TEST_F(LoopbackRcQpTest, RequestOnFailedQp) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion2,
                        verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_RETRY_EXC_ERR, completion2.status);
+  EXPECT_EQ(completion2.status, IBV_WC_RETRY_EXC_ERR);
   EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
-  EXPECT_EQ(1, completion2.wr_id);
-  EXPECT_THAT(remote.buffer.span(), ::testing::Each('b'));
+  EXPECT_EQ(completion2.wr_id, 1);
+  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
@@ -2378,13 +2451,13 @@ TEST_F(LoopbackRcQpTest, PostToRecvQueueInErrorState) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
-  EXPECT_EQ(IBV_WC_REM_INV_REQ_ERR, completion.status);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
 
   // Both should have transitioned now that the completion has been received.
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(local.qp));
-  EXPECT_EQ(IBV_QPS_ERR, verbs_util::GetQpState(remote.qp));
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 
   // Post a send and a recv WR to local and remote QP.
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -2398,12 +2471,12 @@ TEST_F(LoopbackRcQpTest, PostToRecvQueueInErrorState) {
   verbs_util::PostSend(local.qp, send);
 
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_WR_FLUSH_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(send.wr_id, completion.wr_id);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_WR_FLUSH_ERR, completion.status);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(recv.wr_id, completion.wr_id);
 }
 
@@ -2429,18 +2502,18 @@ TEST_F(LoopbackUdQpTest, Send) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(0, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
   auto recv_payload = remote.buffer.span();
   recv_payload = recv_payload.subspan(sizeof(ibv_grh), kPayloadLength);
-  EXPECT_THAT(recv_payload, ::testing::Each('a'));
+  EXPECT_THAT(recv_payload, Each('a'));
 }
 
 TEST_F(LoopbackUdQpTest, SendRnr) {
@@ -2459,9 +2532,9 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
@@ -2488,9 +2561,44 @@ TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+}
+
+TEST_F(LoopbackUdQpTest, SendInvalidAh) {
+  constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = kPayloadLength + sizeof(ibv_grh);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  ibv_ah dummy_ah{.context = nullptr, .pd = nullptr, .handle = 1234};
+  send.wr.ud.ah = &dummy_ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  // Several acceptable outcomes posting a send WR to a UD QP with invalid AH:
+  // 1. IBTA spec indicates the NIC should return an immediate error. But this
+  // is not following by many of the Mellanox NICs.
+  // 2. Instead, Mellanox will return a IBV_WC_SUCCESS on completion.
+  // 3. Based on description on both IBTA spec and Mellanox RDMA manual,
+  // IBV_WC_LOC_QP_OP_ERR also matches the semantic for any invalidity of AH.
+  EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_LOC_QP_OP_ERR));
+  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 // Read not supported on UD.
@@ -2507,9 +2615,9 @@ TEST_F(LoopbackUdQpTest, Read) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 // Tests polling multiple CQE in a single call.
@@ -2541,9 +2649,9 @@ TEST_F(LoopbackUdQpTest, PollMultipleCqe) {
   for (int i = 0; i < kNumCompletions; ++i) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(remote.cq));
-    EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-    EXPECT_EQ(IBV_WC_RECV, completion.opcode);
-    EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+    EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   }
 
   // This is inherantly racy, just because recv posted doesn't mean send
@@ -2555,9 +2663,9 @@ TEST_F(LoopbackUdQpTest, PollMultipleCqe) {
       << "Missing completions see comment above about potential race.";
   // Spot check last completion.
   ibv_wc& completion = result[kNumCompletions - 1];
-  EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(send.wr_id, completion.wr_id);
 }
 
@@ -2575,9 +2683,9 @@ TEST_F(LoopbackUdQpTest, Write) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 // FetchAndAdd not supported on UD.
@@ -2597,9 +2705,9 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
 // CompareAndSwap not supported on UD.
@@ -2618,9 +2726,124 @@ TEST_F(LoopbackUdQpTest, CmpAndSwp) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(IBV_WC_LOC_QP_OP_ERR, completion.status);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(1, completion.wr_id);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
 }
 
+class AdvancedLoopbackTest : public BasicFixture {
+ public:
+  struct BasicSetup {
+    RdmaMemBlock buffer;
+    ibv_context* context;
+    verbs_util::PortGid port_gid;
+    ibv_pd* pd;
+    ibv_mr* mr;
+  };
+
+  absl::StatusOr<BasicSetup> CreateBasicSetup() {
+    BasicSetup setup;
+    setup.buffer = ibv_.AllocBuffer(/*pages=*/1);
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.pd = ibv_.AllocPd(setup.context);
+    if (!setup.pd) {
+      return absl::InternalError("Failed to allocate pd.");
+    }
+    setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
+    if (!setup.mr) {
+      return absl::InternalError("Failed to register mr.");
+    }
+    return setup;
+  }
+};
+
+TEST_F(AdvancedLoopbackTest, RcSendUdRecvFails) {
+  constexpr size_t kPayloadLength = 1000;
+  constexpr int kQKey = 200;
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq* local_cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(local_cq, NotNull());
+  ibv_cq* remote_cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(remote_cq, NotNull());
+  ibv_qp* local_qp = ibv_.CreateQp(
+      setup.pd, local_cq, local_cq, /*srq=*/nullptr, verbs_util::kDefaultMaxWr,
+      verbs_util::kDefaultMaxWr, IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(local_qp, NotNull());
+  ibv_qp* remote_qp =
+      ibv_.CreateQp(setup.pd, remote_cq, remote_cq, /*srq=*/nullptr,
+                    verbs_util::kDefaultMaxWr, verbs_util::kDefaultMaxWr,
+                    IBV_QPT_UD, /*sig_all=*/0);
+  ASSERT_THAT(remote_qp, NotNull());
+  ASSERT_OK(ibv_.SetUpRcQp(local_qp, setup.port_gid, setup.port_gid.gid,
+                           remote_qp->qp_num));
+  ASSERT_OK(ibv_.SetUpUdQp(remote_qp, setup.port_gid, kQKey));
+
+  ibv_sge rsge = verbs_util::CreateSge(
+      setup.buffer.span().subspan(0, kPayloadLength + sizeof(ibv_grh)),
+      setup.mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote_qp, recv);
+  ibv_sge lsge = verbs_util::CreateSge(
+      setup.buffer.span().subspan(0, kPayloadLength), setup.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/0, &lsge, /*num_sge=*/1);
+  verbs_util::PostSend(local_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(
+                                              local_cq, absl::Seconds(10)));
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+  EXPECT_THAT(
+      verbs_util::WaitForCompletion(remote_cq, absl::Seconds(10)).status(),
+      StatusIs(absl::StatusCode::kInternal,
+               "Timeout while waiting for a completion"));
+}
+
+TEST_F(AdvancedLoopbackTest, UdSendToRcFails) {
+  constexpr size_t kPayloadLength = 1000;
+  constexpr int kQKey = 200;
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq* local_cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(local_cq, NotNull());
+  ibv_cq* remote_cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(remote_cq, NotNull());
+  ibv_qp* local_qp = ibv_.CreateQp(
+      setup.pd, local_cq, local_cq, /*srq=*/nullptr, verbs_util::kDefaultMaxWr,
+      verbs_util::kDefaultMaxWr, IBV_QPT_UD, /*sig_all=*/0);
+  ASSERT_THAT(local_qp, NotNull());
+  ibv_qp* remote_qp =
+      ibv_.CreateQp(setup.pd, remote_cq, remote_cq, /*srq=*/nullptr,
+                    verbs_util::kDefaultMaxWr, verbs_util::kDefaultMaxWr,
+                    IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(remote_qp, NotNull());
+  ASSERT_OK(ibv_.SetUpUdQp(local_qp, setup.port_gid, kQKey));
+  ASSERT_OK(ibv_.SetUpRcQp(remote_qp, setup.port_gid, setup.port_gid.gid,
+                           local_qp->qp_num));
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  ASSERT_THAT(ah, NotNull());
+
+  ibv_sge rsge = verbs_util::CreateSge(
+      setup.buffer.span().subspan(0, kPayloadLength + sizeof(ibv_grh)),
+      setup.mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote_qp, recv);
+  ibv_sge lsge = verbs_util::CreateSge(
+      setup.buffer.span().subspan(0, kPayloadLength), setup.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/0, &lsge, /*num_sge=*/1);
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote_qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(
+                                              local_cq, absl::Seconds(10)));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_THAT(
+      verbs_util::WaitForCompletion(remote_cq, absl::Seconds(10)).status(),
+      StatusIs(absl::StatusCode::kInternal,
+               "Timeout while waiting for a completion"));
+}
+
+}  // namespace
 }  // namespace rdma_unit_test

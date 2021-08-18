@@ -25,12 +25,9 @@ void BasicFixture::SetUpTestSuite() {
   // Make initial call to construct the proper Introspection here so the
   // constructor is not called mid-test.
   Introspection();
-
-  VerbsHelperSuite::SetUpHelperGlobal();
 }
 
 void BasicFixture::TearDownTestSuite() {
-  VerbsHelperSuite::TearDownHelperGlobal();
 }
 
 }  // namespace rdma_unit_test

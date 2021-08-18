@@ -47,6 +47,7 @@
 #include "absl/types/span.h"
 
 
+
 #include "infiniband/verbs.h"
 #include "public/flags.h"
 #include "public/status_matchers.h"
@@ -82,76 +83,6 @@ int GetIpAddressType(const ibv_gid& gid) {
 }
 
 }  // namespace
-
-LocalEndpointAttr::LocalEndpointAttr(uint8_t port, ibv_gid gid,
-                                     uint8_t gid_index)
-    : port_(port), gid_(gid), gid_index_(gid_index) {}
-
-uint8_t LocalEndpointAttr::port() const { return port_; }
-
-ibv_gid LocalEndpointAttr::gid() const { return gid_; }
-
-uint8_t LocalEndpointAttr::gid_index() const { return gid_index_; }
-
-
-AddressHandleAttr::AddressHandleAttr(const verbs_util::LocalEndpointAttr& local,
-                                     ibv_gid remote_gid) {
-  // Set base ibv_ah parameters as the source of truth.  Then
-  // copy those into custom transport settings when requested.
-  ibv_ah_attr_.sl = 0;
-  ibv_ah_attr_.is_global = 1;
-  ibv_ah_attr_.port_num = local.port();
-  ibv_ah_attr_.grh.dgid = remote_gid;
-  ibv_ah_attr_.grh.flow_label = 0;
-  ibv_ah_attr_.grh.sgid_index = local.gid_index();
-  ibv_ah_attr_.grh.hop_limit = 10;
-  ibv_ah_attr_.grh.traffic_class = 0;
-
-}
-
-// Only allow return of ibv_ah_attr if not in GOOGLE3 build.
-ibv_ah_attr AddressHandleAttr::GetAttributes() const {
-  return ibv_ah_attr_;
-}
-
-
-std::vector<std::string> GetInterfaces() {
-  std::vector<std::string> interfaces;
-  struct ifaddrs* ifaddrs;
-  if (getifaddrs(&ifaddrs) < 0) return interfaces;
-
-  for (struct ifaddrs* ifa = ifaddrs; ifa != nullptr; ifa = ifa->ifa_next) {
-    if (ifa->ifa_addr && (ifa->ifa_addr->sa_family == AF_INET ||
-                          ifa->ifa_addr->sa_family == AF_INET6)) {
-      interfaces.push_back(std::string(ifa->ifa_name));
-      VLOG(1) << absl::StrFormat("GetInterfaces - %s", interfaces.back());
-    }
-  }
-  freeifaddrs(ifaddrs);
-  return interfaces;
-}
-
-std::array<uint8_t, ETH_ALEN> GetEthernetAddress(std::string_view interface) {
-  int fd;
-  struct ifreq ifr;
-  std::array<uint8_t, ETH_ALEN> ethernet_address;
-  fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-  CHECK_NE(fd, -1);  // Crash ok
-  ifr.ifr_addr.sa_family = AF_INET;
-  strncpy(ifr.ifr_name, interface.data(), IFNAMSIZ - 1);
-  int result = ioctl(fd, SIOCGIFHWADDR, &ifr);
-  CHECK_NE(result, -1);  // Crash ok
-  close(fd);
-  VLOG(1) << absl::StrFormat(
-      "GetEthernetAddress: if(%s) eth(%x:%x:%x:%x:%x:%x)", interface,
-      ifr.ifr_hwaddr.sa_data[0], ifr.ifr_hwaddr.sa_data[1],
-      ifr.ifr_hwaddr.sa_data[2], ifr.ifr_hwaddr.sa_data[3],
-      ifr.ifr_hwaddr.sa_data[4], ifr.ifr_hwaddr.sa_data[5]);
-  std::copy(std::begin(ifr.ifr_hwaddr.sa_data),
-            std::end(ifr.ifr_hwaddr.sa_data), std::begin(ethernet_address));
-
-  return ethernet_address;
-}
 
 ibv_mtu ToVerbsMtu(uint64_t mtu) {
   for (auto [mtu_enum, value] : ibv_mtu_map) {
@@ -199,9 +130,9 @@ absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
   return device_names;
 }
 
-absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
     ibv_context* context) {
-  std::vector<LocalEndpointAttr> result;
+  std::vector<PortGid> result;
   bool no_ipv6_for_gid = absl::GetFlag(FLAGS_no_ipv6_for_gid);
   LOG(INFO) << "Enumerating Ports for " << context
             << "no_ipv6: " << no_ipv6_for_gid;
@@ -212,20 +143,20 @@ absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
   }
 
   // libibverbs port numbers start at 1.
-  for (int port_idx = 1; port_idx <= dev_attr.phys_port_cnt; ++port_idx) {
+  for (int port = 1; port <= dev_attr.phys_port_cnt; ++port) {
     ibv_port_attr port_attr = {};
-    query_result = ibv_query_port(context, port_idx, &port_attr);
+    query_result = ibv_query_port(context, port, &port_attr);
     if (query_result != 0) {
       return absl::InternalError("Failed to query port attributes.");
     }
     if (port_attr.state != IBV_PORT_ACTIVE) {
-      VLOG(1) << "Port is not active, port: " << port_idx
+      VLOG(1) << "Port is not active, port: " << port
               << ", state: " << port_attr.state;
       continue;
     }
-    for (int gid_idx = 0; gid_idx < port_attr.gid_tbl_len; ++gid_idx) {
+    for (int gid_index = 0; gid_index < port_attr.gid_tbl_len; ++gid_index) {
       ibv_gid gid = {};
-      query_result = ibv_query_gid(context, port_idx, gid_idx, &gid);
+      query_result = ibv_query_gid(context, port, gid_index, &gid);
       if (query_result != 0) {
         return absl::InternalError("Failed to query gid.");
       }
@@ -246,11 +177,27 @@ absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
                    << VerbsMtuToValue(port_attr.active_mtu);
       }
       VLOG(2) << "Adding: " << GidToString(gid);
-      LocalEndpointAttr match(port_idx, gid, gid_idx);
+      PortGid match;
+      match.port = port;
+      match.gid = gid;
+      match.gid_index = gid_index;
       result.push_back(match);
     }
   }
   return result;
+}
+
+ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid) {
+  ibv_ah_attr attr;
+  attr.sl = 0;
+  attr.is_global = 1;
+  attr.port_num = port_gid.port;
+  attr.grh.dgid = remote_gid;
+  attr.grh.flow_label = 0;
+  attr.grh.sgid_index = port_gid.gid_index;
+  attr.grh.hop_limit = 10;
+  attr.grh.traffic_class = 0;
+  return attr;
 }
 
 

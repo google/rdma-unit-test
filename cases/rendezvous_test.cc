@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "glog/logging.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/container/fixed_array.h"
 #include "absl/random/random.h"
@@ -54,6 +55,8 @@ T DieIfNull(T&& t) {
   }
   return std::forward<T>(t);
 }
+
+using ::testing::NotNull;
 
 }  // namespace
 
@@ -174,9 +177,9 @@ class RpcControl {
   }
 
   void Init(VerbsHelperSuite& ibv, RpcControl& other) {
-    CHECK_OK(ibv.SetUpRcQp(qp_, ibv.GetLocalEndpointAttr(qp_->context),
-                           ibv.GetLocalEndpointAttr(other.qp_->context).gid(),
-                           other.qp_->qp_num));
+    ASSERT_OK(ibv.SetUpRcQp(qp_, ibv.GetLocalPortGid(qp_->context),
+                            ibv.GetLocalPortGid(other.qp_->context).gid,
+                            other.qp_->qp_num));
     other_rkey_ = other.mr_->rkey;
   }
 
@@ -193,7 +196,7 @@ class RpcControl {
     recv.sg_list = &sg;
     recv.num_sge = 1;
     ibv_recv_wr* bad_wr;
-    CHECK_EQ(0, ibv_post_recv(qp_, &recv, &bad_wr));
+    ASSERT_EQ(ibv_post_recv(qp_, &recv, &bad_wr), 0);
   }
 
   // Sends |contents| to the other side.
@@ -213,7 +216,7 @@ class RpcControl {
     send.opcode = IBV_WR_SEND;
     send.send_flags = IBV_SEND_SIGNALED;
     ibv_send_wr* bad_wr;
-    CHECK_EQ(0, ibv_post_send(qp_, &send, &bad_wr));
+    ASSERT_EQ(ibv_post_send(qp_, &send, &bad_wr), 0);
   }
 
   // Processes control completions.
@@ -231,7 +234,7 @@ class RpcControl {
         continue;
       }
       CHECK_EQ(1, count);
-      CHECK_EQ(IBV_WC_SUCCESS, completion.status);
+      CHECK_EQ(completion.status, IBV_WC_SUCCESS);
       switch (completion.opcode) {
         case IBV_WC_SEND: {
           CHECK_EQ(kSendId, completion.wr_id);
@@ -332,10 +335,9 @@ class RpcBase {
         control_(ibv, context_, pd_, control_pages, max_outstanding) {}
 
   void Init(VerbsHelperSuite& ibv, RpcBase& other) {
-    CHECK_OK(ibv.SetUpRcQp(data_qp_,
-                           ibv.GetLocalEndpointAttr(data_qp_->context),
-                           ibv.GetLocalEndpointAttr(data_qp_->context).gid(),
-                           other.data_qp_->qp_num));
+    ASSERT_OK(ibv.SetUpRcQp(data_qp_, ibv.GetLocalPortGid(data_qp_->context),
+                            ibv.GetLocalPortGid(data_qp_->context).gid,
+                            other.data_qp_->qp_num));
     control_.Init(ibv, other.control_);
   }
 
@@ -410,7 +412,7 @@ class RpcClient : public RpcBase {
     VLOG(2) << "Posting bind.";
     ibv_send_wr* bad_wr;
     int result = ibv_post_send(data_qp_, &bind, &bad_wr);
-    CHECK_EQ(0, result);
+    CHECK_EQ(result, 0);
 
     // Setup data buffer.
     VLOG(2) << "Setting up data buffer.";
@@ -429,9 +431,9 @@ class RpcClient : public RpcBase {
     // Synchronous bind for now.
     VLOG(2) << "Waiting for bind response.";
     ibv_wc completion = verbs_util::WaitForCompletion(data_cq_).value();
-    CHECK_EQ(IBV_WC_SUCCESS, completion.status);
+    CHECK_EQ(completion.status, IBV_WC_SUCCESS);
     // TODO(b/164096025): Re-enable once Simics is fixed.
-    // CHECK_EQ(IBV_WC_BIND_MW, completion.opcode);
+    // CHECK_EQ(completion.opcode, IBV_WC_BIND_MW);
     mw->rkey = bind.bind_mw.rkey;
 
     VLOG(1) << "Client sending request.";
@@ -464,10 +466,10 @@ class RpcClient : public RpcBase {
     invalidate.invalidate_rkey = mw->rkey;
     ibv_send_wr* bad_wr;
     int result = ibv_post_send(data_qp_, &invalidate, &bad_wr);
-    CHECK_EQ(0, result);
+    ASSERT_EQ(result, 0);
     ibv_wc completion = verbs_util::WaitForCompletion(data_cq_).value();
-    CHECK_EQ(IBV_WC_SUCCESS, completion.status);
-    CHECK_EQ(IBV_WC_LOCAL_INV, completion.opcode);
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+    ASSERT_EQ(completion.opcode, IBV_WC_LOCAL_INV);
   }
 
   // Handles a single control message (potentially validating data), cleans up
@@ -565,7 +567,7 @@ class RpcServer : public RpcBase {
         read.wr.rdma.rkey = req->rkey;
         ibv_send_wr* bad_wr;
         int result = ibv_post_send(data_qp_, &read, &bad_wr);
-        CHECK_EQ(0, result);
+        CHECK_EQ(result, 0);
       } break;
       case Operation::kRead: {
         RandomizeBuffer(absl::MakeSpan(buffer_alloc, req->length), req->seed);
@@ -580,7 +582,7 @@ class RpcServer : public RpcBase {
         write.wr.rdma.rkey = req->rkey;
         ibv_send_wr* bad_wr;
         int result = ibv_post_send(data_qp_, &write, &bad_wr);
-        CHECK_EQ(0, result);
+        CHECK_EQ(result, 0);
         break;
       }
     }
@@ -702,12 +704,12 @@ TEST_F(RendezvousTest, Read) {
   // Wait for RMA to finish.
   LOG(INFO) << "Waiting for RMA finished.";
   ControlResponse::Result rma_result = setup.server.ProcessData().value();
-  ASSERT_EQ(ControlResponse::Result::kSuccess, rma_result);
+  ASSERT_EQ(rma_result, ControlResponse::Result::kSuccess);
 
   // Wait for finish report.
   LOG(INFO) << "Waiting for response.";
   ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
-  EXPECT_EQ(ControlResponse::Result::kSuccess, rpc_result);
+  EXPECT_EQ(rpc_result, ControlResponse::Result::kSuccess);
 }
 
 TEST_F(RendezvousTest, Batched) {
@@ -762,20 +764,20 @@ TEST_F(RendezvousTest, ReadCancellation) {
   ibv_mw* mw = setup.client.StartRpc(Operation::kRead, kRpcSize, 15);
 
   // Cancel outstanding.
-  setup.client.CancelRpc(mw);
+  ASSERT_NO_FATAL_FAILURE(setup.client.CancelRpc(mw));
 
   // Receive request.
   ControlRequest request = setup.server.ProcessControl().value();
-  ASSERT_EQ(Operation::kRead, request.operation);
-  ASSERT_EQ(kRpcSize, request.length);
+  ASSERT_EQ(request.operation, Operation::kRead);
+  ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
   ControlResponse::Result rma_result = setup.server.ProcessData().value();
-  ASSERT_EQ(ControlResponse::Result::kInvalidWindow, rma_result);
+  ASSERT_EQ(rma_result, ControlResponse::Result::kInvalidWindow);
 
   // Wait for finish report.
   ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
-  EXPECT_EQ(ControlResponse::Result::kInvalidWindow, rpc_result);
+  EXPECT_EQ(rpc_result, ControlResponse::Result::kInvalidWindow);
 }
 
 TEST_F(RendezvousTest, Write) {
@@ -788,16 +790,16 @@ TEST_F(RendezvousTest, Write) {
 
   // Receive request.
   ControlRequest request = setup.server.ProcessControl().value();
-  ASSERT_EQ(Operation::kWrite, request.operation);
-  ASSERT_EQ(kRpcSize, request.length);
+  ASSERT_EQ(request.operation, Operation::kWrite);
+  ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
   ControlResponse::Result rma_result = setup.server.ProcessData().value();
-  ASSERT_EQ(ControlResponse::Result::kSuccess, rma_result);
+  ASSERT_EQ(rma_result, ControlResponse::Result::kSuccess);
 
   // Wait for finish report.
   ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
-  EXPECT_EQ(ControlResponse::Result::kSuccess, rpc_result);
+  EXPECT_EQ(rpc_result, ControlResponse::Result::kSuccess);
 }
 
 TEST_F(RendezvousTest, WriteCancellation) {
@@ -809,20 +811,20 @@ TEST_F(RendezvousTest, WriteCancellation) {
   ibv_mw* mw = setup.client.StartRpc(Operation::kWrite, kRpcSize, 15);
 
   // Cancel outstanding.
-  setup.client.CancelRpc(mw);
+  ASSERT_NO_FATAL_FAILURE(setup.client.CancelRpc(mw));
 
   // Receive request.
   ControlRequest request = setup.server.ProcessControl().value();
-  ASSERT_EQ(Operation::kWrite, request.operation);
-  ASSERT_EQ(kRpcSize, request.length);
+  ASSERT_EQ(request.operation, Operation::kWrite);
+  ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
   ControlResponse::Result rma_result = setup.server.ProcessData().value();
-  ASSERT_EQ(ControlResponse::Result::kInvalidWindow, rma_result);
+  ASSERT_EQ(rma_result, ControlResponse::Result::kInvalidWindow);
 
   // Wait for finish report.
   ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
-  EXPECT_EQ(ControlResponse::Result::kInvalidWindow, rpc_result);
+  EXPECT_EQ(rpc_result, ControlResponse::Result::kInvalidWindow);
 }
 
 // Represents a pair of client and server objects.
@@ -850,10 +852,11 @@ class RendezvousPair {
              const absl::Notification& cancelled_notification) {
     threads.push_back(
         std::thread([this, target_rpcs, &cancelled_notification]() {
-          ClientRunloop(target_rpcs, cancelled_notification);
+          ASSERT_NO_FATAL_FAILURE(
+              ClientRunloop(target_rpcs, cancelled_notification));
         }));
     threads.push_back(std::thread([this, &cancelled_notification]() {
-      ServerRunloop(cancelled_notification);
+      ASSERT_NO_FATAL_FAILURE(ServerRunloop(cancelled_notification));
     }));
   }
 
@@ -876,7 +879,7 @@ class RendezvousPair {
         ibv_mw* mw = client_.StartRpc(
             op, absl::Uniform<uint32_t>(random, 0, kMaxRpcSize),
             absl::Uniform<uint32_t>(random));
-        CHECK(mw);
+        ASSERT_THAT(mw, NotNull());
         OutstandingTracking entry = {.id = mw, .cancelled = false};
         outstanding.emplace_back(entry);
       }
@@ -887,7 +890,7 @@ class RendezvousPair {
         if (rpc_result_or) {
           VLOG(1) << "Finished RPC.";
           if (!outstanding.front().cancelled) {
-            CHECK(ControlResponse::Result::kSuccess == rpc_result_or.value());
+            ASSERT_EQ(rpc_result_or.value(), ControlResponse::Result::kSuccess);
           }
           ++total_complete;
           // Cancel 1 for every 4 which complete.
@@ -899,7 +902,7 @@ class RendezvousPair {
           auto iter = outstanding.begin();
           std::advance(iter, index);
           if (!iter->cancelled) {
-            client_.CancelRpc(iter->id);
+            ASSERT_NO_FATAL_FAILURE(client_.CancelRpc(iter->id));
             iter->cancelled = true;
           }
         }

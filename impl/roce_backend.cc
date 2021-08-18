@@ -23,8 +23,7 @@
 
 namespace rdma_unit_test {
 
-absl::Status RoceBackend::SetQpRtr(ibv_qp* qp,
-                                   const verbs_util::LocalEndpointAttr& local,
+absl::Status RoceBackend::SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                                    ibv_gid remote_gid, uint32_t remote_qpn) {
   ibv_qp_attr mod_rtr = {};
   mod_rtr.qp_state = IBV_QPS_RTR;
@@ -37,11 +36,11 @@ absl::Status RoceBackend::SetQpRtr(ibv_qp* qp,
   mod_rtr.min_rnr_timer = 26;  // 82us delay
   mod_rtr.ah_attr.grh.dgid = remote_gid;
   mod_rtr.ah_attr.grh.flow_label = 0;
-  mod_rtr.ah_attr.grh.sgid_index = local.gid_index();
+  mod_rtr.ah_attr.grh.sgid_index = local.gid_index;
   mod_rtr.ah_attr.grh.hop_limit = 127;
   mod_rtr.ah_attr.is_global = 1;
   mod_rtr.ah_attr.sl = 5;
-  mod_rtr.ah_attr.port_num = local.port();
+  mod_rtr.ah_attr.port_num = local.port;
   constexpr int kRtrMask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                            IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                            IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;

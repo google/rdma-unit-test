@@ -38,6 +38,10 @@
 
 namespace rdma_unit_test {
 
+using ::testing::AnyOf;
+using ::testing::IsNull;
+using ::testing::NotNull;
+
 class PdTest : public BasicFixture {
  protected:
   static constexpr size_t kBufferMemoryPages = 1;
@@ -46,14 +50,14 @@ class PdTest : public BasicFixture {
 TEST_F(PdTest, OpenPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
-  EXPECT_NE(nullptr, pd);
+  EXPECT_THAT(pd, NotNull());
 }
 
 TEST_F(PdTest, OpenManyPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   for (int i = 0; i < 500; ++i) {
     auto* pd = ibv_.AllocPd(context);
-    EXPECT_NE(nullptr, pd);
+    EXPECT_THAT(pd, NotNull());
   }
 }
 
@@ -84,7 +88,7 @@ TEST_F(PdTest, ThreadedAlloc) {
 
   for (const auto& thread_pds : pds) {
     for (const auto& pd : thread_pds) {
-      EXPECT_NE(nullptr, pd);
+      EXPECT_THAT(pd, NotNull());
     }
   }
 }
@@ -102,7 +106,7 @@ TEST_F(PdTest, ThreadedAllocAndDealloc) {
   auto alloc_dealloc_pds = [this, &context, &dealloc_results](int thread_id) {
     for (int i = 0; i < kPdsPerThread; ++i) {
       ibv_pd* pd = ibv_.AllocPd(context);
-      ASSERT_NE(nullptr, pd);
+      ASSERT_THAT(pd, NotNull());
       dealloc_results[thread_id][i] = ibv_.DeallocPd(pd);
     }
   };
@@ -118,7 +122,7 @@ TEST_F(PdTest, ThreadedAllocAndDealloc) {
 
   for (const auto& thread_results : dealloc_results) {
     for (const auto& dealloc_result : thread_results) {
-      EXPECT_EQ(0, dealloc_result);
+      EXPECT_EQ(dealloc_result, 0);
     }
   }
 }
@@ -126,9 +130,7 @@ TEST_F(PdTest, ThreadedAllocAndDealloc) {
 TEST_F(PdTest, DeleteUnknownPd) {
   if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_pd dummy;
-  dummy.handle = 0;
-  dummy.context = context;
+  ibv_pd dummy{.context = context, .handle = 0};
   EXPECT_EQ(ENOENT, ibv_dealloc_pd(&dummy));
 }
 
@@ -137,7 +139,7 @@ TEST_F(PdTest, DeleteInvalidPd) {
   if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq original;
   // Save original so we can restore for cleanup.
   memcpy(&original, cq, sizeof(original));
@@ -145,7 +147,7 @@ TEST_F(PdTest, DeleteInvalidPd) {
   ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
   fake_pd->context = context;
   fake_pd->handle = original.handle;
-  EXPECT_THAT(ibv_dealloc_pd(fake_pd), testing::AnyOf(EINVAL, ENOENT));
+  EXPECT_THAT(ibv_dealloc_pd(fake_pd), AnyOf(EINVAL, ENOENT));
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -153,17 +155,16 @@ TEST_F(PdTest, DeleteInvalidPd) {
 TEST_F(PdTest, AllocQpWithFakePd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq* cq2 = ibv_.CreateCq(context);
-  ASSERT_NE(nullptr, cq2);
+  ASSERT_THAT(cq2, NotNull());
   ibv_cq original;
   // Save original so we can restore for cleanup.
   memcpy(&original, cq, sizeof(original));
   static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
   ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
   fake_pd->context = context;
-  ibv_qp* qp = ibv_.CreateQp(fake_pd, cq2);
-  EXPECT_EQ(nullptr, qp);
+  EXPECT_THAT(ibv_.CreateQp(fake_pd, cq2), IsNull());
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -172,24 +173,23 @@ TEST_F(PdTest, AllocMrWithPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
   ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_NE(nullptr, pd);
+  ASSERT_THAT(pd, NotNull());
   ibv_mr* mr = ibv_.RegMr(pd, buffer);
-  EXPECT_NE(nullptr, mr);
+  EXPECT_THAT(mr, NotNull());
 }
 
 TEST_F(PdTest, AllocMrWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
   ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq original;
   // Save original so we can restore for cleanup.
   memcpy(&original, cq, sizeof(original));
   static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
   ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
   fake_pd->context = context;
-  ibv_mr* mr = ibv_.RegMr(fake_pd, buffer);
-  EXPECT_EQ(nullptr, mr);
+  EXPECT_THAT(ibv_.RegMr(fake_pd, buffer), IsNull());
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -197,15 +197,14 @@ TEST_F(PdTest, AllocMrWithInvalidPd) {
 TEST_F(PdTest, AllocMwWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq original;
   // Save original so we can restore for cleanup.
   memcpy(&original, cq, sizeof(original));
   static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
   ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
   fake_pd->context = context;
-  ibv_mw* mw = ibv_.AllocMw(fake_pd, IBV_MW_TYPE_1);
-  EXPECT_EQ(nullptr, mw);
+  EXPECT_EQ(ibv_.AllocMw(fake_pd, IBV_MW_TYPE_1), nullptr);
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -228,6 +227,7 @@ class PdBindTest : public BasicFixture,
 
   struct BasicSetup {
     RdmaMemBlock buffer;
+    verbs_util::PortGid port_gid;
     ibv_context* context;
     ibv_cq* cq;
     ibv_pd* qp_pd;
@@ -239,6 +239,7 @@ class PdBindTest : public BasicFixture,
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.cq = ibv_.CreateCq(setup.context);
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
@@ -255,8 +256,7 @@ class PdBindTest : public BasicFixture,
     if (!setup.qp) {
       return absl::InternalError("Failed to create qp.");
     }
-    ibv_.SetUpSelfConnectedRcQp(setup.qp,
-                                ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
     return setup;
   }
 };
@@ -264,7 +264,9 @@ class PdBindTest : public BasicFixture,
 TEST_P(PdBindTest, MwOnOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
   ibv_mw* mw = ibv_.AllocMw(setup.other_pd, GetParam());
+  ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
     // succcess/failure of the bind and if successful than check for completion.
@@ -273,28 +275,28 @@ TEST_P(PdBindTest, MwOnOtherPd) {
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
     int result = ibv_bind_mw(setup.qp, mw, &bind_args);
-    EXPECT_THAT(result, testing::AnyOf(0, EPERM));
+    EXPECT_THAT(result, AnyOf(0, EPERM));
     if (result == 0) {
       ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                            verbs_util::WaitForCompletion(setup.qp->send_cq));
       if (completion.status == IBV_WC_SUCCESS) {
-        EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+        EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
       }
     }
 
   } else {
-    ASSERT_OK_AND_ASSIGN(
-        ibv_wc_status status,
-        verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
-                                    kType2RKey, mr));
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, status);
+    EXPECT_THAT(verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
+                                            kType2RKey, mr),
+                IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
 }
 
 TEST_P(PdBindTest, MrOnOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
   ibv_mw* mw = ibv_.AllocMw(setup.qp_pd, GetParam());
+  ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
     // succcess/failure of the bind and if successful than check for completion.
@@ -303,12 +305,12 @@ TEST_P(PdBindTest, MrOnOtherPd) {
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
     int result = ibv_bind_mw(setup.qp, mw, &bind_args);
-    EXPECT_THAT(result, testing::AnyOf(0, EPERM));
+    EXPECT_THAT(result, AnyOf(0, EPERM));
     if (result == 0) {
       ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                            verbs_util::WaitForCompletion(setup.qp->send_cq));
       if (completion.status == IBV_WC_SUCCESS) {
-        EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+        EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
       }
     }
   } else {
@@ -316,7 +318,7 @@ TEST_P(PdBindTest, MrOnOtherPd) {
         ibv_wc_status status,
         verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
                                     kType2RKey, mr));
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, status);
+    EXPECT_EQ(status, IBV_WC_MW_BIND_ERR);
   }
 }
 
@@ -325,16 +327,13 @@ TEST_P(PdBindTest, MrMwOnOtherPd) {
   ibv_mr* mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ibv_mw* mw = ibv_.AllocMw(setup.other_pd, GetParam());
   if (GetParam() == IBV_MW_TYPE_1) {
-    ASSERT_OK_AND_ASSIGN(
-        ibv_wc_status status,
-        verbs_util::BindType1MwSync(setup.qp, mw, setup.buffer.span(), mr));
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, status);
+    EXPECT_THAT(
+        verbs_util::BindType1MwSync(setup.qp, mw, setup.buffer.span(), mr),
+        IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   } else {
-    ASSERT_OK_AND_ASSIGN(
-        ibv_wc_status status,
-        verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
-                                    kType2RKey, mr));
-    EXPECT_EQ(IBV_WC_MW_BIND_ERR, status);
+    EXPECT_THAT(verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
+                                            kType2RKey, mr),
+                IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
 }
 
@@ -350,6 +349,7 @@ class PdRcLoopbackMrTest : public BasicFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_cq* local_cq;
     ibv_cq* remote_cq;
     ibv_pd* qp_pd;
@@ -362,6 +362,7 @@ class PdRcLoopbackMrTest : public BasicFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.local_cq = ibv_.CreateCq(setup.context);
     if (!setup.local_cq) {
       return absl::InternalError("Failed to create local cq.");
@@ -386,8 +387,7 @@ class PdRcLoopbackMrTest : public BasicFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
-                            ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
     return setup;
   }
 };
@@ -395,7 +395,9 @@ class PdRcLoopbackMrTest : public BasicFixture {
 TEST_F(PdRcLoopbackMrTest, SendMrOtherPdLocal) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), remote_mr);
   ibv_recv_wr recv =
@@ -409,13 +411,15 @@ TEST_F(PdRcLoopbackMrTest, SendMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, SendMrOtherPdRemote) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), remote_mr);
   ibv_recv_wr recv =
@@ -430,10 +434,10 @@ TEST_F(PdRcLoopbackMrTest, SendMrOtherPdRemote) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.remote_cq));
   EXPECT_THAT(completion.status,
-              testing::AnyOf(IBV_WC_LOC_PROT_ERR, IBV_WC_LOC_QP_OP_ERR));
+              AnyOf(IBV_WC_LOC_PROT_ERR, IBV_WC_LOC_QP_OP_ERR));
   ASSERT_OK_AND_ASSIGN(completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
@@ -443,7 +447,9 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
@@ -452,7 +458,7 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
@@ -462,7 +468,9 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
@@ -471,7 +479,7 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
@@ -481,7 +489,9 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
@@ -490,7 +500,7 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
@@ -500,7 +510,9 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
@@ -509,7 +521,7 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
@@ -519,7 +531,9 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   sg.length = 8;
@@ -530,7 +544,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
@@ -540,7 +554,9 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   sg.length = 8;
@@ -551,7 +567,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
@@ -561,7 +577,9 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   sg.length = 8;
@@ -572,7 +590,7 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
@@ -582,7 +600,9 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(local_mr, NotNull());
   ibv_mr* remote_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_THAT(remote_mr, NotNull());
 
   ibv_sge sg = verbs_util::CreateSge(setup.buffer.span(), local_mr);
   sg.length = 8;
@@ -593,7 +613,7 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 class PdUdLoopbackTest : public BasicFixture {
@@ -612,6 +632,7 @@ class PdUdLoopbackTest : public BasicFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_cq* local_cq;
     ibv_cq* remote_cq;
     ibv_pd* qp_pd;
@@ -624,6 +645,7 @@ class PdUdLoopbackTest : public BasicFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.local_cq = ibv_.CreateCq(setup.context);
     if (!setup.local_cq) {
       return absl::InternalError("Failed to create local cq.");
@@ -646,8 +668,7 @@ class PdUdLoopbackTest : public BasicFixture {
     if (!setup.local_qp) {
       return absl::InternalError("Failed to create local qp.");
     }
-    absl::Status status = ibv_.SetUpUdQp(
-        setup.local_qp, ibv_.GetLocalEndpointAttr(setup.context), kQKey);
+    absl::Status status = ibv_.SetUpUdQp(setup.local_qp, setup.port_gid, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up local ud qp.");
     }
@@ -657,8 +678,7 @@ class PdUdLoopbackTest : public BasicFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    status = ibv_.SetUpUdQp(setup.remote_qp,
-                            ibv_.GetLocalEndpointAttr(setup.context), kQKey);
+    status = ibv_.SetUpUdQp(setup.remote_qp, setup.port_gid, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up remote ud qp.");
     }
@@ -671,8 +691,10 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
     GTEST_SKIP() << "NIC does not handle PD errors.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.other_pd);
+  ibv_ah* ah = ibv_.CreateAh(setup.other_pd, setup.port_gid.gid);
+  ASSERT_THAT(ah, NotNull());
   ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
   ibv_sge ssge = verbs_util::CreateSge(setup.buffer.span(), mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
@@ -684,8 +706,7 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
                        verbs_util::WaitForCompletion(setup.local_cq));
   // It should return IBV_WC_LOC_QP_OP_ERR, see InfiniBand™ Architecture
   // Specification, Volume 1, P466, C10-10.
-  EXPECT_THAT(completion.status,
-              ::testing::AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_SUCCESS));
+  EXPECT_THAT(completion.status, AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_SUCCESS));
 }
 
 class PdType1MwTest : public BasicFixture {
@@ -704,6 +725,7 @@ class PdType1MwTest : public BasicFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_cq* cq;
     ibv_pd* mw_pd;
     ibv_mw* mw;
@@ -716,6 +738,7 @@ class PdType1MwTest : public BasicFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.cq = ibv_.CreateCq(setup.context);
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
@@ -737,8 +760,7 @@ class PdType1MwTest : public BasicFixture {
     if (!bind_qp) {
       return absl::InternalError("Failed to create qp for bind.");
     }
-    ibv_.SetUpSelfConnectedRcQp(bind_qp,
-                                ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpSelfConnectedRcQp(bind_qp, setup.port_gid);
     ASSIGN_OR_RETURN(ibv_wc_status status,
                      verbs_util::BindType1MwSync(bind_qp, setup.mw,
                                                  setup.buffer.span(), mr));
@@ -754,8 +776,7 @@ class PdType1MwTest : public BasicFixture {
     if (!setup.qp) {
       return absl::InternalError("Failed to create qp.");
     }
-    ibv_.SetUpSelfConnectedRcQp(setup.qp,
-                                ibv_.GetLocalEndpointAttr(setup.context));
+    ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
     setup.mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
     if (!setup.mr) {
       return absl::InternalError("Failed to create mr.");
@@ -772,7 +793,7 @@ TEST_F(PdType1MwTest, ReadMwOtherPd) {
   verbs_util::PostSend(setup.qp, read);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdType1MwTest, WriteMwOtherPd) {
@@ -783,7 +804,7 @@ TEST_F(PdType1MwTest, WriteMwOtherPd) {
   verbs_util::PostSend(setup.qp, write);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
@@ -796,7 +817,7 @@ TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
   verbs_util::PostSend(setup.qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
@@ -809,7 +830,7 @@ TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
   verbs_util::PostSend(setup.qp, comp_swap);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(IBV_WC_REM_ACCESS_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
 class PdSrqTest : public BasicFixture {
@@ -819,6 +840,7 @@ class PdSrqTest : public BasicFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context = nullptr;
+    verbs_util::PortGid port_gid;
     ibv_cq* cq = nullptr;
   };
 
@@ -826,6 +848,7 @@ class PdSrqTest : public BasicFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.cq = ibv_.CreateCq(setup.context);
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
@@ -838,13 +861,13 @@ TEST_F(PdSrqTest, CreateSrq) {
   // Fun fact: SRQ can be of different QP with its associated QP(s).
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_pd* pd1 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_pd* pd2 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
-  ASSERT_NE(nullptr, srq);
+  ASSERT_THAT(srq, NotNull());
   ibv_qp* qp = ibv_.CreateQp(pd2, setup.cq, srq);
-  EXPECT_NE(nullptr, qp);
+  EXPECT_THAT(qp, NotNull());
 }
 
 // When Pd of receive MR matches SRQ but not the receive QP.
@@ -855,16 +878,18 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_pd* pd1 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_pd* pd2 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
-  ASSERT_NE(nullptr, srq);
+  ASSERT_THAT(srq, NotNull());
   ibv_qp* qp = ibv_.CreateQp(pd2, setup.cq, srq);
-  ASSERT_NE(nullptr, qp);
-  ibv_.SetUpSelfConnectedRcQp(qp, ibv_.GetLocalEndpointAttr(setup.context));
+  ASSERT_THAT(qp, NotNull());
+  ibv_.SetUpSelfConnectedRcQp(qp, setup.port_gid);
   ibv_mr* mr_recv = ibv_.RegMr(pd1, setup.buffer);
+  ASSERT_THAT(mr_recv, NotNull());
   ibv_mr* mr_send = ibv_.RegMr(pd2, setup.buffer);
+  ASSERT_THAT(mr_send, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), mr_recv);
   ibv_recv_wr recv =
@@ -878,7 +903,7 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
   for (int i = 0; i < 2; ++i) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(setup.cq));
-    EXPECT_EQ(IBV_WC_SUCCESS, completion.status);
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   }
 }
 
@@ -891,18 +916,18 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
   ibv_cq* send_cq = ibv_.CreateCq(setup.context);
   ibv_cq* recv_cq = ibv_.CreateCq(setup.context);
   ibv_pd* pd1 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_pd* pd2 = ibv_.AllocPd(setup.context);
-  ASSERT_NE(nullptr, pd1);
+  ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
-  ASSERT_NE(nullptr, srq);
+  ASSERT_THAT(srq, NotNull());
   ibv_qp* recv_qp = ibv_.CreateQp(pd2, recv_cq, srq);
-  ASSERT_NE(nullptr, recv_qp);
+  ASSERT_THAT(recv_qp, NotNull());
   ibv_qp* send_qp = ibv_.CreateQp(pd2, send_cq);
-  ASSERT_NE(nullptr, send_qp);
-  ibv_.SetUpLoopbackRcQps(send_qp, recv_qp,
-                          ibv_.GetLocalEndpointAttr(setup.context));
+  ASSERT_THAT(send_qp, NotNull());
+  ibv_.SetUpLoopbackRcQps(send_qp, recv_qp, setup.port_gid);
   ibv_mr* mr = ibv_.RegMr(pd2, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), mr);
   ibv_recv_wr recv =
@@ -915,9 +940,9 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(send_cq));
-  EXPECT_EQ(IBV_WC_REM_OP_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(recv_cq));
-  EXPECT_EQ(IBV_WC_LOC_PROT_ERR, completion.status);
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
 // TODO(author1): Create Max

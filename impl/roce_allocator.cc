@@ -24,11 +24,10 @@ ibv_mr* RoceAllocator::RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
   return ibv_reg_mr(pd, memblock.data(), memblock.size(), access);
 }
 
-ibv_ah* RoceAllocator::CreateAhInternal(ibv_pd* pd) {
-  verbs_util::LocalEndpointAttr local = GetLocalEndpointAttr(pd->context);
-  verbs_util::AddressHandleAttr attr(local, /*remote_gid=*/local.gid());
-  ibv_ah_attr ibv_attr = attr.GetAttributes();
-  return ibv_create_ah(pd, &ibv_attr);
+ibv_ah* RoceAllocator::CreateAhInternal(ibv_pd* pd, ibv_gid remote_gid) {
+  verbs_util::PortGid local = GetLocalPortGid(pd->context);
+  ibv_ah_attr attr = verbs_util::CreateAhAttr(local, remote_gid);
+  return ibv_create_ah(pd, &attr);
 }
 
 ibv_qp* RoceAllocator::CreateQpInternal(ibv_pd* pd,

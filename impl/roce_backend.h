@@ -29,14 +29,14 @@ namespace rdma_unit_test {
 class RoceBackend : public VerbsBackend {
  public:
   RoceBackend() = default;
-  RoceBackend(const RoceBackend&& backend) = delete;
-  RoceBackend& operator=(const RoceBackend&& backend) = delete;
+  // Movable but not copyable.
+  RoceBackend(RoceBackend&& backend) = default;
+  RoceBackend& operator=(RoceBackend&& backend) = default;
   RoceBackend(const RoceBackend& backend) = delete;
   RoceBackend& operator=(const RoceBackend& backend) = delete;
   ~RoceBackend() override = default;
 
-  absl::Status SetQpRtr(ibv_qp* qp,
-                        const verbs_util::LocalEndpointAttr& local_endpoint,
+  absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                         ibv_gid remote_gid, uint32_t remote_qpn) override;
 };
 

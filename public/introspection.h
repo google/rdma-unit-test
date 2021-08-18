@@ -37,6 +37,9 @@ class NicIntrospection {
     return (attr_.device_cap_flags & target) > 0;
   }
 
+  // Returns true if the device allows empty SGLs in the WR.
+  virtual bool AllowsEmptySgl() const { return true; }
+
   // Returns true if the device supports Ipv6.
   virtual bool SupportsIpV6() const { return true; }
 

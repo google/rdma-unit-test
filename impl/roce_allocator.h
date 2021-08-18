@@ -25,8 +25,9 @@ namespace rdma_unit_test {
 class RoceAllocator : public VerbsAllocator {
  public:
   RoceAllocator() = default;
-  RoceAllocator(const RoceAllocator&& allocator) = delete;
-  RoceAllocator& operator=(const RoceAllocator&& allocator) = delete;
+  // Movable but not copyable.
+  RoceAllocator(RoceAllocator&& allocator) = default;
+  RoceAllocator& operator=(RoceAllocator&& allocator) = default;
   RoceAllocator(const RoceAllocator& allocator) = delete;
   RoceAllocator& operator=(const RoceAllocator& allocator) = delete;
   ~RoceAllocator() override = default;
@@ -34,7 +35,7 @@ class RoceAllocator : public VerbsAllocator {
  private:
   ibv_mr* RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
                         int access) override;
-  ibv_ah* CreateAhInternal(ibv_pd* pd) override;
+  ibv_ah* CreateAhInternal(ibv_pd* pd, ibv_gid remote_gid) override;
   ibv_qp* CreateQpInternal(ibv_pd* pd, ibv_qp_init_attr& basic_attr) override;
 };
 

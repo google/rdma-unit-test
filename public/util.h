@@ -46,45 +46,12 @@ namespace verbs_util {
 //                          Classes and Data Types
 //////////////////////////////////////////////////////////////////////////////
 
-// Encapsulates the various attributes that are used to define a local verbs
-// endpoint. Note: a remote endpoint is solely defined by an ibv_gid.
-class LocalEndpointAttr {
- public:
-  LocalEndpointAttr() = default;
-  LocalEndpointAttr(uint8_t port, ibv_gid gid, uint8_t gid_index);
-  ~LocalEndpointAttr() = default;
-  // Copyable.
-  LocalEndpointAttr(const LocalEndpointAttr& other) = default;
-  LocalEndpointAttr& operator=(const LocalEndpointAttr& other) = default;
-  LocalEndpointAttr(LocalEndpointAttr&& other) = default;
-  LocalEndpointAttr& operator=(LocalEndpointAttr&& other) = default;
-
-  uint8_t port() const;
-  ibv_gid gid() const;
-  uint8_t gid_index() const;
-
-
- private:
-  uint8_t port_;
-  ibv_gid gid_;
-  uint8_t gid_index_;
-};
-
-// Creates an abstraction for ibv_ah_attr.
-class AddressHandleAttr {
- public:
-  AddressHandleAttr() = delete;
-  // Creates an AddressHandle with default attributes with the info from the
-  // passed endpoint attributes.
-  explicit AddressHandleAttr(const verbs_util::LocalEndpointAttr& local,
-                             ibv_gid remote_gid);
-  ~AddressHandleAttr() = default;
-
-  // Returns the underlying ibv_ah_attr.
-  ibv_ah_attr GetAttributes() const;
-
- private:
-  ibv_ah_attr ibv_ah_attr_;
+// PortGid bundles the address information such as the ibv_gid and its index and
+// port number used to create an ibv_context.
+struct PortGid {
+  uint8_t port;
+  ibv_gid gid;
+  uint8_t gid_index;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -117,12 +84,6 @@ constexpr uint32_t kPageSize = 4 * 1024;  // 4K
 //                          Helper Functions
 //////////////////////////////////////////////////////////////////////////////
 
-// Returns of vector of attached interface names of type AF_PACKET.
-std::vector<std::string> GetInterfaces();
-
-// Returns the ethernet address of the given interface.
-std::array<uint8_t, ETH_ALEN> GetEthernetAddress(std::string_view interface);
-
 // Converts an uint64_t mtu to a ibv_mtu object.
 ibv_mtu ToVerbsMtu(uint64_t mtu);
 
@@ -133,8 +94,11 @@ std::string GidToString(const ibv_gid& gid);
 absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames();
 
 // Enumerate all ports with (one of) their sgid(s).
-absl::StatusOr<std::vector<LocalEndpointAttr>> EnumeratePortsForContext(
+absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
     ibv_context* context);
+
+// Create an ibv_ah_attr from a local address and a remote gid.
+ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid);
 
 // Verbs utilities:
 // Useful helper functions to eliminate the tediousness of filling repetitive

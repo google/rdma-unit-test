@@ -39,6 +39,10 @@
 
 namespace rdma_unit_test {
 
+using ::testing::AnyOf;
+using ::testing::IsNull;
+using ::testing::NotNull;
+
 class MrTest : public BasicFixture {
  public:
   static constexpr int kBufferMemoryPages = 4;
@@ -65,7 +69,7 @@ class MrTest : public BasicFixture {
 TEST_F(MrTest, RegisterMemory) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
-  EXPECT_NE(nullptr, mr);
+  EXPECT_THAT(mr, NotNull());
 }
 
 TEST_F(MrTest, ThreadedReg) {
@@ -75,7 +79,7 @@ TEST_F(MrTest, ThreadedReg) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
 
   ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_NE(nullptr, pd);
+  ASSERT_THAT(pd, NotNull());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
   std::array<std::array<ibv_mr*, kMrsPerThread>, kThreadCount> mrs;
   mrs = {{{nullptr}}};
@@ -98,7 +102,7 @@ TEST_F(MrTest, ThreadedReg) {
 
   for (const auto& thread_mrs : mrs) {
     for (const auto& mr : thread_mrs) {
-      EXPECT_NE(nullptr, mr);
+      EXPECT_THAT(mr, NotNull());
     }
   }
 }
@@ -110,7 +114,7 @@ TEST_F(MrTest, ThreadedRegAndDereg) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
 
   ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_NE(nullptr, pd);
+  ASSERT_THAT(pd, NotNull());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
   // Initialize to 1 since we are expecting the values to be 0 after
   // deregistering MRs.
@@ -119,7 +123,7 @@ TEST_F(MrTest, ThreadedRegAndDereg) {
   auto reg_dereg_mrs = [this, &pd, &buffer, &dereg_results](int thread_id) {
     for (int i = 0; i < kMrsPerThread; ++i) {
       ibv_mr* mr = ibv_.RegMr(pd, buffer);
-      ASSERT_NE(nullptr, mr);
+      ASSERT_THAT(mr, NotNull());
       dereg_results[thread_id][i] = ibv_.DeregMr(mr);
     }
   };
@@ -135,7 +139,7 @@ TEST_F(MrTest, ThreadedRegAndDereg) {
 
   for (const auto& thread_results : dereg_results) {
     for (const auto& dereg_result : thread_results) {
-      EXPECT_EQ(0, dereg_result);
+      EXPECT_EQ(dereg_result, 0);
     }
   }
 }
@@ -145,7 +149,7 @@ TEST_F(MrTest, ThreadedRegAndDereg) {
 TEST_F(MrTest, DeregInvalidMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_.CreateCq(setup.context);
-  ASSERT_NE(nullptr, cq);
+  ASSERT_THAT(cq, NotNull());
   ibv_cq original;
   // Save original so we can restore for cleanup.
   memcpy(&original, cq, sizeof(original));
@@ -153,7 +157,7 @@ TEST_F(MrTest, DeregInvalidMr) {
   ibv_mr* fake_mr = reinterpret_cast<ibv_mr*>(cq);
   fake_mr->context = setup.context;
   fake_mr->handle = original.handle;
-  EXPECT_THAT(ibv_dereg_mr(fake_mr), testing::AnyOf(EINVAL, ENOENT));
+  EXPECT_THAT(ibv_dereg_mr(fake_mr), AnyOf(EINVAL, ENOENT));
   // Restore original.
   memcpy(cq, &original, sizeof(original));
 }
@@ -161,25 +165,23 @@ TEST_F(MrTest, DeregInvalidMr) {
 // Cannot have remote write without local write.
 TEST_F(MrTest, InvalidPermissions) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer,
-                          IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
-  EXPECT_EQ(nullptr, mr);
+  EXPECT_THAT(ibv_.RegMr(setup.pd, setup.buffer,
+                         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
+              IsNull());
 }
 
 // Cannot have remote atomic without local write.
 TEST_F(MrTest, InvalidPermissions2) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer,
-                          IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
-  EXPECT_EQ(nullptr, mr);
+  EXPECT_THAT(ibv_.RegMr(setup.pd, setup.buffer,
+                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC),
+              IsNull());
 }
 
 TEST_F(MrTest, DestroyPdWithOutstandingMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
-  ASSERT_NE(nullptr, mr);
-
-  EXPECT_EQ(EBUSY, ibv_.DeallocPd(setup.pd));
+  ASSERT_THAT(ibv_.RegMr(setup.pd, setup.buffer), NotNull());
+  EXPECT_EQ(ibv_.DeallocPd(setup.pd), EBUSY);
 }
 
 // TODO(author1): Create Many/Max
@@ -193,7 +195,7 @@ class MrLoopbackTest : public BasicFixture {
 
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::LocalEndpointAttr endpoint;
+    verbs_util::PortGid port_gid;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     // RC qp.
@@ -209,7 +211,7 @@ class MrLoopbackTest : public BasicFixture {
     client.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     memset(client.buffer.data(), buf_content, client.buffer.size());
     ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
-    client.endpoint = ibv_.GetLocalEndpointAttr(client.context);
+    client.port_gid = ibv_.GetLocalPortGid(client.context);
     client.pd = ibv_.AllocPd(client.context);
     if (!client.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -234,7 +236,7 @@ class MrLoopbackTest : public BasicFixture {
   absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair() {
     ASSIGN_OR_RETURN(Client local, CreateClient(/*buf_content=*/'a'));
     ASSIGN_OR_RETURN(Client remote, CreateClient(/*buf_content=*/'b'));
-    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.endpoint);
+    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_gid);
     return std::make_pair(local, remote);
   }
 
@@ -264,7 +266,7 @@ class MrLoopbackTest : public BasicFixture {
         if (!cancel_notification.HasBeenNotified()) {
           if (outstanding + wqes.size() < kTargetOutstanding) {
             ibv_send_wr* bad_wr = nullptr;
-            EXPECT_EQ(0, ibv_post_send(local.qp, wqes.data(), &bad_wr));
+            EXPECT_EQ(ibv_post_send(local.qp, wqes.data(), &bad_wr), 0);
             outstanding += wqes.size();
           } else {
             saturation = true;
@@ -303,11 +305,11 @@ TEST_F(MrLoopbackTest, OutstandingRecv) {
   ibv_sge sg = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sg, /*num_sge=*/1);
   verbs_util::PostRecv(remote.qp, recv);
-  ASSERT_EQ(0, ibv_.DeregMr(remote.mr));
+  ASSERT_EQ(ibv_.DeregMr(remote.mr), 0);
 
   ibv_wc completions[10];
   int count = ibv_poll_cq(local.cq, sizeof(completions), completions);
-  EXPECT_EQ(0, count);
+  EXPECT_EQ(count, 0);
 }
 
 TEST_F(MrLoopbackTest, OutstandingRead) {
@@ -319,7 +321,7 @@ TEST_F(MrLoopbackTest, OutstandingRead) {
 
   std::vector<uint64_t> results;
   auto deregister = [this, &local = local]() {
-    EXPECT_EQ(0, ibv_.DeregMr(local.mr));
+    EXPECT_EQ(ibv_.DeregMr(local.mr), 0);
   };
   StressDereg(local, read, deregister, &results);
 
@@ -338,7 +340,7 @@ TEST_F(MrLoopbackTest, OutstandingWrite) {
 
   std::vector<uint64_t> results;
   auto deregister = [this, &local = local]() {
-    ASSERT_EQ(0, ibv_.DeregMr(local.mr));
+    ASSERT_EQ(ibv_.DeregMr(local.mr), 0);
   };
   StressDereg(local, write, deregister, &results);
 

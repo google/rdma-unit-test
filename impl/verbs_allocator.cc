@@ -26,6 +26,7 @@
 #include "glog/logging.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
@@ -112,8 +113,7 @@ RdmaMemBlock VerbsAllocator::AllocBufferByBytes(size_t bytes,
   return result;
 }
 
-absl::StatusOr<ibv_context*> VerbsAllocator::OpenDeviceWithActivePorts(
-    bool no_ipv6_for_gid) {
+absl::StatusOr<ibv_context*> VerbsAllocator::OpenDevice(bool no_ipv6_for_gid) {
   std::vector<std::string> device_names;
   if (!absl::GetFlag(FLAGS_device_name).empty()) {
     device_names.push_back(absl::GetFlag(FLAGS_device_name));
@@ -125,7 +125,7 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDeviceWithActivePorts(
   }
 
   ibv_context* context = nullptr;
-  std::vector<verbs_util::LocalEndpointAttr> endpoints;
+  std::vector<verbs_util::PortGid> port_gids;
   for (auto& device_name : device_names) {
     absl::StatusOr<ibv_context*> context_or =
         verbs_util::OpenUntrackedDevice(device_name);
@@ -135,11 +135,11 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDeviceWithActivePorts(
       continue;
     }
     context = context_or.value();
-    absl::StatusOr<std::vector<verbs_util::LocalEndpointAttr>> enum_result =
-        verbs_util::EnumeratePortsForContext(context);
+    absl::StatusOr<std::vector<verbs_util::PortGid>> enum_result =
+        verbs_util::EnumeratePortGidsForContext(context);
     if (enum_result.ok() && !enum_result.value().empty()) {
-      endpoints = enum_result.value();
-      VLOG(1) << "Found (" << endpoints.size()
+      port_gids = enum_result.value();
+      VLOG(1) << "Found (" << port_gids.size()
               << ") active ports for device: " << device_name;
       // Just need one device with active ports. Break at this point.
       break;
@@ -150,27 +150,27 @@ absl::StatusOr<ibv_context*> VerbsAllocator::OpenDeviceWithActivePorts(
     context = nullptr;
   }
 
-  if (!context || endpoints.empty()) {
+  if (!context || port_gids.empty()) {
     return absl::InternalError("Failed to open a device with active ports.");
   }
 
   {
     absl::MutexLock guard(&mtx_contexts_);
-    contexts_.emplace_back(context, &ContextDeleter);
+    contexts_.emplace(context, &ContextDeleter);
   }
-  absl::MutexLock guard(&mtx_endpoints_);
-  endpoint_attrs_[context] = endpoints;
+  absl::MutexLock guard(&mtx_port_gids_);
+  port_gids_[context] = port_gids;
   return context;
 }
 
 ibv_pd* VerbsAllocator::AllocPd(ibv_context* context) {
-  auto result = ibv_alloc_pd(context);
-  if (result) {
-    VLOG(1) << "Created pd " << result;
+  auto pd = ibv_alloc_pd(context);
+  if (pd) {
+    VLOG(1) << "Created pd " << pd;
     absl::MutexLock guard(&mtx_pds_);
-    pds_.emplace_back(result, &PdDeleter);
+    pds_.emplace(pd, &PdDeleter);
   }
-  return result;
+  return pd;
 }
 
 int VerbsAllocator::DeallocPd(ibv_pd* pd) {
@@ -179,25 +179,34 @@ int VerbsAllocator::DeallocPd(ibv_pd* pd) {
   if (result != 0) {
     return result;
   }
-  auto iter = pds_.begin();
-  while (iter != pds_.end() && iter->get() != pd) {
-    ++iter;
-  }
-  DCHECK(iter != pds_.end());
-  ibv_pd* found = iter->release();
-  DCHECK_EQ(found, pd);
-  pds_.erase(iter);
+  auto node = pds_.extract(pd);
+  DCHECK(!node.empty());
+  ibv_pd* found = node.value().release();
+  DCHECK_EQ(pd, found);
   return result;
 }
 
-ibv_ah* VerbsAllocator::CreateAh(ibv_pd* pd) {
-  ibv_ah* ah = CreateAhInternal(pd);
+ibv_ah* VerbsAllocator::CreateAh(ibv_pd* pd, ibv_gid remote_gid) {
+  ibv_ah* ah = CreateAhInternal(pd, remote_gid);
   if (ah) {
     VLOG(1) << "Created ah " << ah;
     absl::MutexLock guard(&mtx_ahs_);
-    ahs_.emplace_back(ah, &AhDeleter);
+    ahs_.emplace(ah, &AhDeleter);
   }
   return ah;
+}
+
+int VerbsAllocator::DestroyAh(ibv_ah* ah) {
+  absl::MutexLock guard(&mtx_ahs_);
+  int result = ibv_destroy_ah(ah);
+  if (result != 0) {
+    return result;
+  }
+  auto node = ahs_.extract(ah);
+  DCHECK(!node.empty());
+  ibv_ah* found = node.value().release();
+  DCHECK_EQ(ah, found);
+  return result;
 }
 
 ibv_mr* VerbsAllocator::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
@@ -206,7 +215,7 @@ ibv_mr* VerbsAllocator::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
   if (mr) {
     VLOG(1) << "Created Memory Region " << mr;
     absl::MutexLock guard(&mtx_mrs_);
-    mrs_.emplace_back(mr, &MrDeleter);
+    mrs_.emplace(mr, &MrDeleter);
   }
   return mr;
 }
@@ -217,14 +226,10 @@ int VerbsAllocator::DeregMr(ibv_mr* mr) {
   if (result != 0) {
     return result;
   }
-  auto iter = mrs_.begin();
-  while (iter != mrs_.end() && iter->get() != mr) {
-    ++iter;
-  }
-  DCHECK(iter != mrs_.end());
-  ibv_mr* found = iter->release();
-  DCHECK_EQ(found, mr);
-  mrs_.erase(iter);
+  auto node = mrs_.extract(mr);
+  DCHECK(!node.empty());
+  ibv_mr* found = node.value().release();
+  DCHECK_EQ(mr, found);
   return result;
 }
 
@@ -233,7 +238,7 @@ ibv_mw* VerbsAllocator::AllocMw(ibv_pd* pd, ibv_mw_type type) {
   if (mw) {
     VLOG(1) << "Created Memory Window " << mw;
     absl::MutexLock guard(&mtx_mws_);
-    mws_.emplace_back(mw, &MwDeleter);
+    mws_.emplace(mw, &MwDeleter);
   }
   return mw;
 }
@@ -244,25 +249,21 @@ int VerbsAllocator::DeallocMw(ibv_mw* mw) {
   if (result != 0) {
     return result;
   }
-  auto iter = mws_.begin();
-  while (iter != mws_.end() && iter->get() != mw) {
-    ++iter;
-  }
-  DCHECK(iter != mws_.end());
-  ibv_mw* found = iter->release();
-  DCHECK_EQ(found, mw);
-  mws_.erase(iter);
+  auto node = mws_.extract(mw);
+  DCHECK(!node.empty());
+  ibv_mw* found = node.value().release();
+  DCHECK_EQ(mw, found);
   return result;
 }
 
 ibv_comp_channel* VerbsAllocator::CreateChannel(ibv_context* context) {
-  auto result = ibv_create_comp_channel(context);
-  if (result) {
-    VLOG(1) << "Created channel " << result;
+  auto channel = ibv_create_comp_channel(context);
+  if (channel) {
+    VLOG(1) << "Created channel " << channel;
     absl::MutexLock guard(&mtx_channels_);
-    channels_.emplace_back(result, &ChannelDeleter);
+    channels_.emplace(channel, &ChannelDeleter);
   }
-  return result;
+  return channel;
 }
 
 int VerbsAllocator::DestroyChannel(ibv_comp_channel* channel) {
@@ -271,26 +272,22 @@ int VerbsAllocator::DestroyChannel(ibv_comp_channel* channel) {
   if (result != 0) {
     return result;
   }
-  auto iter = channels_.begin();
-  while (iter != channels_.end() && iter->get() != channel) {
-    ++iter;
-  }
-  DCHECK(iter != channels_.end());
-  ibv_comp_channel* found = iter->release();
-  DCHECK_EQ(found, channel);
-  channels_.erase(iter);
+  auto node = channels_.extract(channel);
+  DCHECK(!node.empty());
+  ibv_comp_channel* found = node.value().release();
+  DCHECK_EQ(channel, found);
   return result;
 }
 
 ibv_cq* VerbsAllocator::CreateCq(ibv_context* context, int max_wr,
                                  ibv_comp_channel* channel) {
-  auto result = ibv_create_cq(context, max_wr, nullptr, channel, 0);
-  if (result) {
-    VLOG(1) << "Created Cq " << result;
+  auto cq = ibv_create_cq(context, max_wr, nullptr, channel, 0);
+  if (cq) {
+    VLOG(1) << "Created Cq " << cq;
     absl::MutexLock guard(&mtx_cqs_);
-    cqs_.emplace_back(result, &CqDeleter);
+    cqs_.emplace(cq, &CqDeleter);
   }
-  return result;
+  return cq;
 }
 
 int VerbsAllocator::DestroyCq(ibv_cq* cq) {
@@ -299,14 +296,10 @@ int VerbsAllocator::DestroyCq(ibv_cq* cq) {
   if (result != 0) {
     return result;
   }
-  auto iter = cqs_.begin();
-  while (iter != cqs_.end() && iter->get() != cq) {
-    ++iter;
-  }
-  DCHECK(iter != cqs_.end());
-  ibv_cq* found = iter->release();
-  DCHECK_EQ(found, cq);
-  cqs_.erase(iter);
+  auto node = cqs_.extract(cq);
+  DCHECK(!node.empty());
+  ibv_cq* found = node.value().release();
+  DCHECK_EQ(cq, found);
   return result;
 }
 
@@ -315,13 +308,7 @@ ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
   attr.attr.max_wr = max_wr;
   attr.attr.max_sge = verbs_util::kDefaultMaxSge;
   attr.attr.srq_limit = 0;  // not used for infiniband.
-  ibv_srq* srq = ibv_create_srq(pd, &attr);
-  if (srq) {
-    VLOG(1) << "Created srq: " << srq;
-    absl::MutexLock guard(&mtx_srqs_);
-    srqs_.emplace_back(srq, &SrqDeleter);
-  }
-  return srq;
+  return CreateSrq(pd, attr);
 }
 
 ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
@@ -329,7 +316,7 @@ ibv_srq* VerbsAllocator::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
   if (srq) {
     VLOG(1) << "Created srq: " << srq;
     absl::MutexLock guard(&mtx_srqs_);
-    srqs_.emplace_back(srq, &SrqDeleter);
+    srqs_.emplace(srq, &SrqDeleter);
   }
   return srq;
 }
@@ -340,14 +327,10 @@ int VerbsAllocator::DestroySrq(ibv_srq* srq) {
   if (result != 0) {
     return result;
   }
-  auto iter = srqs_.begin();
-  while (iter != srqs_.end() && iter->get() != srq) {
-    ++iter;
-  }
-  DCHECK(iter != srqs_.end());
-  ibv_srq* found = iter->release();
-  DCHECK_EQ(found, srq);
-  srqs_.erase(iter);
+  auto node = srqs_.extract(srq);
+  DCHECK(!node.empty());
+  ibv_srq* found = node.value().release();
+  DCHECK_EQ(srq, found);
   return result;
 }
 
@@ -383,7 +366,7 @@ ibv_qp* VerbsAllocator::CreateQp(ibv_pd* pd, ibv_qp_init_attr& attr) {
   if (qp) {
     VLOG(1) << "Created qp " << qp;
     absl::MutexLock guard(&mtx_qps_);
-    qps_.emplace_back(qp, &QpDeleter);
+    qps_.emplace(qp, &QpDeleter);
   }
   return qp;
 }
@@ -394,22 +377,18 @@ int VerbsAllocator::DestroyQp(ibv_qp* qp) {
   if (result != 0) {
     return result;
   }
-  auto iter = qps_.begin();
-  while (iter != qps_.end() && iter->get() != qp) {
-    ++iter;
-  }
-  DCHECK(iter != qps_.end());
-  ibv_qp* found = iter->release();
-  DCHECK_EQ(found, qp);
-  qps_.erase(iter);
+  auto node = qps_.extract(qp);
+  DCHECK(!node.empty());
+  ibv_qp* found = node.value().release();
+  DCHECK_EQ(qp, found);
   return result;
 }
 
-verbs_util::LocalEndpointAttr VerbsAllocator::GetLocalEndpointAttr(
+verbs_util::PortGid VerbsAllocator::GetLocalPortGid(
     ibv_context* context) const {
-  absl::MutexLock guard(&mtx_endpoints_);
-  auto iter = endpoint_attrs_.find(context);
-  CHECK(iter != endpoint_attrs_.end());  // Crash ok
+  absl::MutexLock guard(&mtx_port_gids_);
+  auto iter = port_gids_.find(context);
+  CHECK(iter != port_gids_.end());  // Crash ok
   auto& info_array = iter->second;
   return info_array[0];
 }

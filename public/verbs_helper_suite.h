@@ -42,28 +42,23 @@ namespace rdma_unit_test {
 class VerbsHelperSuite {
  public:
   VerbsHelperSuite();
-  // Not movable or copyable.
-  VerbsHelperSuite(const VerbsHelperSuite&& helper) = delete;
-  VerbsHelperSuite& operator=(const VerbsHelperSuite&& helper) = delete;
+  // Movable but not copyable.
+  VerbsHelperSuite(VerbsHelperSuite&& helper) = default;
+  VerbsHelperSuite& operator=(VerbsHelperSuite&& helper) = default;
   VerbsHelperSuite(const VerbsHelperSuite& helper) = delete;
   VerbsHelperSuite& operator=(const VerbsHelperSuite& helper) = delete;
   ~VerbsHelperSuite() = default;
 
-  static void SetUpHelperGlobal();
-  static void TearDownHelperGlobal();
-
   // See VerbsBackend.
-  absl::Status SetUpRcQp(ibv_qp* local_qp,
-                         const verbs_util::LocalEndpointAttr& local,
+  absl::Status SetUpRcQp(ibv_qp* local_qp, const verbs_util::PortGid& local,
                          ibv_gid remote_gid, uint32_t remote_qpn);
-  void SetUpSelfConnectedRcQp(ibv_qp* qp,
-                              const verbs_util::LocalEndpointAttr& local);
+  void SetUpSelfConnectedRcQp(ibv_qp* qp, const verbs_util::PortGid& local);
   void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::LocalEndpointAttr& local);
-  absl::Status SetUpUdQp(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
+                          const verbs_util::PortGid& local);
+  absl::Status SetUpUdQp(ibv_qp* qp, const verbs_util::PortGid& local,
                          uint32_t qkey);
   absl::Status SetQpInit(ibv_qp* qp, uint8_t port);
-  absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
+  absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                         ibv_gid remote_gid, uint32_t remote_qpn);
   absl::Status SetQpRts(ibv_qp* qp);
   absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr, int mask);
@@ -76,7 +71,8 @@ class VerbsHelperSuite {
   RdmaMemBlock AllocBufferByBytes(
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__);
   absl::StatusOr<ibv_context*> OpenDevice(bool no_ipv6_for_gid = false);
-  ibv_ah* CreateAh(ibv_pd* pd);
+  ibv_ah* CreateAh(ibv_pd* pd, ibv_gid remote_gid);
+  int DestroyAh(ibv_ah* ah);
   ibv_pd* AllocPd(ibv_context* context);
   int DeallocPd(ibv_pd* pd);
   ibv_mr* RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
@@ -104,12 +100,11 @@ class VerbsHelperSuite {
                    ibv_qp_type qp_type = IBV_QPT_RC, int sig_all = 0);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
-  verbs_util::LocalEndpointAttr GetLocalEndpointAttr(
-      ibv_context* context) const;
+  verbs_util::PortGid GetLocalPortGid(ibv_context* context) const;
 
  private:
   std::unique_ptr<VerbsAllocator> allocator_;
-  std::shared_ptr<VerbsBackend> backend_;
+  std::unique_ptr<VerbsBackend> backend_;
 };
 
 }  // namespace rdma_unit_test

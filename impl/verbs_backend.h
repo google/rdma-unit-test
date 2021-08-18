@@ -34,35 +34,33 @@ namespace rdma_unit_test {
 class VerbsBackend {
  public:
   VerbsBackend() = default;
-  VerbsBackend(const VerbsBackend&& transport) = delete;
-  VerbsBackend& operator=(const VerbsBackend&& transport) = delete;
+  // Movable but not copyable.
+  VerbsBackend(VerbsBackend&& transport) = default;
+  VerbsBackend& operator=(VerbsBackend&& transport) = default;
   VerbsBackend(const VerbsBackend& transport) = delete;
   VerbsBackend& operator=(const VerbsBackend& transport) = delete;
   virtual ~VerbsBackend() = default;
 
   // Sets up a reliable connection queue pair to RTS (ready to send).
-  absl::Status SetUpRcQp(ibv_qp* qp, const verbs_util::LocalEndpointAttr& local,
+  absl::Status SetUpRcQp(ibv_qp* qp, const verbs_util::PortGid& local,
                          ibv_gid remote_gid, uint32_t remote_qpn);
 
   // Set up a QP that is connected to itself. Succeed or crash.
-  void SetUpSelfConnectedRcQp(ibv_qp* qp,
-                              const verbs_util::LocalEndpointAttr& local);
+  void SetUpSelfConnectedRcQp(ibv_qp* qp, const verbs_util::PortGid& local);
 
   // Set up a pair of interconnected RC QPs on loopback port. Both QPs share the
   // same NIC and thus same verbs_util::VerbsAddress.
   void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::LocalEndpointAttr& local);
+                          const verbs_util::PortGid& local);
 
   // Sets up a unreliable datagram queue pair to RTS (ready to send).
-  absl::Status SetUpUdQp(ibv_qp* qp, verbs_util::LocalEndpointAttr local,
-                         uint32_t qkey);
+  absl::Status SetUpUdQp(ibv_qp* qp, verbs_util::PortGid local, uint32_t qkey);
 
   // Modify the QP to Init state.
   absl::Status SetQpInit(ibv_qp* qp, uint8_t port);
 
   // Modify the QP to RTR(ready to receive) state.
-  virtual absl::Status SetQpRtr(ibv_qp* qp,
-                                const verbs_util::LocalEndpointAttr& local,
+  virtual absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                                 ibv_gid remote_gid, uint32_t remote_qpn) = 0;
 
   // Modify the QP to RTS(ready to send) state.

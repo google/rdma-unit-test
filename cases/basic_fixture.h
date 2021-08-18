@@ -32,7 +32,8 @@
 namespace rdma_unit_test {
 
 // A light-weight test fixture for RDMA unit tests. Provides default-created
-// VerbsHelperSuite for smart verbs creations and for setting up QPs.
+// VerbsHelperSuite for smart verbs creations and transport-related QP
+// bring-ups.
 class BasicFixture : public ::testing::Test {
  public:
   BasicFixture() = default;

@@ -15,6 +15,7 @@
 #include <errno.h>
 
 #include "glog/logging.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -23,20 +24,25 @@
 #include "cases/basic_fixture.h"
 #include "public/flags.h"
 #include "public/status_matchers.h"
+#include "public/util.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
+
+using ::testing::NotNull;
 
 class AhTest : public BasicFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
+    verbs_util::PortGid port_gid;
     ibv_pd* pd;
   };
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -47,8 +53,8 @@ class AhTest : public BasicFixture {
 
 TEST_F(AhTest, CreateAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd);
-  EXPECT_NE(nullptr, ah);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  EXPECT_THAT(ah, NotNull());
 }
 
 TEST_F(AhTest, DeregUnknownAh) {
@@ -59,18 +65,18 @@ TEST_F(AhTest, DeregUnknownAh) {
   ibv_ah dummy;
   dummy.context = setup.context;
   dummy.handle = -1;
-  EXPECT_EQ(ENOENT, ibv_destroy_ah(&dummy));
+  EXPECT_EQ(ibv_destroy_ah(&dummy), ENOENT);
 }
 
 TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd);
-  ASSERT_NE(nullptr, ah);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  ASSERT_THAT(ah, NotNull());
   int result = ibv_.DeallocPd(setup.pd);
   if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(0, result);
+    EXPECT_EQ(result, 0);
   } else {
-    EXPECT_EQ(EBUSY, result);
+    EXPECT_EQ(result, EBUSY);
   }
 }
 

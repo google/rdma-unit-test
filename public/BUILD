@@ -52,6 +52,16 @@ cc_library(
 )
 
 cc_library(
+    name = "map_util",
+    hdrs = ["map_util.h"],
+    deps = [
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+cc_library(
     name = "util",
     srcs = ["util.cc"],
     hdrs = ["util.h"],
@@ -93,5 +103,9 @@ cc_library(
     name = "status_matchers",
     testonly = 1,
     hdrs = ["status_matchers.h"],
-    deps = ["@com_google_googletest//:gtest"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest",
+    ],
 )
