@@ -218,7 +218,7 @@ ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr) {
 }
 
 ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr) {
-  DCHECK_EQ(reinterpret_cast<uint64_t>(addr) % 8, 0)
+  DCHECK_EQ(reinterpret_cast<uint64_t>(addr) % 8, 0ul)
       << "Address is not 8 byte aligned.";
   return CreateSge(absl::MakeSpan(reinterpret_cast<uint8_t*>(addr), 8), mr);
 }

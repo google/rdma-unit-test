@@ -59,7 +59,6 @@ namespace {
 using ::testing::AnyOf;
 using ::testing::Each;
 using ::testing::NotNull;
-using ::testing::status::StatusIs;
 
 class LoopbackTest : public BasicFixture {
  protected:

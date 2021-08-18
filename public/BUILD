@@ -102,6 +102,7 @@ cc_library(
 cc_library(
     name = "status_matchers",
     testonly = 1,
+    srcs = ["status_matchers.cc"],
     hdrs = ["status_matchers.h"],
     deps = [
         "@com_google_absl//absl/status",
