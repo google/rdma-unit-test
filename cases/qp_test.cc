@@ -34,8 +34,8 @@
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
 #include "public/verbs_helper_suite.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
@@ -293,28 +293,38 @@ TEST_F(QpTest, QueueRefs) {
 }
 
 TEST_F(QpTest, ExceedsDeviceCap) {
+  // Some devices will fail the qp creation. Other will just adjust the QP
+  // capacity accordingly.
   const ibv_device_attr& device_attr = Introspection().device_attr();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_send_wr = device_attr.max_qp_wr + 1;
-  EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr)
-      << "max_send_wr";
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  if (qp) {
+    EXPECT_LE(setup.basic_attr.cap.max_send_wr, device_attr.max_qp_wr);
+  }
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_recv_wr = device_attr.max_qp_wr + 1;
-  EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr)
-      << "max_recv_wr";
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  if (qp) {
+    EXPECT_LE(setup.basic_attr.cap.max_recv_wr, device_attr.max_qp_wr);
+  }
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_send_sge = device_attr.max_sge + 1;
-  EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr)
-      << "max_send_sge";
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  if (qp) {
+    EXPECT_LE(setup.basic_attr.cap.max_send_sge, device_attr.max_sge);
+  }
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_recv_sge = device_attr.max_sge + 1;
-  EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr)
-      << "max_recv_sge";
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  if (qp) {
+    EXPECT_LE(setup.basic_attr.cap.max_recv_sge, device_attr.max_sge);
+  }
 }
 
 TEST_F(QpTest, ExceedsMaxQp) {

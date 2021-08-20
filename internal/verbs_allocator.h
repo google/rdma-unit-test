@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_VERBS_ALLOCATOR_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_VERBS_ALLOCATOR_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_ALLOCATOR_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_ALLOCATOR_H_
 
 #include <stddef.h>
-#include <stdint.h>
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -31,7 +31,7 @@
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
@@ -147,4 +147,4 @@ class VerbsAllocator {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_VERBS_ALLOCATOR_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_ALLOCATOR_H_

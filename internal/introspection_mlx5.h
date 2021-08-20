@@ -1,8 +1,8 @@
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX5_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX5_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 
 #include "infiniband/verbs.h"
-#include "impl/introspection_registrar.h"
+#include "internal/introspection_registrar.h"
 #include "public/introspection.h"
 
 namespace rdma_unit_test {
@@ -78,9 +78,6 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"PdTest", "DeleteUnknownPd", ""},
         // User API misuse causes crash.
         {"PdTest", "DeleteInvalidPd", ""},
-        // Allows qp creation when exceeding max_recv_wr, max_send_sge,
-        // and max_recv_sge.
-        {"QpTest", "ExceedsDeviceCap", ""},
         // Allows creation over max qp.
         {"QpTest", "ExceedsMaxQp", ""},
     };
@@ -103,4 +100,4 @@ class IntrospectionMlx5 : public NicIntrospection {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX5_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_

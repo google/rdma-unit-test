@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX4_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX4_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
 
 #include "infiniband/verbs.h"
-#include "impl/introspection_registrar.h"
+#include "internal/introspection_registrar.h"
 #include "public/introspection.h"
 
 namespace rdma_unit_test {
@@ -37,6 +37,8 @@ class IntrospectionMlx4 : public NicIntrospection {
   }
 
   bool FullCqIdlesQp() const override { return true; }
+
+  bool SupportsReRegMr() const override { return true; }
 
  protected:
   const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
@@ -92,4 +94,4 @@ class IntrospectionMlx4 : public NicIntrospection {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_MLX4_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_

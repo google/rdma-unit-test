@@ -13,13 +13,13 @@
 // limitations under the License.
 
 #include <sched.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -38,8 +38,8 @@
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
 #include "public/verbs_helper_suite.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 namespace {

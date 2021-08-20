@@ -18,13 +18,13 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_RDMA_MEMBLOCK_H_
 
 #include <stddef.h>
-#include <stdint.h>
 
+#include <cstdint>
 #include <iosfwd>
 #include <memory>
 
 #include "absl/types/span.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

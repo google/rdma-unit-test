@@ -17,8 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_FLAGS_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_FLAGS_H_
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <string>
 
 #include "absl/flags/declare.h"

@@ -24,10 +24,10 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"
 #include "infiniband/verbs.h"
-#include "impl/introspection_registrar.h"
+#include "internal/introspection_registrar.h"
 #include "public/flags.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

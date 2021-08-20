@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "impl/verbs_allocator.h"
+#include "internal/verbs_allocator.h"
 
 #include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <utility>
@@ -35,7 +35,7 @@
 #include "infiniband/verbs.h"
 #include "public/flags.h"
 #include "public/rdma_memblock.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

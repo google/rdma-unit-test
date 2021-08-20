@@ -26,8 +26,8 @@ cc_library(
     deps = [
         ":flags",
         ":status_matchers",
-        ":util",
-        "//impl:introspection_registrar",
+        ":verbs_util",
+        "//internal:introspection_registrar",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -43,7 +43,7 @@ cc_library(
     srcs = ["rdma_memblock.cc"],
     hdrs = ["rdma_memblock.h"],
     deps = [
-        ":util",
+        ":verbs_util",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -62,9 +62,9 @@ cc_library(
 )
 
 cc_library(
-    name = "util",
-    srcs = ["util.cc"],
-    hdrs = ["util.h"],
+    name = "verbs_util",
+    srcs = ["verbs_util.cc"],
+    hdrs = ["verbs_util.h"],
     deps = [
         ":flags",
         ":status_matchers",
@@ -88,11 +88,11 @@ cc_library(
     hdrs = ["verbs_helper_suite.h"],
     deps = [
         ":flags",
-        ":util",
-        "//impl:roce_allocator",
-        "//impl:roce_backend",
-        "//impl:verbs_allocator",
-        "//impl:verbs_backend",
+        ":verbs_util",
+        "//internal:roce_allocator",
+        "//internal:roce_backend",
+        "//internal:verbs_allocator",
+        "//internal:verbs_backend",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",

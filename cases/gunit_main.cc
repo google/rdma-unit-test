@@ -17,9 +17,9 @@
 #include "gtest/gtest.h"
 #include "absl/debugging/failure_signal_handler.h"
 #include "absl/flags/parse.h"
-#include "impl/introspection_mlx4.h"
-#include "impl/introspection_mlx5.h"
-#include "impl/introspection_rxe.h"
+#include "internal/introspection_mlx4.h"
+#include "internal/introspection_mlx5.h"
+#include "internal/introspection_rxe.h"
 
 // glog/gflag are restricted libraries internally so we need to declare them
 // here.

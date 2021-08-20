@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "impl/roce_backend.h"
+#include "internal/roce_backend.h"
 
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "public/flags.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

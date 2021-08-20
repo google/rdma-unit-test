@@ -17,19 +17,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <sys/mman.h>
 #include <syscall.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 
 #include "glog/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/types/span.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

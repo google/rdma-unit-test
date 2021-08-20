@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "impl/verbs_backend.h"
+#include "internal/verbs_backend.h"
 
 #include <cstdint>
 
@@ -21,7 +21,7 @@
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

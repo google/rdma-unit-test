@@ -22,9 +22,9 @@
 
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "impl/verbs_allocator.h"
-#include "impl/verbs_backend.h"
-#include "public/util.h"
+#include "internal/verbs_allocator.h"
+#include "internal/verbs_backend.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

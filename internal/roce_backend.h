@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_BACKEND_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_BACKEND_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_BACKEND_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_BACKEND_H_
 
 #include <cstdint>
 
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "impl/verbs_backend.h"
-#include "public/util.h"
+#include "internal/verbs_backend.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
@@ -42,4 +42,4 @@ class RoceBackend : public VerbsBackend {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_BACKEND_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_BACKEND_H_

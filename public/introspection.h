@@ -19,7 +19,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "infiniband/verbs.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
@@ -42,6 +42,9 @@ class NicIntrospection {
 
   // Returns true if the device supports Ipv6.
   virtual bool SupportsIpV6() const { return true; }
+
+  // Returns true if the device supports rereg_mr operations.
+  virtual bool SupportsReRegMr() const { return false; }
 
   // Returns true if a full Completion Queue stops processing QP work.
   // The alternative is to overwrite completions and continue operation.

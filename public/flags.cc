@@ -14,8 +14,7 @@
 
 #include "public/flags.h"
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <string>
 
 #include "absl/flags/flag.h"

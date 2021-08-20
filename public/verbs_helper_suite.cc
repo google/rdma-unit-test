@@ -20,11 +20,11 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "impl/roce_allocator.h"
-#include "impl/roce_backend.h"
-#include "impl/verbs_allocator.h"
+#include "internal/roce_allocator.h"
+#include "internal/roce_backend.h"
+#include "internal/verbs_allocator.h"
 #include "public/flags.h"
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

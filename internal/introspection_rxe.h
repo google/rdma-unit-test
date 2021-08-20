@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_RXE_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_RXE_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
 
 #include "infiniband/verbs.h"
-#include "impl/introspection_registrar.h"
+#include "internal/introspection_registrar.h"
 #include "public/introspection.h"
 
 namespace rdma_unit_test {
@@ -84,4 +84,4 @@ class IntrospectionRxe : public NicIntrospection {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_INTROSPECTION_RXE_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_

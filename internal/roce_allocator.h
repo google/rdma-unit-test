@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_ALLOCATOR_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_ALLOCATOR_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_ALLOCATOR_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_ALLOCATOR_H_
 
 #include "infiniband/verbs.h"
-#include "impl/verbs_allocator.h"
+#include "internal/verbs_allocator.h"
 
 namespace rdma_unit_test {
 
@@ -41,4 +41,4 @@ class RoceAllocator : public VerbsAllocator {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_IMPL_ROCE_ALLOCATOR_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_ROCE_ALLOCATOR_H_

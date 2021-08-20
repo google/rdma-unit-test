@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <stdint.h>
 #include <string.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <optional>
 #include <thread>  // NOLINT
 
@@ -30,8 +30,8 @@
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
 #include "public/verbs_helper_suite.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

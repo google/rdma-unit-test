@@ -34,8 +34,8 @@
 #include "cases/basic_fixture.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
-#include "public/util.h"
 #include "public/verbs_helper_suite.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
@@ -185,6 +185,66 @@ TEST_F(MrTest, DestroyPdWithOutstandingMr) {
 }
 
 // TODO(author1): Create Many/Max
+
+// Test using ibv_rereg_mr to associate the MR with another buffer.
+TEST_F(MrTest, ReregMrChangeAddress) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
+  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
+                         buffer.data(), buffer.size(), 0),
+            0);
+  EXPECT_EQ(mr->addr, buffer.data());
+  EXPECT_EQ(mr->length, buffer.size());
+}
+
+// Test using ibv_rereg_mr to associate the MR with another PD.
+TEST_F(MrTest, ReregMrChangePd) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
+
+  ibv_pd* pd = ibv_.AllocPd(setup.context);
+  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_PD, pd, nullptr, 0, 0), 0);
+  EXPECT_EQ(mr->pd, pd);
+}
+
+// Change the MR's permission to a invalid one (remote write without local
+// write)
+TEST_F(MrTest, ReregMrInvalidPermission) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
+
+  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr, 0,
+                         IBV_ACCESS_REMOTE_WRITE),
+            IBV_REREG_MR_ERR_CMD);
+}
+
+// Invalid buffer: valid address but has a length of 0.
+TEST_F(MrTest, ReregMrInvalidBuffer) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
+
+  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
+                         setup.buffer.data(), 0, 0),
+            IBV_REREG_MR_ERR_INPUT);
+}
+
 // TODO(author1): Threaded rkey user (IBV_WC_REM_ACCESS_ERR)
 
 class MrLoopbackTest : public BasicFixture {
@@ -310,6 +370,31 @@ TEST_F(MrLoopbackTest, OutstandingRecv) {
   ibv_wc completions[10];
   int count = ibv_poll_cq(local.cq, sizeof(completions), completions);
   EXPECT_EQ(count, 0);
+}
+
+TEST_F(MrLoopbackTest, ReregMrChangeAccess) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ASSERT_EQ(
+      ibv_rereg_mr(remote.mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr, 0,
+                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE),
+      0);
+
+  // Attempt to do a remote_read to the remote side.
+  ibv_sge sg = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr read = verbs_util::CreateReadWr(
+      /*wr_id=*/0, &sg, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
+  verbs_util::PostSend(local.qp, read);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  // The remote_read request should fail since the remote side does not have
+  // permission for remote_read.
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.wr_id, 0);
 }
 
 TEST_F(MrLoopbackTest, OutstandingRead) {

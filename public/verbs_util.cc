@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "public/util.h"
+#include "public/verbs_util.h"
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <resolv.h>
-#include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -27,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <iterator>
 #include <string>
 #include <string_view>
