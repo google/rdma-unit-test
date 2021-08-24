@@ -936,6 +936,9 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeAfterTransition) {
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
   verbs_util::PostSend(local.qp, send);
 
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   if (!Introspection().ShouldDeviateForCurrentTest()) {
@@ -963,6 +966,9 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateRecvWqeBeforeTransition) {
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
   verbs_util::PostSend(local.qp, send);
 
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_THAT(completion.status,
@@ -985,6 +991,9 @@ TEST_F(LoopbackRcQpTest, SendRemoteQpInErrorStateNoRecvWqe) {
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
   verbs_util::PostSend(local.qp, send);
 
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_THAT(completion.status,
@@ -1214,6 +1223,9 @@ TEST_F(LoopbackRcQpTest, ReadRemoteQpInErrorState) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
   verbs_util::PostSend(local.qp, read);
 
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
@@ -1498,6 +1510,9 @@ TEST_F(LoopbackRcQpTest, WriteRemoteQpInErrorState) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
   verbs_util::PostSend(local.qp, write);
 
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
@@ -1940,6 +1955,9 @@ TEST_F(LoopbackRcQpTest, FetchAddRemoteQpInErrorState) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
       remote.atomic_mr->rkey, 0);
   verbs_util::PostSend(local.qp, fetch_add);
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
@@ -1952,7 +1970,7 @@ TEST_F(LoopbackRcQpTest, FetchAddRemoteQpInErrorState) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.atomic_buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpNotEqualNoSwap) {
+TEST_F(LoopbackRcQpTest, CompareSwapNotEqualNoSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -1977,7 +1995,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpNotEqualNoSwap) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpEqualWithSwap) {
+TEST_F(LoopbackRcQpTest, CompareSwapEqualWithSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2001,7 +2019,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpEqualWithSwap) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwp) {
+TEST_F(LoopbackRcQpTest, UnsignaledCompareSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2032,7 +2050,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwp) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 3);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidLKey) {
+TEST_F(LoopbackRcQpTest, CompareSwapInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2060,7 +2078,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwpError) {
+TEST_F(LoopbackRcQpTest, UnsignaledCompareSwapError) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2089,7 +2107,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledCmpAndSwpError) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKey) {
+TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2115,7 +2133,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKeyAndInvalidLKey) {
+TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKeyAndInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2140,7 +2158,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidRKeyAndInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpUnaligned) {
+TEST_F(LoopbackRcQpTest, CompareSwapUnaligned) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2164,7 +2182,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnaligned) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidRKey) {
+TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2188,7 +2206,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
+TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
@@ -2215,7 +2233,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpUnalignedInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidSize) {
+TEST_F(LoopbackRcQpTest, CompareSwapInvalidSize) {
   if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -2241,7 +2259,7 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpInvalidSize) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.atomic_buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CmpAndSwpRemoteQpInErrorState) {
+TEST_F(LoopbackRcQpTest, CompareSwapRemoteQpInErrorState) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_TRUE(TransitionQpToErrorState(remote.qp));
@@ -2254,6 +2272,9 @@ TEST_F(LoopbackRcQpTest, CmpAndSwpRemoteQpInErrorState) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
       remote.atomic_mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  if (Introspection().ShouldDeviateForCurrentTest("NoCompletion")) {
+    return;
+  }
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
@@ -2351,37 +2372,6 @@ TEST_F(LoopbackRcQpTest, QueryQpInitialState) {
 
   ASSERT_EQ(ibv_query_qp(remote.qp, &attr, IBV_QP_STATE, &init_attr), 0);
   EXPECT_EQ(attr.qp_state, IBV_QPS_RTS);
-}
-
-TEST_F(LoopbackRcQpTest, RequestOnFailedQp) {
-  Client local, remote;
-  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
-  // The invalid lkey will fail the local qp.
-  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
-  sge.lkey = (sge.lkey + 10) * 5;
-  ibv_send_wr read = verbs_util::CreateReadWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
-  verbs_util::PostSend(local.qp, read);
-
-  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_THAT(local.buffer.span(), Each('a'));
-
-  // Send a request from the remote to the local failed qp.
-  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
-  ibv_send_wr read2 = verbs_util::CreateReadWr(
-      /*wr_id=*/1, &rsge, /*num_sge=*/1, local.buffer.data(), local.mr->rkey);
-  verbs_util::PostSend(remote.qp, read2);
-
-  ASSERT_OK_AND_ASSIGN(ibv_wc completion2,
-                       verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion2.status, IBV_WC_RETRY_EXC_ERR);
-  EXPECT_EQ(remote.qp->qp_num, completion2.qp_num);
-  EXPECT_EQ(completion2.wr_id, 1);
-  EXPECT_THAT(remote.buffer.span(), Each('b'));
 }
 
 TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
@@ -2710,7 +2700,7 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
 }
 
 // CompareAndSwap not supported on UD.
-TEST_F(LoopbackUdQpTest, CmpAndSwp) {
+TEST_F(LoopbackUdQpTest, CompareSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));

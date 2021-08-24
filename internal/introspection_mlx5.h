@@ -63,6 +63,17 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
         // Fails to send completion when qp in error state.
         {"LoopbackRcQpTest", "ReqestOnFailedQp", ""},
+        // No completions when remote in error state.
+        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateRecvWqeAfterTransition",
+         "NoCompletion"},
+        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateRecvWqeBeforeTransition",
+         "NoCompletion"},
+        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateNoRecvWqe",
+         "NoCompletion"},
+        {"LoopbackRcQpTest", "ReadRemoteQpInErrorState", "NoCompletion"},
+        {"LoopbackRcQpTest", "WriteRemoteQpInErrorState", "NoCompletion"},
+        {"LoopbackRcQpTest", "FetchAddRemoteQpInErrorState", "NoCompletion"},
+        {"LoopbackRcQpTest", "CmpAndSwpRemoteQpInErrorState", "NoCompletion"},
         // Permissions not checked at bind.
         {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
         {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
