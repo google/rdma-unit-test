@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_UTIL_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_UTIL_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_UTIL_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_UTIL_H_
 
 #include <net/ethernet.h>
 
@@ -198,4 +198,4 @@ absl::StatusOr<ibv_context*> OpenUntrackedDevice(const std::string device_name);
 }  // namespace verbs_util
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_UTIL_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_UTIL_H_

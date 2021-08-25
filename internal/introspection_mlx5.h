@@ -56,7 +56,7 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"LoopbackRcQpTest", "FetchAddInvalidSize", ""},
         {"LoopbackRcQpTest", "FetchAddSmallSge", ""},
         {"LoopbackRcQpTest", "FetchAddLargeSge", ""},
-        {"LoopbackRcQpTest", "CmpAndSwpInvalidSize", ""},
+        {"LoopbackRcQpTest", "CompareSwapInvalidSize", ""},
         // Bad recv length larger than region does not cause a failure.
         {"LoopbackRcQpTest", "BadRecvLength", ""},
         // Supports multiple SGEs for atomics.
@@ -73,7 +73,7 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"LoopbackRcQpTest", "ReadRemoteQpInErrorState", "NoCompletion"},
         {"LoopbackRcQpTest", "WriteRemoteQpInErrorState", "NoCompletion"},
         {"LoopbackRcQpTest", "FetchAddRemoteQpInErrorState", "NoCompletion"},
-        {"LoopbackRcQpTest", "CmpAndSwpRemoteQpInErrorState", "NoCompletion"},
+        {"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState", "NoCompletion"},
         // Permissions not checked at bind.
         {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
         {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
@@ -91,7 +91,8 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"PdTest", "DeleteInvalidPd", ""},
         // Allows creation over max qp.
         {"QpTest", "ExceedsMaxQp", ""},
-    };
+        // Allows creation over device cap.
+        {"QpTest", "ExceedsDeviceCap", ""}};
     return deviations;
   }
 

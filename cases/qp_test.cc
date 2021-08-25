@@ -293,6 +293,9 @@ TEST_F(QpTest, QueueRefs) {
 }
 
 TEST_F(QpTest, ExceedsDeviceCap) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP() << "Some NICs allow QP creation over device cap.";
+  }
   // Some devices will fail the qp creation. Other will just adjust the QP
   // capacity accordingly.
   const ibv_device_attr& device_attr = Introspection().device_attr();
@@ -301,30 +304,22 @@ TEST_F(QpTest, ExceedsDeviceCap) {
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_send_wr = device_attr.max_qp_wr + 1;
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  if (qp) {
-    EXPECT_LE(setup.basic_attr.cap.max_send_wr, device_attr.max_qp_wr);
-  }
+  EXPECT_THAT(qp, IsNull());
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_recv_wr = device_attr.max_qp_wr + 1;
   qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  if (qp) {
-    EXPECT_LE(setup.basic_attr.cap.max_recv_wr, device_attr.max_qp_wr);
-  }
+  EXPECT_THAT(qp, IsNull());
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_send_sge = device_attr.max_sge + 1;
   qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  if (qp) {
-    EXPECT_LE(setup.basic_attr.cap.max_send_sge, device_attr.max_sge);
-  }
+  EXPECT_THAT(qp, IsNull());
 
   setup.basic_attr.cap = kBasicQpCap;
   setup.basic_attr.cap.max_recv_sge = device_attr.max_sge + 1;
   qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  if (qp) {
-    EXPECT_LE(setup.basic_attr.cap.max_recv_sge, device_attr.max_sge);
-  }
+  EXPECT_THAT(qp, IsNull());
 }
 
 TEST_F(QpTest, ExceedsMaxQp) {

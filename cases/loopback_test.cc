@@ -1922,8 +1922,7 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
   ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   ibv_sge sge =
-      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
-  sge.length = 9;
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 9), local.atomic_mr);
 
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
@@ -2240,9 +2239,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidSize) {
   ASSERT_OK(InitializeAtomicBuffer(local, /*content=*/1));
   ASSERT_OK(InitializeAtomicBuffer(remote, /*content=*/2));
   ibv_sge sge =
-      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 8), local.atomic_mr);
-  sge.length = 8;
-  sge.length = 9;
+      verbs_util::CreateSge(local.atomic_buffer.subspan(0, 9), local.atomic_mr);
 
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.atomic_buffer.data(),
