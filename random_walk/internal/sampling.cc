@@ -224,6 +224,9 @@ double ActionSampler::GetActionWeight(Action action) const {
     case Action::COMP_SWAP: {
       return action_weights_.comp_swap();
     }
+    default: {
+      LOG(FATAL) << "Unknown action";  // Crash ok
+    }
   }
 }
 

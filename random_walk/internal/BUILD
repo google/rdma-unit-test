@@ -142,6 +142,7 @@ cc_library(
     name = "types",
     srcs = ["types.cc"],
     hdrs = ["types.h"],
+    deps = ["@com_glog_glog//:glog"],
 )
 
 cc_library(

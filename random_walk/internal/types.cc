@@ -18,6 +18,8 @@
 
 #include <string>
 
+#include "glog/logging.h"
+
 namespace rdma_unit_test {
 namespace random_walk {
 
@@ -97,6 +99,9 @@ std::string ActionToString(const Action& action) {
     }
     case Action::COMP_SWAP: {
       return "Compare Swap";
+    }
+    default: {
+      LOG(FATAL) << "Unknown action.";  // Crash ok
     }
   }
 }
