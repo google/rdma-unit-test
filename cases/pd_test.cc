@@ -628,6 +628,7 @@ class PdUdLoopbackTest : public BasicFixture {
   static constexpr uint32_t kClientMemoryPages = 1;
   static constexpr uint32_t kMaxQpWr = 200;
   static constexpr int kQKey = 200;
+  static constexpr size_t kPayloadSize = 1000;  // Sub-MTU size for UD.
 
   struct BasicSetup {
     RdmaMemBlock buffer;
@@ -695,7 +696,8 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
   ASSERT_THAT(ah, NotNull());
   ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
-  ibv_sge ssge = verbs_util::CreateSge(setup.buffer.span(), mr);
+  ibv_sge ssge =
+      verbs_util::CreateSge(setup.buffer.subspan(0, kPayloadSize), mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
   send.wr.ud.ah = ah;
@@ -705,7 +707,8 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
   // It should return IBV_WC_LOC_QP_OP_ERR, see InfiniBand™ Architecture
-  // Specification, Volume 1, P466, C10-10.
+  // Specification, Volume 1, P466, C10-10. But some NIC will return
+  // IBV_WC_SUCCESS and behave as if the packet is lost.
   EXPECT_THAT(completion.status, AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_SUCCESS));
 }
 

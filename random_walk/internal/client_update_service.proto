@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package rdma_unit_test.random_walk;
+
+// The following protobuffers each represent a type of metadata update sent
+// from a local RandomWalkClient to one or more remote RandomWalkClient(s).
+// See the message ClientUpdate.
+
+// Add a local memory region/window for RDMA/atomics. The memory is identified
+// by a rkey.
+message AddRKey {
+  // Next id: 7
+  uint64 addr = 1;
+  uint64 length = 2;
+  uint32 rkey = 3;
+  uint32 owner_id = 4;
+  optional uint32 qpn = 5;
+  // This field is specifically passed so that a client, when issuing a
+  // Rdma, can pick the correct QP whose remote counterpart has the same
+  // PD as the rkey memory.
+  uint32 pd_handle = 6;
+}
+
+// Remove a local memory region/window for RDMA/atomics.
+message RemoveRKey {
+  // Next id: 3
+  uint32 owner_id = 1;
+  uint32 rkey = 2;
+}
+
+// The following three requests are used for creating a pair of connected qps.
+// The process is as follows:
+// 1. One client, called initiator creates a QP in RESET state and sends a
+//    InitiatorCreateQp request to another client, called responder.
+// 2. The responder creates another QP and set it up to RTS and sends a
+//    ResponderCreateModifyQpRts request to the initiator.
+// 3. The initiator sets the QP up to from RESET to RTS and sends a ModifyQpRts
+//    to the responder.
+message InitiatorCreateRcQp {
+  // Next id: 4
+  uint32 initiator_id = 1;
+  uint32 initiator_qpn = 2;
+  uint32 initiator_pd_handle = 3;
+}
+
+message ResponderCreateModifyRcQpRts {
+  // Next id: 5
+  uint32 responder_id = 1;
+  uint32 responder_qpn = 2;
+  uint32 responder_pd_handle = 4;
+  uint32 initiator_qpn = 3;
+}
+
+message InitiatorModifyRcQpRts {
+  // Next id: 4
+  reserved 1, 2;
+  uint32 responder_qpn = 3;
+}
+
+message AddUdQp {
+  // Next id: 4
+  uint32 owner_id = 1;
+  uint32 qp_num = 2;
+  uint32 q_key = 3;
+}
+
+message RemoveUdQp {
+  // Next id: 3
+  uint32 owner_id = 1;
+  uint32 qp_num = 2;
+}
+
+message ClientUpdate {
+  // Next id: 9
+  // The id of the source and destination id.
+  optional uint32 destination_id = 1;
+  oneof contents {
+    AddRKey add_rkey = 2;
+    RemoveRKey remove_rkey = 3;
+    InitiatorCreateRcQp initiator_create_rc_qp = 4;
+    ResponderCreateModifyRcQpRts responder_create_modify_rc_qp_rts = 5;
+    InitiatorModifyRcQpRts initiator_modify_rc_qp_rts = 6;
+    AddUdQp add_ud_qp = 7;
+    RemoveUdQp remove_ud_qp = 8;
+  }
+}
+
+message OrderedUpdateRequest {
+  // Next id: 4
+  uint32 source_id = 1;
+  uint32 sequence_number = 2;
+  ClientUpdate update = 3;
+}
+
+message UpdateResponse {}
+
+service ClientUpdateService {
+  // Update remote client information.
+  rpc Update(OrderedUpdateRequest) returns (UpdateResponse) {}
+}
