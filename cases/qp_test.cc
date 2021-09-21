@@ -374,7 +374,7 @@ TEST_F(QpTest, ThreadedCreateAndDestroy) {
   // Initialize to 1 since we are expecting the values to be 0 after destroying
   // QPs.
   std::array<std::array<int, kQpsPerThread>, kThreadCount> destroy_results;
-  destroy_results = {{{1}}};
+  std::fill(destroy_results.front().begin(), destroy_results.back().end(), 1);
   auto create_destroy_qps = [this, &setup, &destroy_results](int thread_id) {
     for (int i = 0; i < kQpsPerThread; ++i) {
       ibv_qp_init_attr basic_attr = CreateBasicInitAttr(setup.cq);

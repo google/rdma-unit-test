@@ -108,12 +108,12 @@ TEST_F(CqTest, ShareChannel) {
   ASSERT_EQ(ibv_destroy_cq(cq2), 0);
 }
 
-TEST_F(CqTest, SmallCompVector) {
+TEST_F(CqTest, NegativeCompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ASSERT_THAT(ibv_create_cq(setup.context, 10, nullptr, nullptr, -1), IsNull());
 }
 
-TEST_F(CqTest, CompVector) {
+TEST_F(CqTest, ZeroCompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
@@ -121,6 +121,14 @@ TEST_F(CqTest, CompVector) {
 }
 
 TEST_F(CqTest, LargeCompVector) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr,
+                             setup.context->num_comp_vectors - 1);
+  ASSERT_THAT(cq, NotNull());
+  ASSERT_EQ(ibv_destroy_cq(cq), 0);
+}
+
+TEST_F(CqTest, AboveMaxCompVector) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ASSERT_THAT(ibv_create_cq(setup.context, 10, nullptr, nullptr,
                             setup.context->num_comp_vectors),
@@ -130,7 +138,6 @@ TEST_F(CqTest, LargeCompVector) {
 TEST_F(CqTest, ThreadedCreate) {
   static constexpr int kThreadCount = 5;
   static constexpr int kCqsPerThread = 50;
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
 
   std::array<std::array<ibv_cq*, kCqsPerThread>, kThreadCount> cqs;
@@ -147,11 +154,9 @@ TEST_F(CqTest, ThreadedCreate) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     threads.push_back(std::thread(create_qps, thread_id));
   }
-
   for (auto& thread : threads) {
     thread.join();
   }
-
   for (const auto& thread_cqs : cqs) {
     for (const auto& cq : thread_cqs) {
       EXPECT_THAT(cq, NotNull());
@@ -162,13 +167,12 @@ TEST_F(CqTest, ThreadedCreate) {
 TEST_F(CqTest, ThreadedCreateAndDestroy) {
   static constexpr int kThreadCount = 5;
   static constexpr int kCqsPerThread = 50;
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
 
   // Initialize to 1 since we are expecting the values to be 0 after destroying
   // CQs.
   std::array<std::array<int, kCqsPerThread>, kThreadCount> destroy_results;
-  destroy_results = {{{1}}};
+  std::fill(destroy_results.front().begin(), destroy_results.back().end(), 1);
   auto create_destroy_cqs = [this, &setup, &destroy_results](int thread_id) {
     for (int i = 0; i < kCqsPerThread; ++i) {
       ibv_cq* cq = ibv_.CreateCq(setup.context, 10);
@@ -181,11 +185,9 @@ TEST_F(CqTest, ThreadedCreateAndDestroy) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     threads.push_back(std::thread(create_destroy_cqs, thread_id));
   }
-
   for (auto& thread : threads) {
     thread.join();
   }
-
   for (const auto& thread_results : destroy_results) {
     for (const auto& destroy_result : thread_results) {
       EXPECT_EQ(destroy_result, 0);
@@ -396,8 +398,8 @@ class CqAdvancedTest : public BasicFixture {
     // The maximumber number of operations which can be issued on a given QP.
     const size_t kMaxOpsPerQp = Introspection().device_attr().max_qp_wr;
     setup.src_memblock =
-        ibv_.AllocBufferByBytes(kMaxOpsPerQp * sizeof(uint16_t));
-    setup.dst_memblock = ibv_.AllocBufferByBytes(256 * sizeof(uint16_t));
+        ibv_.AllocAlignedBufferByBytes(kMaxOpsPerQp * sizeof(uint16_t));
+    setup.dst_memblock = ibv_.AllocAlignedBufferByBytes(256 * sizeof(uint16_t));
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);

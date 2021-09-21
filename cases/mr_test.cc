@@ -119,7 +119,7 @@ TEST_F(MrTest, ThreadedRegAndDereg) {
   // Initialize to 1 since we are expecting the values to be 0 after
   // deregistering MRs.
   std::array<std::array<int, kMrsPerThread>, kThreadCount> dereg_results;
-  dereg_results = {{{1}}};
+  std::fill(dereg_results.front().begin(), dereg_results.back().end(), 1);
   auto reg_dereg_mrs = [this, &pd, &buffer, &dereg_results](int thread_id) {
     for (int i = 0; i < kMrsPerThread; ++i) {
       ibv_mr* mr = ibv_.RegMr(pd, buffer);

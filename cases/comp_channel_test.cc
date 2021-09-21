@@ -26,7 +26,6 @@
 
 namespace rdma_unit_test {
 
-using ::testing::_;
 using ::testing::AnyOf;
 using ::testing::Ne;
 using ::testing::NotNull;

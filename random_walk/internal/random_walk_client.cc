@@ -358,7 +358,7 @@ ibv_qp* RandomWalkClient::CreateLocalRcQp(ClientId peer_id, ibv_pd* pd) {
   ibv_cq* recv_cq = send_cq_sample.value();
   DCHECK(recv_cq);
 
-  ibv_qp_init_attr init_attr;
+  ibv_qp_init_attr init_attr = {0};
   init_attr.send_cq = send_cq;
   init_attr.recv_cq = recv_cq;
   init_attr.qp_type = IBV_QPT_RC;
@@ -1020,7 +1020,7 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
   ibv_cq* recv_cq = send_cq_sample.value();
   DCHECK(recv_cq);
 
-  ibv_qp_init_attr init_attr;
+  ibv_qp_init_attr init_attr = {0};
   init_attr.send_cq = send_cq;
   init_attr.recv_cq = recv_cq;
   init_attr.qp_type = IBV_QPT_UD;

@@ -75,7 +75,9 @@ constexpr std::string_view kIpV6LoopbackAddress{"::1"};
 
 // Programmatically define the page size in lieue of calling sysconf
 #if defined(__x86_64__) || defined(__i386__)
-constexpr uint32_t kPageSize = 4 * 1024;  // 4K
+static constexpr uint32_t kHugePageShift = 21;
+constexpr uint32_t kPageSize = 4 * 1024;
+constexpr uint32_t kHugePageSize = 1 << kHugePageShift;
 #else
 #error "No page size defined for this architecture"
 #endif
@@ -100,9 +102,20 @@ absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
 // Create an ibv_ah_attr from a local address and a remote gid.
 ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid);
 
-// Verbs utilities:
+// Create a defaulted ibv_srq_attr.
+ibv_srq_attr DefaultSrqAttr();
+
+// Returns the defaulted ibv_qp_cap value.
+ibv_qp_cap DefaultQpCap();
+
+// Returns the defaulted ibv_srq_attr value.
+ibv_srq_attr DefaultSrqAttr();
+
+///////////////////////////////////////////////////////////////////////////////
+//                           Verbs Utilities
 // Useful helper functions to eliminate the tediousness of filling repetitive
 // attributes and flags. Simplifies the verb API.
+///////////////////////////////////////////////////////////////////////////////
 
 ibv_qp_state GetQpState(ibv_qp* qp);
 
@@ -110,15 +123,18 @@ ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr);
 
 // Create an SGE for atomic operation. Addr must be 8-byte aligned.
 ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr);
+
 ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
                                   int access = IBV_ACCESS_REMOTE_READ |
                                                IBV_ACCESS_REMOTE_WRITE |
                                                IBV_ACCESS_REMOTE_ATOMIC);
+
 ibv_mw_bind CreateType1MwBind(uint64_t wr_id, absl::Span<uint8_t> buffer,
                               ibv_mr* mr,
                               int access = IBV_ACCESS_REMOTE_READ |
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_ATOMIC);
+
 ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                               const absl::Span<uint8_t> buffer, uint32_t rkey,
                               ibv_mr* mr,
@@ -127,26 +143,36 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                                            IBV_ACCESS_REMOTE_ATOMIC);
 
 ibv_send_wr CreateInvalidateWr(uint64_t wr_id, uint32_t rkey);
+
 ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
+
 ibv_recv_wr CreateRecvWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
+
 ibv_send_wr CreateReadWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                          void* remote_buffer, uint32_t rkey);
+
 ibv_send_wr CreateWriteWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                           void* remote_buffer, uint32_t rkey);
+
 ibv_send_wr CreateFetchAddWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                              void* remote_buffer, uint32_t rkey,
                              uint64_t compare_add);
+
 ibv_send_wr CreateCompSwapWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                              void* remote_buffer, uint32_t rkey,
                              uint64_t compare_add, uint64_t swap);
 
 void PostType1Bind(ibv_qp* qp, ibv_mw* mw, const ibv_mw_bind& bind_args);
+
 void PostSend(ibv_qp* qp, const ibv_send_wr& wr);
+
 void PostRecv(ibv_qp* qp, const ibv_recv_wr& wr);
+
 void PostSrqRecv(ibv_srq* srq, const ibv_recv_wr& wr);
 
 absl::StatusOr<ibv_wc> WaitForCompletion(
     ibv_cq* cq, absl::Duration timeout = kDefaultCompletionTimeout);
+
 void PrintCompletion(const ibv_wc& completion);
 
 // Synchronously execute ops:

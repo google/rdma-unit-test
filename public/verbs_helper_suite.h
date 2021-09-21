@@ -20,10 +20,12 @@
 #include <memory>
 #include <utility>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "internal/verbs_allocator.h"
 #include "internal/verbs_backend.h"
+#include "internal/verbs_cleanup.h"
+#include "internal/verbs_extension_interface.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
@@ -68,8 +70,10 @@ class VerbsHelperSuite {
   RdmaMemBlock AllocBuffer(int pages, bool requires_shared_memory = false);
   RdmaMemBlock AllocAlignedBuffer(int pages,
                                   size_t alignment = verbs_util::kPageSize);
-  RdmaMemBlock AllocBufferByBytes(
-      size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+  RdmaMemBlock AllocHugepageBuffer(int pages);
+  RdmaMemBlock AllocAlignedBufferByBytes(
+      size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__,
+      bool huge_page = false);
   absl::StatusOr<ibv_context*> OpenDevice(bool no_ipv6_for_gid = false);
   ibv_ah* CreateAh(ibv_pd* pd, ibv_gid remote_gid);
   int DestroyAh(ibv_ah* ah);
@@ -92,19 +96,28 @@ class VerbsHelperSuite {
   int DestroySrq(ibv_srq* srq);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* cq);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* cq, ibv_srq* srq);
-  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq, ibv_srq* srq);
-  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
-                   ibv_srq* srq = nullptr,
-                   uint32_t max_send_wr = verbs_util::kDefaultMaxWr,
-                   uint32_t max_recv_wr = verbs_util::kDefaultMaxWr,
-                   ibv_qp_type qp_type = IBV_QPT_RC, int sig_all = 0);
+  ibv_qp* CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq, ibv_srq* srq,
+                   uint32_t max_send_wr, uint32_t max_recv_wr,
+                   ibv_qp_type qp_type, int sig_all);
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   verbs_util::PortGid GetLocalPortGid(ibv_context* context) const;
 
  private:
-  std::unique_ptr<VerbsAllocator> allocator_;
+  // Tracks RdmaMemblocks to make sure it outlive MRs.
+  std::vector<std::unique_ptr<RdmaMemBlock>> memblocks_
+      ABSL_GUARDED_BY(mtx_memblocks_);
+  // Tracks address info for a given context.
+  absl::flat_hash_map<ibv_context*, std::vector<verbs_util::PortGid>> port_gids_
+      ABSL_GUARDED_BY(mtx_port_gids_);
+
+  // locks for containers above.
+  absl::Mutex mtx_memblocks_;
+  mutable absl::Mutex mtx_port_gids_;
+
+  std::unique_ptr<VerbsExtensionInterface> extension_;
   std::unique_ptr<VerbsBackend> backend_;
+  VerbsCleanup cleanup_;
 };
 
 }  // namespace rdma_unit_test

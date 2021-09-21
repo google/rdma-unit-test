@@ -11,27 +11,25 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#include "internal/roce_allocator.h"
+#include "internal/roce_extension.h"
 
 #include "infiniband/verbs.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 
-ibv_mr* RoceAllocator::RegMrInternal(ibv_pd* pd, const RdmaMemBlock& memblock,
-                                     int access) {
+ibv_mr* RoceExtension::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
+                             int access) {
   return ibv_reg_mr(pd, memblock.data(), memblock.size(), access);
 }
 
-ibv_ah* RoceAllocator::CreateAhInternal(ibv_pd* pd, ibv_gid remote_gid) {
-  verbs_util::PortGid local = GetLocalPortGid(pd->context);
+ibv_ah* RoceExtension::CreateAh(ibv_pd* pd, verbs_util::PortGid local,
+                                ibv_gid remote_gid) {
   ibv_ah_attr attr = verbs_util::CreateAhAttr(local, remote_gid);
   return ibv_create_ah(pd, &attr);
 }
 
-ibv_qp* RoceAllocator::CreateQpInternal(ibv_pd* pd,
-                                        ibv_qp_init_attr& basic_attr) {
+ibv_qp* RoceExtension::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
   return ibv_create_qp(pd, &basic_attr);
 }
 

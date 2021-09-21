@@ -201,6 +201,25 @@ ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid) {
 }
 
 
+ibv_qp_cap DefaultQpCap() {
+  ibv_qp_cap cap;
+  cap.max_send_wr = verbs_util::kDefaultMaxWr;
+  cap.max_recv_wr = verbs_util::kDefaultMaxWr;
+  cap.max_send_sge = verbs_util::kDefaultMaxSge;
+  cap.max_recv_sge = verbs_util::kDefaultMaxSge;
+  // By default QPs will be constructed with max_inline_data set to this.
+  cap.max_inline_data = 36;
+  return cap;
+}
+
+ibv_srq_attr DefaultSrqAttr() {
+  ibv_srq_attr attr;
+  attr.max_wr = verbs_util::kDefaultMaxWr;
+  attr.max_sge = verbs_util::kDefaultMaxSge;
+  attr.srq_limit = 0;  // not used for infiniband.
+  return attr;
+}
+
 ibv_qp_state GetQpState(ibv_qp* qp) {
   ibv_qp_attr attr;
   ibv_qp_init_attr init_attr;

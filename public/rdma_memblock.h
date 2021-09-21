@@ -17,6 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_RDMA_MEMBLOCK_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_RDMA_MEMBLOCK_H_
 
+#include <linux/memfd.h>
 #include <stddef.h>
 
 #include <cstdint>
@@ -37,6 +38,8 @@ namespace rdma_unit_test {
 // an alignment other than a page.  If an alignment is provided that is not
 // a page boundary the length will be rounded up to the length plus the page
 // size and alignment. The buffer presented will occur at the proper alignment.
+// NOTE: When using huge pages the length will be forced to align to the page
+// size, as it is required by mmap and munmap.
 class RdmaMemBlock {
  public:
   RdmaMemBlock() = default;
@@ -44,7 +47,8 @@ class RdmaMemBlock {
   // elements. The underlying allocation will be extended to a page size
   // boundary.
   explicit RdmaMemBlock(size_t length,
-                        size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+                        size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__,
+                        bool use_huge_page = false);
   // Allow copy constructor, the underlying filememblock is a shared pointer.
   RdmaMemBlock(const RdmaMemBlock&) = default;
   RdmaMemBlock& operator=(const RdmaMemBlock&) = default;
@@ -93,7 +97,8 @@ class RdmaMemBlock {
   RdmaMemBlock(const RdmaMemBlock& base, size_t offset, size_t size);
 
   // Creates the actual file backed shared memory of 'size'.
-  static std::shared_ptr<MemBlock> Create(size_t size);
+  static std::shared_ptr<MemBlock> Create(size_t size,
+                                          bool use_huge_page = false);
 
   // Custom deleters to cleanup fd's and shared memory.
   static void MemBlockDeleter(MemBlock* memblock);

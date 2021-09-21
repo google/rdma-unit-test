@@ -20,9 +20,9 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "internal/roce_allocator.h"
 #include "internal/roce_backend.h"
-#include "internal/verbs_allocator.h"
+#include "internal/roce_extension.h"
+#include "internal/verbs_extension_interface.h"
 #include "public/flags.h"
 #include "public/verbs_util.h"
 
@@ -31,8 +31,8 @@ namespace rdma_unit_test {
 VerbsHelperSuite::VerbsHelperSuite() {
   backend_ = std::make_unique<RoceBackend>();
   CHECK(backend_);  // Crash ok
-  allocator_ = std::make_unique<RoceAllocator>();
-  CHECK(allocator_);  // Crash ok
+  extension_ = std::make_unique<RoceExtension>();
+  CHECK(extension_);  // Crash ok
 }
 
 absl::Status VerbsHelperSuite::SetUpRcQp(ibv_qp* local_qp,
@@ -84,110 +84,257 @@ absl::Status VerbsHelperSuite::SetQpError(ibv_qp* qp) {
 
 RdmaMemBlock VerbsHelperSuite::AllocBuffer(int pages,
                                            bool requires_shared_memory) {
-  return allocator_->AllocBuffer(pages, requires_shared_memory);
+  return AllocAlignedBufferByBytes(pages * verbs_util::kPageSize,
+                                   requires_shared_memory
+                                       ? verbs_util::kPageSize
+                                       : __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 }
 
 RdmaMemBlock VerbsHelperSuite::AllocAlignedBuffer(int pages, size_t alignment) {
-  return allocator_->AllocAlignedBuffer(pages, alignment);
+  return AllocAlignedBufferByBytes(pages * verbs_util::kPageSize, alignment);
 }
 
-RdmaMemBlock VerbsHelperSuite::AllocBufferByBytes(size_t bytes,
-                                                  size_t alignment) {
-  return allocator_->AllocBufferByBytes(bytes, alignment);
+RdmaMemBlock VerbsHelperSuite::AllocHugepageBuffer(int pages) {
+  return AllocAlignedBufferByBytes(pages * verbs_util::kHugePageSize,
+                                   verbs_util::kHugePageSize,
+                                   /*huge_page=*/true);
+}
+
+RdmaMemBlock VerbsHelperSuite::AllocAlignedBufferByBytes(size_t bytes,
+                                                         size_t alignment,
+                                                         bool huge_page) {
+  auto block = absl::make_unique<RdmaMemBlock>(bytes, alignment, huge_page);
+  DCHECK(block);
+  memset(block->data(), '-', block->size());
+  RdmaMemBlock result = *block;
+  absl::MutexLock guard(&mtx_memblocks_);
+  memblocks_.emplace_back(std::move(block));
+  return result;
 }
 
 absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
     bool no_ipv6_for_gid) {
-  return allocator_->OpenDevice(no_ipv6_for_gid);
+  std::vector<std::string> device_names;
+  if (!absl::GetFlag(FLAGS_device_name).empty()) {
+    device_names.push_back(absl::GetFlag(FLAGS_device_name));
+  } else {
+    absl::StatusOr<std::vector<std::string>> enum_results =
+        verbs_util::EnumerateDeviceNames();
+    if (!enum_results.ok()) return enum_results.status();
+    device_names = enum_results.value();
+  }
+
+  ibv_context* context = nullptr;
+  std::vector<verbs_util::PortGid> port_gids;
+  for (auto& device_name : device_names) {
+    absl::StatusOr<ibv_context*> context_or =
+        verbs_util::OpenUntrackedDevice(device_name);
+    LOG(INFO) << "Opening device: " << device_name;
+    if (!context_or.ok()) {
+      LOG(INFO) << "Failed to open device: " << device_name;
+      continue;
+    }
+    context = context_or.value();
+    absl::StatusOr<std::vector<verbs_util::PortGid>> enum_result =
+        verbs_util::EnumeratePortGidsForContext(context);
+    if (enum_result.ok() && !enum_result.value().empty()) {
+      port_gids = enum_result.value();
+      VLOG(1) << "Found (" << port_gids.size()
+              << ") active ports for device: " << device_name;
+      // Just need one device with active ports. Break at this point.
+      break;
+    }
+    LOG(INFO) << "Failed to get ports for device: " << device_name;
+    int result = ibv_close_device(context);
+    LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
+    context = nullptr;
+  }
+  if (!context || port_gids.empty()) {
+    return absl::InternalError("Failed to open a device with active ports.");
+  }
+  cleanup_.AddCleanup(context);
+
+  absl::MutexLock guard(&mtx_port_gids_);
+  port_gids_[context] = port_gids;
+
+  return context;
 }
 
 ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid) {
-  return allocator_->CreateAh(pd, remote_gid);
+  verbs_util::PortGid local = GetLocalPortGid(pd->context);
+  ibv_ah* ah = extension_->CreateAh(pd, local, remote_gid);
+  if (ah) {
+    cleanup_.AddCleanup(ah);
+  }
+  return ah;
 }
 
 int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
-  return allocator_->DestroyAh(ah);
+  int result = ibv_destroy_ah(ah);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(ah);
+  }
+  return result;
 }
 
 ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
-  return allocator_->AllocPd(context);
+  ibv_pd* pd = ibv_alloc_pd(context);
+  if (pd) {
+    cleanup_.AddCleanup(pd);
+  }
+  return pd;
 }
 
 int VerbsHelperSuite::DeallocPd(ibv_pd* pd) {
-  return allocator_->DeallocPd(pd);
+  int result = ibv_dealloc_pd(pd);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(pd);
+  }
+  return result;
 }
 
 ibv_mr* VerbsHelperSuite::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
                                 int access) {
-  return allocator_->RegMr(pd, memblock, access);
+  ibv_mr* mr = extension_->RegMr(pd, memblock, access);
+  if (mr) {
+    cleanup_.AddCleanup(mr);
+  }
+  return mr;
 }
 
-int VerbsHelperSuite::DeregMr(ibv_mr* mr) { return allocator_->DeregMr(mr); }
+int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
+  int result = ibv_dereg_mr(mr);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(mr);
+  }
+  return result;
+}
 
 ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
-  return allocator_->AllocMw(pd, type);
+  ibv_mw* mw = ibv_alloc_mw(pd, type);
+  if (mw) {
+    cleanup_.AddCleanup(mw);
+  }
+  return mw;
 }
 
 int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
-  return allocator_->DeallocMw(mw);
+  int result = ibv_dealloc_mw(mw);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(mw);
+  }
+  return result;
 }
 
 ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
-  return allocator_->CreateChannel(context);
+  ibv_comp_channel* channel = ibv_create_comp_channel(context);
+  if (channel) {
+    cleanup_.AddCleanup(channel);
+  }
+  return channel;
 }
 
 int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
-  return allocator_->DestroyChannel(channel);
+  int result = ibv_destroy_comp_channel(channel);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(channel);
+  }
+  return result;
 }
 
 ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int max_wr,
                                    ibv_comp_channel* channel) {
-  return allocator_->CreateCq(context, max_wr, channel);
+  ibv_cq* cq = ibv_create_cq(context, max_wr, /*cq_context=*/nullptr, channel,
+                             /*cq_vector=*/0);
+  if (cq) {
+    cleanup_.AddCleanup(cq);
+  }
+  return cq;
 }
 
 int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
-  return allocator_->DestroyCq(cq);
+  int result = ibv_destroy_cq(cq);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(cq);
+  }
+  return result;
 }
 
 ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
-  return allocator_->CreateSrq(pd, max_wr);
-}
-
-int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
-  return allocator_->DestroySrq(srq);
+  ibv_srq_init_attr init_attr;
+  init_attr.attr = verbs_util::DefaultSrqAttr();
+  init_attr.attr.max_wr = max_wr;
+  return CreateSrq(pd, init_attr);
 }
 
 ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
-  return allocator_->CreateSrq(pd, attr);
+  ibv_srq* srq = ibv_create_srq(pd, &attr);
+  if (srq) {
+    cleanup_.AddCleanup(srq);
+  }
+  return srq;
+}
+
+int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
+  int result = ibv_destroy_srq(srq);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(srq);
+  }
+  return result;
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* cq) {
-  return allocator_->CreateQp(pd, cq);
+  return CreateQp(pd, cq, nullptr);
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* cq, ibv_srq* srq) {
-  return allocator_->CreateQp(pd, cq, srq);
+  ibv_qp_init_attr attr{.send_cq = cq,
+                        .recv_cq = cq,
+                        .srq = srq,
+                        .cap = verbs_util::DefaultQpCap(),
+                        .qp_type = IBV_QPT_RC,
+                        .sq_sig_all = 0};
+  return CreateQp(pd, attr);
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
                                    ibv_srq* srq, uint32_t max_send_wr,
                                    uint32_t max_recv_wr, ibv_qp_type qp_type,
                                    int sig_all) {
-  return allocator_->CreateQp(pd, send_cq, recv_cq, srq, max_send_wr,
-                              max_recv_wr, qp_type, sig_all);
+  ibv_qp_init_attr attr{.send_cq = send_cq,
+                        .recv_cq = recv_cq,
+                        .srq = srq,
+                        .cap = verbs_util::DefaultQpCap(),
+                        .qp_type = qp_type,
+                        .sq_sig_all = sig_all};
+  attr.cap.max_send_wr = max_send_wr;
+  attr.cap.max_recv_wr = max_recv_wr;
+  return CreateQp(pd, attr);
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
-  return allocator_->CreateQp(pd, basic_attr);
+  ibv_qp* qp = extension_->CreateQp(pd, basic_attr);
+  if (qp) {
+    cleanup_.AddCleanup(qp);
+  }
+  return qp;
 }
 
 int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
-  return allocator_->DestroyQp(qp);
+  int result = ibv_destroy_qp(qp);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(qp);
+  }
+  return result;
 }
 
 verbs_util::PortGid VerbsHelperSuite::GetLocalPortGid(
     ibv_context* context) const {
-  return allocator_->GetLocalPortGid(context);
+  absl::MutexLock guard(&mtx_port_gids_);
+  auto iter = port_gids_.find(context);
+  CHECK(iter != port_gids_.end());  // Crash ok
+  auto& info_array = iter->second;
+  return info_array[0];
 }
 
 }  // namespace rdma_unit_test

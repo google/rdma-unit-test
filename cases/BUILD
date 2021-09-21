@@ -155,6 +155,27 @@ cc_library(
 )
 
 cc_test(
+    name = "hugepage_test",
+    srcs = ["hugepage_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":basic_fixture",
+        ":gunit_main",
+        "//public:introspection",
+        "//public:rdma_memblock",
+        "//public:status_matchers",
+        "//public:verbs_helper_suite",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
     name = "loopback_test",
     srcs = ["loopback_test.cc"],
     linkstatic = 1,
@@ -311,6 +332,7 @@ cc_library(
         "comp_channel_test.cc",
         "cq_test.cc",
         "device_test.cc",
+        "hugepage_test.cc",
         "loopback_test.cc",
         "mr_test.cc",
         "mw_test.cc",

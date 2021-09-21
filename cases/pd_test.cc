@@ -98,16 +98,15 @@ TEST_F(PdTest, ThreadedAllocAndDealloc) {
   static constexpr int kPdsPerThread = 50;
 
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-
   // Initialize to 1 since we are expecting the values to be 0 after
   // deallocating PDs.
   std::array<std::array<int, kPdsPerThread>, kThreadCount> dealloc_results;
-  dealloc_results = {{{1}}};
+  std::fill(dealloc_results.front().begin(), dealloc_results.back().end(), 1);
   auto alloc_dealloc_pds = [this, &context, &dealloc_results](int thread_id) {
     for (int i = 0; i < kPdsPerThread; ++i) {
-      ibv_pd* pd = ibv_.AllocPd(context);
+      ibv_pd* pd = ibv_alloc_pd(context);
       ASSERT_THAT(pd, NotNull());
-      dealloc_results[thread_id][i] = ibv_.DeallocPd(pd);
+      dealloc_results[thread_id][i] = ibv_dealloc_pd(pd);
     }
   };
 
@@ -733,7 +732,8 @@ class PdType1MwTest : public BasicFixture {
     ibv_pd* mw_pd;
     ibv_mw* mw;
     ibv_pd* qp_pd;
-    ibv_qp* qp;
+    ibv_qp* local_qp;
+    ibv_qp* remote_qp;
     ibv_mr* mr;
   };
 
@@ -775,11 +775,15 @@ class PdType1MwTest : public BasicFixture {
     if (!setup.qp_pd) {
       return absl::InternalError("Failed to allocate qp's pd.");
     }
-    setup.qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
-    if (!setup.qp) {
-      return absl::InternalError("Failed to create qp.");
+    setup.local_qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
+    if (!setup.local_qp) {
+      return absl::InternalError("Failed to local create local qp.");
     }
-    ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
+    setup.remote_qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
+    if (!setup.remote_qp) {
+      return absl::InternalError("Failed to local create local qp.");
+    }
+    ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
     setup.mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
     if (!setup.mr) {
       return absl::InternalError("Failed to create mr.");
@@ -793,7 +797,7 @@ TEST_F(PdType1MwTest, ReadMwOtherPd) {
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey);
-  verbs_util::PostSend(setup.qp, read);
+  verbs_util::PostSend(setup.local_qp, read);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
@@ -804,7 +808,7 @@ TEST_F(PdType1MwTest, WriteMwOtherPd) {
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey);
-  verbs_util::PostSend(setup.qp, write);
+  verbs_util::PostSend(setup.local_qp, write);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
@@ -817,7 +821,7 @@ TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey,
       kCompareAdd);
-  verbs_util::PostSend(setup.qp, fetch_add);
+  verbs_util::PostSend(setup.local_qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
@@ -830,7 +834,7 @@ TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
   ibv_send_wr comp_swap = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey,
       kCompareAdd, kSwap);
-  verbs_util::PostSend(setup.qp, comp_swap);
+  verbs_util::PostSend(setup.local_qp, comp_swap);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);

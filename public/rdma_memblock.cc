@@ -37,11 +37,22 @@ static inline int memfd_create(const char* name, unsigned int flags) {
   return syscall(SYS_memfd_create, name, flags);
 }
 
-RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment) {
+RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment,
+                           bool use_huge_page) {
   offset_ = 0;
-  size_t pad = (alignment == verbs_util::kPageSize) ? 0 : alignment;
+  size_t pad = 0;
+  if (use_huge_page) {
+    pad = (alignment == verbs_util::kHugePageSize) ? 0 : alignment;
+  } else {
+    pad = (alignment == verbs_util::kPageSize) ? 0 : alignment;
+  }
   size_t alloc_size = length + pad;
-  memblock_ = Create(alloc_size);
+  if (use_huge_page && alloc_size % verbs_util::kHugePageSize) {
+    // When using huge pages, buffer length must be aligned to the page size.
+    alloc_size +=
+        verbs_util::kHugePageSize - (alloc_size % verbs_util::kHugePageSize);
+  }
+  memblock_ = Create(alloc_size, use_huge_page);
   uint8_t* buffer = memblock_->buffer.data() + pad;
   span_ = absl::MakeSpan(buffer, length);
   VLOG(1) << absl::StrCat("created new memblock: ", " alloc_size=", alloc_size,
@@ -67,9 +78,14 @@ RdmaMemBlock RdmaMemBlock::subblock(size_t offset, size_t size) const {
   return RdmaMemBlock(*this, offset, size);
 }
 
-std::shared_ptr<RdmaMemBlock::MemBlock> RdmaMemBlock::Create(size_t size) {
+std::shared_ptr<RdmaMemBlock::MemBlock> RdmaMemBlock::Create(
+    size_t size, bool use_huge_page) {
   // First create the memory file file descriptor.
-  int fd = memfd_create("memfd", 0);
+  int memfd_flags = 0;
+  if (use_huge_page) {
+    memfd_flags |= MFD_HUGETLB;
+  }
+  int fd = memfd_create("memfd", memfd_flags);
   CHECK_GT(fd, 0);  // Crash ok
 
   // Allocate space in 2MB chunks to reduce the number EINTR attempts.
@@ -85,7 +101,7 @@ std::shared_ptr<RdmaMemBlock::MemBlock> RdmaMemBlock::Create(size_t size) {
       result = fallocate(fd, /* mode */ 0, offset, length);
     } while (result == -1 && errno == EINTR &&
              ++attempts < kMaximumFallocateEintrAttempts);
-    CHECK_EQ(result, 0) << "errno = " << errno;  // Crash ok
+    CHECK_EQ(result, 0) << strerror(errno);  // Crash ok
     remaining -= length;
   }
 

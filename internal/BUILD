@@ -54,11 +54,12 @@ cc_library(
 )
 
 cc_library(
-    name = "roce_allocator",
-    srcs = ["roce_allocator.cc"],
-    hdrs = ["roce_allocator.h"],
+    name = "roce_extension",
+    srcs = ["roce_extension.cc"],
+    hdrs = ["roce_extension.h"],
     deps = [
-        ":verbs_allocator",
+        ":verbs_extension_interface",
+        "//public:rdma_memblock",
         "//public:verbs_util",
     ],
 )
@@ -78,24 +79,9 @@ cc_library(
 )
 
 cc_library(
-    name = "verbs_allocator",
-    srcs = ["verbs_allocator.cc"],
-    hdrs = ["verbs_allocator.h"],
-    deps = [
-        "//public:flags",
-        "//public:rdma_memblock",
-        "//public:verbs_util",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/cleanup",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
-    ],
+    name = "verbs_extension_interface",
+    hdrs = ["verbs_extension_interface.h"],
+    deps = ["//public:rdma_memblock"],
 )
 
 cc_library(
@@ -108,5 +94,16 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "verbs_cleanup",
+    srcs = ["verbs_cleanup.cc"],
+    hdrs = ["verbs_cleanup.h"],
+    deps = [
+        "//public:rdma_memblock",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/synchronization",
     ],
 )

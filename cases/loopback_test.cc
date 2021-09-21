@@ -58,6 +58,7 @@ namespace {
 
 using ::testing::AnyOf;
 using ::testing::Each;
+using ::testing::Eq;
 using ::testing::NotNull;
 
 class LoopbackTest : public BasicFixture {
@@ -213,7 +214,7 @@ class LoopbackRcQpTest : public LoopbackTest {
     ibv_qp_attr attr;
     attr.qp_state = IBV_QPS_ERR;
     ibv_qp_attr_mask attr_mask = IBV_QP_STATE;
-    return (ibv_modify_qp(qp, &attr, attr_mask) == 0) ? true : false;
+    return (ibv_modify_qp(qp, &attr, attr_mask) == 0);
   }
 };
 
@@ -365,6 +366,8 @@ TEST_F(LoopbackRcQpTest, SendLargeChunk) {
   memset(recv_buf.data(), 'b', recv_buf.size());
   ibv_mr* send_mr = ibv_.RegMr(local.pd, send_buf);
   ibv_mr* recv_mr = ibv_.RegMr(remote.pd, recv_buf);
+  ASSERT_THAT(send_mr, NotNull());
+  ASSERT_THAT(recv_mr, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(recv_buf.span(), recv_mr);
   ibv_recv_wr recv =
