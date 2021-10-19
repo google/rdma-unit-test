@@ -20,6 +20,7 @@
 #include "infiniband/verbs.h"
 #include "internal/verbs_extension_interface.h"
 #include "public/rdma_memblock.h"
+#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

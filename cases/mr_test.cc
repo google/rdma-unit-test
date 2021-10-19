@@ -13,25 +13,26 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <string.h>
-#include <sys/mman.h>
 
-#include <exception>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <thread>  // NOLINT
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/notification.h"
-#include "absl/types/span.h"
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
@@ -71,79 +72,6 @@ TEST_F(MrTest, RegisterMemory) {
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
   EXPECT_THAT(mr, NotNull());
 }
-
-TEST_F(MrTest, ThreadedReg) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kMrsPerThread = 50;
-
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-
-  ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_THAT(pd, NotNull());
-  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-  std::array<std::array<ibv_mr*, kMrsPerThread>, kThreadCount> mrs;
-  mrs = {{{nullptr}}};
-  auto reg_mrs = [this, &pd, &buffer, &mrs](int thread_id) {
-    // No MRs can share the same position in the array, so no need for thread
-    // synchronization.
-    for (int i = 0; i < kMrsPerThread; ++i) {
-      mrs[thread_id][i] = ibv_.RegMr(pd, buffer);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(reg_mrs, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_mrs : mrs) {
-    for (const auto& mr : thread_mrs) {
-      EXPECT_THAT(mr, NotNull());
-    }
-  }
-}
-
-TEST_F(MrTest, ThreadedRegAndDereg) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kMrsPerThread = 50;
-
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-
-  ibv_pd* pd = ibv_.AllocPd(context);
-  ASSERT_THAT(pd, NotNull());
-  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-  // Initialize to 1 since we are expecting the values to be 0 after
-  // deregistering MRs.
-  std::array<std::array<int, kMrsPerThread>, kThreadCount> dereg_results;
-  std::fill(dereg_results.front().begin(), dereg_results.back().end(), 1);
-  auto reg_dereg_mrs = [this, &pd, &buffer, &dereg_results](int thread_id) {
-    for (int i = 0; i < kMrsPerThread; ++i) {
-      ibv_mr* mr = ibv_.RegMr(pd, buffer);
-      ASSERT_THAT(mr, NotNull());
-      dereg_results[thread_id][i] = ibv_.DeregMr(mr);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(reg_dereg_mrs, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_results : dereg_results) {
-    for (const auto& dereg_result : thread_results) {
-      EXPECT_EQ(dereg_result, 0);
-    }
-  }
-}
-
 
 // Check with a pointer in the correct range.
 TEST_F(MrTest, DeregInvalidMr) {

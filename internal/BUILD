@@ -8,20 +8,13 @@ package(
 )
 
 cc_library(
-    name = "introspection_extras",
-    deps = [
-        ":introspection_mlx4",
-        ":introspection_mlx5",
-        ":introspection_rxe",
-    ],
-)
-
-cc_library(
     name = "introspection_mlx4",
     hdrs = ["introspection_mlx4.h"],
     deps = [
         ":introspection_registrar",
         "//public:introspection",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -32,6 +25,8 @@ cc_library(
     deps = [
         ":introspection_registrar",
         "//public:introspection",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -40,7 +35,10 @@ cc_library(
     name = "introspection_registrar",
     srcs = ["introspection_registrar.cc"],
     hdrs = ["introspection_registrar.h"],
-    deps = ["@com_glog_glog//:glog"],
+    deps = [
+        "@com_glog_glog//:glog",
+        "@libibverbs",
+    ],
 )
 
 cc_library(
@@ -49,6 +47,8 @@ cc_library(
     deps = [
         ":introspection_registrar",
         "//public:introspection",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -61,6 +61,7 @@ cc_library(
         ":verbs_extension_interface",
         "//public:rdma_memblock",
         "//public:verbs_util",
+        "@libibverbs",
     ],
 )
 
@@ -72,16 +73,22 @@ cc_library(
         ":verbs_backend",
         "//public:flags",
         "//public:verbs_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@libibverbs",
     ],
 )
 
 cc_library(
     name = "verbs_extension_interface",
     hdrs = ["verbs_extension_interface.h"],
-    deps = ["//public:rdma_memblock"],
+    deps = [
+        "//public:rdma_memblock",
+        "//public:verbs_util",
+        "@libibverbs",
+    ],
 )
 
 cc_library(
@@ -91,9 +98,10 @@ cc_library(
     deps = [
         "//public:status_matchers",
         "//public:verbs_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest",
+        "@libibverbs",
     ],
 )
 
@@ -103,7 +111,10 @@ cc_library(
     hdrs = ["verbs_cleanup.h"],
     deps = [
         "//public:rdma_memblock",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/synchronization",
+        "@libibverbs",
     ],
 )

@@ -18,6 +18,8 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_STATUS_MATCHER_H_
 
 #include <ostream>
+#include <string>
+#include <utility>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"

@@ -13,24 +13,18 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <string.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
-#include <thread>  // NOLINT
-#include <vector>
+#include <cstring>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
-#include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
@@ -58,71 +52,6 @@ TEST_F(PdTest, OpenManyPd) {
   for (int i = 0; i < 500; ++i) {
     auto* pd = ibv_.AllocPd(context);
     EXPECT_THAT(pd, NotNull());
-  }
-}
-
-TEST_F(PdTest, ThreadedAlloc) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kPdsPerThread = 50;
-
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-
-  std::array<std::array<ibv_pd*, kPdsPerThread>, kThreadCount> pds;
-  pds = {{{nullptr}}};
-  auto alloc_pds = [this, &context, &pds](int thread_id) {
-    // No PDs can share the same position in the array, so no need for thread
-    // synchronization.
-    for (int i = 0; i < kPdsPerThread; ++i) {
-      pds[thread_id][i] = ibv_.AllocPd(context);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(alloc_pds, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_pds : pds) {
-    for (const auto& pd : thread_pds) {
-      EXPECT_THAT(pd, NotNull());
-    }
-  }
-}
-
-TEST_F(PdTest, ThreadedAllocAndDealloc) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kPdsPerThread = 50;
-
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  // Initialize to 1 since we are expecting the values to be 0 after
-  // deallocating PDs.
-  std::array<std::array<int, kPdsPerThread>, kThreadCount> dealloc_results;
-  std::fill(dealloc_results.front().begin(), dealloc_results.back().end(), 1);
-  auto alloc_dealloc_pds = [this, &context, &dealloc_results](int thread_id) {
-    for (int i = 0; i < kPdsPerThread; ++i) {
-      ibv_pd* pd = ibv_alloc_pd(context);
-      ASSERT_THAT(pd, NotNull());
-      dealloc_results[thread_id][i] = ibv_dealloc_pd(pd);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(alloc_dealloc_pds, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_results : dealloc_results) {
-    for (const auto& dealloc_result : thread_results) {
-      EXPECT_EQ(dealloc_result, 0);
-    }
   }
 }
 

@@ -15,23 +15,13 @@
 #include "public/verbs_util.h"
 
 #include <arpa/inet.h>
-#include <ifaddrs.h>
-#include <net/ethernet.h>
-#include <net/if.h>
 #include <resolv.h>
-#include <string.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <unistd.h>
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
-#include <iterator>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "glog/logging.h"
@@ -40,13 +30,10 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-
-
 
 #include "infiniband/verbs.h"
 #include "public/flags.h"
@@ -200,7 +187,6 @@ ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid) {
   return attr;
 }
 
-
 ibv_qp_cap DefaultQpCap() {
   ibv_qp_cap cap;
   cap.max_send_wr = verbs_util::kDefaultMaxWr;
@@ -226,6 +212,14 @@ ibv_qp_state GetQpState(ibv_qp* qp) {
   int result = ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
   DCHECK_EQ(0, result);
   return attr.qp_state;
+}
+
+ibv_qp_cap GetQpCap(ibv_qp* qp) {
+  ibv_qp_attr attr;
+  ibv_qp_init_attr init_attr;
+  int result = ibv_query_qp(qp, &attr, IBV_QP_CAP, &init_attr);
+  DCHECK_EQ(0, result);
+  return attr.cap;
 }
 
 ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr) {
@@ -406,7 +400,58 @@ absl::StatusOr<ibv_wc> WaitForCompletion(ibv_cq* cq, absl::Duration timeout) {
   if (count > 0) {
     return result;
   }
-  return absl::InternalError("Timeout while waiting for a completion");
+  return absl::DeadlineExceededError("Timeout while waiting for a completion.");
+}
+
+absl::Status WaitForPollingExtendedCompletion(ibv_cq_ex* cq,
+                                              absl::Duration timeout) {
+  ibv_poll_cq_attr poll_attr = {};
+  int result = ibv_start_poll(cq, &poll_attr);
+  absl::Time stop = absl::Now() + timeout;
+  while (result == ENOENT && absl::Now() < stop) {
+    absl::SleepFor(absl::Milliseconds(10));
+    result = ibv_start_poll(cq, &poll_attr);
+  }
+  if (result == 0) {
+    return absl::OkStatus();
+  }
+  if (result != ENOENT) {
+    return absl::InternalError("Failed to start polling completion.");
+  }
+  return absl::DeadlineExceededError("Timeout while waiting for a completion.");
+}
+
+absl::Status WaitForNextExtendedCompletion(ibv_cq_ex* cq,
+                                           absl::Duration timeout) {
+  int result = ibv_next_poll(cq);
+  absl::Time stop = absl::Now() + timeout;
+  while (result == ENOENT && absl::Now() < stop) {
+    absl::SleepFor(absl::Milliseconds(10));
+    result = ibv_next_poll(cq);
+  }
+  if (result == 0) {
+    return absl::OkStatus();
+  }
+  ibv_end_poll(cq);
+  if (result != ENOENT) {
+    return absl::InternalError("Failed to get next completion.");
+  }
+  return absl::DeadlineExceededError("Timeout while waiting for a completion.");
+}
+
+bool CheckExtendedCompletionHasCapability(ibv_context* context,
+                                          uint64_t wc_flag) {
+  ibv_cq_init_attr_ex cq_attr = {.cqe = 1, .wc_flags = wc_flag};
+  ibv_cq_ex* cq = ibv_create_cq_ex(context, &cq_attr);
+  if (cq != nullptr) {
+    DCHECK_EQ(ibv_destroy_cq(ibv_cq_ex_to_cq(cq)), 0);
+    return true;
+  }
+  return false;
+}
+
+bool ExpectNoCompletion(ibv_cq* cq, absl::Duration timeout) {
+  return absl::IsDeadlineExceeded(WaitForCompletion(cq, timeout).status());
 }
 
 void PrintCompletion(const ibv_wc& completion) {

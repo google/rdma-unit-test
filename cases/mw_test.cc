@@ -13,13 +13,14 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <sched.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
+#include <string>
 #include <thread>  // NOLINT
 #include <utility>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"

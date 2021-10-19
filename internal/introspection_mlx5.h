@@ -1,6 +1,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 
+#include "absl/container/flat_hash_set.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/introspection.h"

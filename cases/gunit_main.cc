@@ -14,6 +14,8 @@
 
 // Initialize absl::Flags before initializing/running unit tests.
 
+#include <cstdint>
+
 #include "gtest/gtest.h"
 #include "absl/debugging/failure_signal_handler.h"
 #include "absl/flags/parse.h"

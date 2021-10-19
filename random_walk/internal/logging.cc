@@ -18,10 +18,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
-#include <vector>
 
+#include "glog/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -39,9 +40,8 @@ uint64_t LogEntry::entry_id() const { return entry_id_; }
 
 absl::Time LogEntry::timestamp() const { return timestamp_; }
 
-CreateCq::CreateCq(uint64_t entry_id) : LogEntry(entry_id) {}
-
-void CreateCq::FillInCq(ibv_cq* cq) { cq_ = cq; }
+CreateCq::CreateCq(uint64_t entry_id, ibv_cq* cq)
+    : LogEntry(entry_id), cq_(cq) {}
 
 std::string CreateCq::ToString() const {
   return absl::StrCat("AllocPd {entry_id = ", entry_id(),
@@ -58,9 +58,7 @@ std::string DestroyCq::ToString() const {
                       ", cq = ", reinterpret_cast<uint64_t>(cq_), "}");
 }
 
-AllocPd::AllocPd(uint64_t entry_id) : LogEntry(entry_id) {}
-
-void AllocPd::FillInPd(ibv_pd* pd) { pd_ = pd; }
+AllocPd::AllocPd(uint64_t entry_id, ibv_pd* pd) : LogEntry(entry_id), pd_(pd) {}
 
 std::string AllocPd::ToString() const {
   return absl::StrCat("AllocPd {entry_id = ", entry_id(),
@@ -77,13 +75,13 @@ std::string DeallocPd::ToString() const {
                       ", pd = ", reinterpret_cast<uint64_t>(pd_), "}");
 }
 
-RegMr::RegMr(uint64_t entry_id, ibv_pd* pd, const RdmaMemBlock& memblock)
+RegMr::RegMr(uint64_t entry_id, ibv_pd* pd, const RdmaMemBlock& memblock,
+             ibv_mr* mr)
     : LogEntry(entry_id),
       pd_(pd),
       addr_(reinterpret_cast<uint64_t>(memblock.data())),
-      length_(memblock.size()) {}
-
-void RegMr::FillInMr(ibv_mr* mr) { mr_ = mr; }
+      length_(memblock.size()),
+      mr_(mr) {}
 
 std::string RegMr::ToString() const {
   return absl::StrCat("RegMr {entry_id = ", entry_id(),
@@ -100,10 +98,8 @@ std::string DeregMr::ToString() const {
                       ", mr = ", reinterpret_cast<uint64_t>(mr_), "}.");
 }
 
-AllocMw::AllocMw(uint64_t entry_id, ibv_pd* pd, ibv_mw_type mw_type)
-    : LogEntry(entry_id), pd_(pd), mw_type_(mw_type) {}
-
-void AllocMw::FillInMw(ibv_mw* mw) { mw_ = mw; }
+AllocMw::AllocMw(uint64_t entry_id, ibv_pd* pd, ibv_mw_type mw_type, ibv_mw* mw)
+    : LogEntry(entry_id), pd_(pd), mw_type_(mw_type), mw_(mw) {}
 
 std::string AllocMw::ToString() const {
   return absl::StrCat("AllocMw {entry_id = ", entry_id(),
@@ -313,130 +309,111 @@ std::string Completion::ToString() const {
 RandomWalkLogger::RandomWalkLogger(size_t log_capacity)
     : log_capacity_(log_capacity) {}
 
-std::shared_ptr<CreateCq> RandomWalkLogger::PushCreateCqInput() {
-  std::shared_ptr<CreateCq> create_cq =
-      std::make_shared<CreateCq>(next_entry_id_++);
-  PushToLog(create_cq);
-  return create_cq;
+void RandomWalkLogger::PushCreateCq(ibv_cq* cq) {
+  logs_.emplace_back(std::make_unique<CreateCq>(next_entry_id_++, cq));
+  Flush();
 }
 
 void RandomWalkLogger::PushDestroyCq(ibv_cq* cq) {
-  std::shared_ptr<DestroyCq> destroy_cq =
-      std::make_shared<DestroyCq>(next_entry_id_++, cq);
-  PushToLog(destroy_cq);
+  logs_.emplace_back(std::make_unique<DestroyCq>(next_entry_id_++, cq));
+  Flush();
 }
 
-std::shared_ptr<AllocPd> RandomWalkLogger::PushAllocPdInput() {
-  std::shared_ptr<AllocPd> alloc_pd =
-      std::make_shared<AllocPd>(next_entry_id_++);
-  PushToLog(alloc_pd);
-  return alloc_pd;
+void RandomWalkLogger::PushAllocPd(ibv_pd* pd) {
+  logs_.emplace_back(std::make_unique<AllocPd>(next_entry_id_++, pd));
+  Flush();
 }
 
 void RandomWalkLogger::PushDeallocPd(ibv_pd* pd) {
-  std::shared_ptr<DeallocPd> dealloc_pd =
-      std::make_shared<DeallocPd>(next_entry_id_++, pd);
-  PushToLog(dealloc_pd);
+  logs_.emplace_back(std::make_unique<DeallocPd>(next_entry_id_++, pd));
+  Flush();
 }
 
-std::shared_ptr<RegMr> RandomWalkLogger::PushRegMrInput(
-    ibv_pd* pd, const RdmaMemBlock& memblock) {
-  std::shared_ptr<RegMr> reg_mr =
-      std::make_shared<RegMr>(next_entry_id_++, pd, memblock);
-  PushToLog(reg_mr);
-  return reg_mr;
+void RandomWalkLogger::PushRegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
+                                 ibv_mr* mr) {
+  logs_.emplace_back(
+      std::make_unique<RegMr>(next_entry_id_++, pd, memblock, mr));
+  Flush();
 }
 
 void RandomWalkLogger::PushDeregMr(ibv_mr* mr) {
-  std::shared_ptr<DeregMr> dereg_mr =
-      std::make_shared<DeregMr>(next_entry_id_++, mr);
-  PushToLog(dereg_mr);
+  logs_.emplace_back(std::make_unique<DeregMr>(next_entry_id_++, mr));
+  Flush();
 }
 
-std::shared_ptr<AllocMw> RandomWalkLogger::PushAllocMwInput(
-    ibv_pd* pd, ibv_mw_type mw_type) {
-  std::shared_ptr<AllocMw> alloc_mw =
-      std::make_shared<AllocMw>(next_entry_id_++, pd, mw_type);
-  PushToLog(alloc_mw);
-  return alloc_mw;
+void RandomWalkLogger::PushAllocMw(ibv_pd* pd, ibv_mw_type mw_type,
+                                   ibv_mw* mw) {
+  logs_.emplace_back(
+      std::make_unique<AllocMw>(next_entry_id_++, pd, mw_type, mw));
+  Flush();
 }
 
 void RandomWalkLogger::PushDeallocMw(ibv_mw* mw) {
-  std::shared_ptr<DeallocMw> dealloc_mw =
-      std::make_shared<DeallocMw>(next_entry_id_++, mw);
-  PushToLog(dealloc_mw);
+  logs_.emplace_back(std::make_unique<DeallocMw>(next_entry_id_++, mw));
+  Flush();
 }
 
 void RandomWalkLogger::PushBindMw(const ibv_mw_bind& bind, ibv_mw* mw) {
-  std::shared_ptr<BindMw> bind_mw =
-      std::make_shared<BindMw>(next_entry_id_++, bind, mw);
-  PushToLog(bind_mw);
+  logs_.emplace_back(std::make_unique<BindMw>(next_entry_id_++, bind, mw));
+  Flush();
 }
 
 void RandomWalkLogger::PushBindMw(const ibv_send_wr& bind) {
-  std::shared_ptr<BindMw> bind_mw =
-      std::make_shared<BindMw>(next_entry_id_++, bind);
-  PushToLog(bind_mw);
+  logs_.emplace_back(std::make_unique<BindMw>(next_entry_id_++, bind));
+  Flush();
 }
 
 void RandomWalkLogger::PushCreateQp(ibv_qp* qp) {
-  std::shared_ptr<CreateQp> create_qp =
-      std::make_shared<CreateQp>(next_entry_id_++, qp);
-  PushToLog(create_qp);
+  logs_.emplace_back(std::make_unique<CreateQp>(next_entry_id_++, qp));
+  Flush();
 }
 
 void RandomWalkLogger::PushCreateAh(ibv_pd* pd, ClientId client_id,
                                     ibv_ah* ah) {
-  std::shared_ptr<CreateAh> create_ah =
-      std::make_shared<CreateAh>(next_entry_id_++, pd, client_id, ah);
-  PushToLog(create_ah);
+  logs_.emplace_back(
+      std::make_unique<CreateAh>(next_entry_id_++, pd, client_id, ah));
+  Flush();
 }
 void RandomWalkLogger::PushDestroyAh(ibv_ah* ah) {
-  std::shared_ptr<DestroyAh> destroy_ah =
-      std::make_shared<DestroyAh>(next_entry_id_++, ah);
-  PushToLog(destroy_ah);
+  logs_.emplace_back(std::make_unique<DestroyAh>(next_entry_id_++, ah));
+  Flush();
 }
 
 void RandomWalkLogger::PushSend(const ibv_send_wr& send_wr) {
-  std::shared_ptr<Send> send =
-      std::make_shared<Send>(next_entry_id_++, send_wr);
-  PushToLog(send);
+  logs_.emplace_back(std::make_unique<Send>(next_entry_id_++, send_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushRecv(const ibv_recv_wr& recv_wr) {
-  std::shared_ptr<Recv> recv =
-      std::make_shared<Recv>(next_entry_id_++, recv_wr);
-  PushToLog(recv);
+  logs_.emplace_back(std::make_unique<Recv>(next_entry_id_++, recv_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushRead(const ibv_send_wr& read_wr) {
-  std::shared_ptr<Read> read =
-      std::make_shared<Read>(next_entry_id_++, read_wr);
-  PushToLog(read);
+  logs_.emplace_back(std::make_unique<Read>(next_entry_id_++, read_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushWrite(const ibv_send_wr& write_wr) {
-  std::shared_ptr<Write> write =
-      std::make_shared<Write>(next_entry_id_++, write_wr);
-  PushToLog(write);
+  logs_.emplace_back(std::make_unique<Write>(next_entry_id_++, write_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushFetchAdd(const ibv_send_wr& fetch_add_wr) {
-  std::shared_ptr<FetchAdd> fetch_add =
-      std::make_shared<FetchAdd>(next_entry_id_++, fetch_add_wr);
-  PushToLog(fetch_add);
+  logs_.emplace_back(
+      std::make_unique<FetchAdd>(next_entry_id_++, fetch_add_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushCompSwap(const ibv_send_wr& comp_swap_wr) {
-  std::shared_ptr<CompSwap> comp_swap =
-      std::make_shared<CompSwap>(next_entry_id_++, comp_swap_wr);
-  PushToLog(comp_swap);
+  logs_.emplace_back(
+      std::make_unique<CompSwap>(next_entry_id_++, comp_swap_wr));
+  Flush();
 }
 
 void RandomWalkLogger::PushCompletion(const ibv_wc& cqe) {
-  std::shared_ptr<Completion> completion =
-      std::make_shared<Completion>(next_entry_id_++, cqe);
-  PushToLog(completion);
+  logs_.emplace_back(std::make_unique<Completion>(next_entry_id_++, cqe));
+  Flush();
 }
 
 void RandomWalkLogger::PrintLogs() const {
@@ -445,8 +422,7 @@ void RandomWalkLogger::PrintLogs() const {
   }
 }
 
-void RandomWalkLogger::PushToLog(std::shared_ptr<LogEntry> log_entry) {
-  logs_.push_back(log_entry);
+void RandomWalkLogger::Flush() {
   while (logs_.size() > log_capacity_) {
     logs_.pop_front();
   }

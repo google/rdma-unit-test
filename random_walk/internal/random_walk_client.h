@@ -66,6 +66,10 @@ class RandomWalkClient : public InboundUpdateInterface {
   static constexpr double kSendImmProbability = 0.2;
   // The capacity of the queues storing oustanding inbound/outbound updates.
   static constexpr size_t kMaxOustandingUpdates = 50;
+  // The minimum WR capacity of a QP.
+  static constexpr int kMinQpWr = 20;
+  // The minimum CQE capacity of a CQ.
+  static constexpr int kMinCqe = 50;
 
   // ---------------------------------------------------------------------------
 

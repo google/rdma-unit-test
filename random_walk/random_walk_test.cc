@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/time/time.h"
 #include "public/introspection.h"
@@ -33,7 +34,6 @@ class RandomWalkTest : public testing::Test {
   static void TearDownTestSuite() {
   }
 };
-
 
 TEST_F(RandomWalkTest, SingleNodeTwoClientRandomWalk20Second) {
   ActionWeights weights;

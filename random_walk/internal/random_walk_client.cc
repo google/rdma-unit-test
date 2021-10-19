@@ -16,23 +16,25 @@
 
 #include "random_walk/internal/random_walk_client.h"
 
-#include <algorithm>
+#include <sched.h>
+
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
+#include <cstring>
+#include <deque>
 #include <memory>
 #include <string>
 #include <tuple>
-#include <utility>
 #include <vector>
 
-#include "absl/container/flat_hash_set.h"
-#include "absl/flags/flag.h"
+#include "glog/logging.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/random/distributions.h"
-#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -41,11 +43,15 @@
 #include "infiniband/verbs.h"
 #include "public/introspection.h"
 #include "public/map_util.h"
+#include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
+#include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
 #include "random_walk/internal/bind_ops_tracker.h"
 #include "random_walk/internal/client_update_service.pb.h"
+#include "random_walk/internal/ibv_resource_manager.h"
 #include "random_walk/internal/invalidate_ops_tracker.h"
+#include "random_walk/internal/logging.h"
 #include "random_walk/internal/random_walk_config.pb.h"
 #include "random_walk/internal/sampling.h"
 #include "random_walk/internal/types.h"
@@ -364,11 +370,16 @@ ibv_qp* RandomWalkClient::CreateLocalRcQp(ClientId peer_id, ibv_pd* pd) {
   init_attr.qp_type = IBV_QPT_RC;
   init_attr.sq_sig_all = 0;
   init_attr.srq = nullptr;
-  init_attr.cap.max_send_wr = verbs_util::kDefaultMaxWr;
-  init_attr.cap.max_recv_wr = verbs_util::kDefaultMaxWr;
-  init_attr.cap.max_send_sge = verbs_util::kDefaultMaxSge;
-  init_attr.cap.max_recv_sge = verbs_util::kDefaultMaxSge;
-  init_attr.cap.max_inline_data = verbs_util::kDefaultMaxInlineSize;
+  init_attr.cap = verbs_util::DefaultQpCap();
+  // Randomized QP cap.
+  init_attr.cap.max_send_wr =
+      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
+  init_attr.cap.max_recv_wr =
+      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
+  init_attr.cap.max_send_sge =
+      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
+  init_attr.cap.max_recv_sge =
+      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
   ibv_qp* qp = ibv_.CreateQp(pd, init_attr);
   if (!qp) {
     return nullptr;
@@ -414,10 +425,10 @@ absl::Status RandomWalkClient::DoRandomAction() {
 }
 
 absl::StatusCode RandomWalkClient::DeregMr(ibv_mr* mr) {
-  log_.PushDeregMr(mr);
   uint32_t rkey = mr->rkey;
   ibv_pd* pd = mr->pd;
   int result = ibv_.DeregMr(mr);
+  log_.PushDeregMr(mr);
   if (result) {
     LOG(DFATAL) << "Failed to deregister mr (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -443,8 +454,8 @@ absl::StatusCode RandomWalkClient::DeallocType1Mw(ibv_mw* mw, bool is_bound) {
 
   ibv_pd* pd = mw->pd;
   uint32_t mw_rkey = mw->rkey;
-  log_.PushDeallocMw(mw);
   int result = ibv_.DeallocMw(mw);
+  log_.PushDeallocMw(mw);
   if (result) {
     LOG(DFATAL) << "Failed to deallocate (bound) mw (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -479,8 +490,8 @@ absl::StatusCode RandomWalkClient::DeallocType2Mw(ibv_mw* mw, bool is_bound) {
 
   uint32_t rkey = mw->rkey;
   ibv_pd* pd = mw->pd;
-  log_.PushDeallocMw(mw);
   int result = ibv_.DeallocMw(mw);
+  log_.PushDeallocMw(mw);
   if (result) {
     LOG(DFATAL) << "Failed to deallocate (bound) mw (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -658,13 +669,14 @@ absl::StatusCode RandomWalkClient::TryDoRandomAction() {
 }
 
 absl::StatusCode RandomWalkClient::TryCreateCq() {
-  auto log_entry = log_.PushCreateCqInput();
-  ibv_cq* cq = ibv_.CreateCq(context_);
+  int cqe =
+      absl::Uniform(bitgen_, kMinCqe, Introspection().device_attr().max_cqe);
+  ibv_cq* cq = ibv_.CreateCq(context_, cqe);
+  log_.PushCreateCq(cq);
   if (!cq) {
-    LOG(DFATAL) << "Failed to create cq. errno = " << errno << ").";
+    LOG(DFATAL) << "Failed to create cq (" << errno << ").";
     return absl::StatusCode::kInternal;
   }
-  log_entry->FillInCq(cq);
   ++stats_.create_cq;
   resource_manager_.InsertCq(cq);
 
@@ -683,8 +695,8 @@ absl::StatusCode RandomWalkClient::TryDestroyCq() {
   ibv_cq* cq = cq_sample.value();
   DCHECK(cq);
 
-  log_.PushDestroyCq(cq);
   int result = ibv_.DestroyCq(cq);
+  log_.PushDestroyCq(cq);
   if (result) {
     LOG(DFATAL) << "Failed to destroy CQ (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -696,13 +708,12 @@ absl::StatusCode RandomWalkClient::TryDestroyCq() {
 }
 
 absl::StatusCode RandomWalkClient::TryAllocPd() {
-  auto log_entry = log_.PushAllocPdInput();
   ibv_pd* pd = ibv_.AllocPd(context_);
+  log_.PushAllocPd(pd);
   if (!pd) {
     LOG(DFATAL) << "Failed to allocate PD. (errno = " << errno << ").";
     return absl::StatusCode::kInternal;
   }
-  log_entry->FillInPd(pd);
   ++stats_.alloc_pd;
   resource_manager_.InsertPd(pd);
 
@@ -721,8 +732,8 @@ absl::StatusCode RandomWalkClient::TryDeallocPd() {
   ibv_pd* pd = pd_sample.value();
   DCHECK(pd);
 
-  log_.PushDeallocPd(pd);
   int result = ibv_.DeallocPd(pd);
+  log_.PushDeallocPd(pd);
   if (result) {
     LOG(DFATAL) << "Failed to deallocate PD (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -742,9 +753,8 @@ absl::StatusCode RandomWalkClient::TryRegMr() {
   ibv_pd* pd = pd_sample.value();
   DCHECK(pd);
 
-  auto log_entry = log_.PushRegMrInput(pd, memblock);
   ibv_mr* mr = ibv_.RegMr(pd, memblock);
-  log_entry->FillInMr(mr);
+  log_.PushAllocPd(pd);
   if (!mr) {
     LOG(DFATAL) << "Failed to register mr.";
     return absl::StatusCode::kInternal;
@@ -788,9 +798,8 @@ absl::StatusCode RandomWalkClient::TryAllocType1Mw() {
   ibv_pd* pd = pd_sample.value();
   DCHECK(pd);
 
-  auto log_entry = log_.PushAllocMwInput(pd, IBV_MW_TYPE_1);
   ibv_mw* mw = ibv_.AllocMw(pd, IBV_MW_TYPE_1);
-  log_entry->FillInMw(mw);
+  log_.PushAllocMw(pd, IBV_MW_TYPE_1, mw);
   if (!mw) {
     LOG(DFATAL) << "Failed to allocate mw.";
     return absl::StatusCode::kInternal;
@@ -818,9 +827,8 @@ absl::StatusCode RandomWalkClient::TryAllocType2Mw() {
   ibv_pd* pd = pd_sample.value();
   DCHECK(pd);
 
-  auto log_entry = log_.PushAllocMwInput(pd, IBV_MW_TYPE_2);
   ibv_mw* mw = ibv_.AllocMw(pd, IBV_MW_TYPE_2);
-  log_entry->FillInMw(mw);
+  log_.PushAllocMw(pd, IBV_MW_TYPE_2, mw);
   if (!mw) {
     LOG(DFATAL) << "Failed to allocate mw.";
     return absl::StatusCode::kInternal;
@@ -906,8 +914,8 @@ absl::StatusCode RandomWalkClient::TryBindType1Mw() {
   ibv_mw_bind bind_wr =
       verbs_util::CreateType1MwBind(next_wr_id_++, buffer, mr);
 
-  log_.PushBindMw(bind_wr, mw);
   int result = ibv_bind_mw(qp, mw, &bind_wr);
+  log_.PushBindMw(bind_wr, mw);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -959,8 +967,8 @@ absl::StatusCode RandomWalkClient::TryBindType2Mw() {
   ibv_send_wr bind_wr =
       verbs_util::CreateType2BindWr(next_wr_id_++, mw, buffer, rkey, mr);
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushBindMw(bind_wr);
   int result = ibv_post_send(qp, &bind_wr, &bad_wr);
+  log_.PushBindMw(bind_wr);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -985,8 +993,8 @@ absl::StatusCode RandomWalkClient::TryCreateRcQpPair() {
   DCHECK(pd);
 
   ibv_qp* qp = CreateLocalRcQp(peer_id, pd);
-  DCHECK(qp);
   log_.PushCreateQp(qp);
+  DCHECK(qp);
   ++stats_.create_rc_qp_pair;
 
   ClientUpdate update;
@@ -1026,13 +1034,19 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
   init_attr.qp_type = IBV_QPT_UD;
   init_attr.sq_sig_all = 0;
   init_attr.srq = nullptr;
-  init_attr.cap.max_send_wr = verbs_util::kDefaultMaxWr;
-  init_attr.cap.max_recv_wr = verbs_util::kDefaultMaxWr;
-  init_attr.cap.max_send_sge = verbs_util::kDefaultMaxSge;
-  init_attr.cap.max_recv_sge = verbs_util::kDefaultMaxSge;
-  init_attr.cap.max_inline_data = verbs_util::kDefaultMaxInlineSize;
+  init_attr.cap = verbs_util::DefaultQpCap();
+  // Randomized QP cap.
+  init_attr.cap.max_send_wr =
+      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
+  init_attr.cap.max_recv_wr =
+      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
+  init_attr.cap.max_send_sge =
+      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
+  init_attr.cap.max_recv_sge =
+      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
 
   ibv_qp* qp = ibv_.CreateQp(pd, init_attr);
+  log_.PushCreateQp(qp);
   if (!qp) {
     LOG(DFATAL) << "Failed to create UD QP (" << errno << ")";
     return absl::StatusCode::kInternal;
@@ -1044,7 +1058,6 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
     LOG(DFATAL) << "Failed to bring up UD QP (" << status << ").";
     return absl::StatusCode::kInternal;
   }
-  log_.PushCreateQp(qp);
   ++stats_.create_ud_qp;
   resource_manager_.InsertUdQp(qp, qkey, init_attr.cap);
   CqInfo* send_cq_info = resource_manager_.GetMutableCqInfo(send_cq);
@@ -1105,12 +1118,12 @@ absl::StatusCode RandomWalkClient::TryCreateAh() {
   std::tie(client_id, gid) = gid_sample.value();
 
   ibv_ah* ah = ibv_.CreateAh(pd, gid);
+  log_.PushCreateAh(pd, client_id, ah);
   if (!ah) {
     LOG(DFATAL) << "Failed to create ah (" << errno << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.create_ah;
-  log_.PushCreateAh(pd, client_id, ah);
   resource_manager_.InsertAh(ah, client_id);
   PdInfo* pd_info = resource_manager_.GetMutablePdInfo(pd);
   DCHECK(pd_info);
@@ -1129,12 +1142,12 @@ absl::StatusCode RandomWalkClient::TryDestroyAh() {
 
   ibv_pd* pd = ah->pd;
   int result = ibv_.DestroyAh(ah);
+  log_.PushDestroyAh(ah);
   if (result) {
     LOG(DFATAL) << "Failed to destroy ah (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.destroy_ah;
-  log_.PushDestroyAh(ah);
   resource_manager_.EraseAh(ah);
   PdInfo* pd_info = resource_manager_.GetMutablePdInfo(pd);
   DCHECK(pd_info);
@@ -1204,8 +1217,8 @@ absl::StatusCode RandomWalkClient::TrySend() {
     send.imm_data = absl::Uniform<uint32_t>(bitgen_);
   }
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushSend(send);
   int result = ibv_post_send(qp, &send, &bad_wr);
+  log_.PushSend(send);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1300,8 +1313,8 @@ absl::StatusCode RandomWalkClient::TryRecv() {
   ibv_recv_wr recv =
       verbs_util::CreateRecvWr(next_wr_id_++, sges.data(), sges.size());
   ibv_recv_wr* bad_wr = nullptr;
-  log_.PushRecv(recv);
   int result = ibv_post_recv(qp, &recv, &bad_wr);
+  log_.PushRecv(recv);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1349,8 +1362,8 @@ absl::StatusCode RandomWalkClient::TryRead() {
   ibv_send_wr read = verbs_util::CreateReadWr(
       next_wr_id_++, sges.data(), sges.size(), remote_addr, memory.rkey);
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushRead(read);
   int result = ibv_post_send(qp, &read, &bad_wr);
+  log_.PushRead(read);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1398,8 +1411,8 @@ absl::StatusCode RandomWalkClient::TryWrite() {
   ibv_send_wr write = verbs_util::CreateWriteWr(
       next_wr_id_++, sges.data(), sges.size(), remote_addr, memory.rkey);
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushWrite(write);
   int result = ibv_post_send(qp, &write, &bad_wr);
+  log_.PushWrite(write);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1443,8 +1456,8 @@ absl::StatusCode RandomWalkClient::TryFetchAdd() {
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       next_wr_id_++, &sge, /*num_sge=*/1, remote_addr, memory.rkey, add);
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushFetchAdd(fetch_add);
   int result = ibv_post_send(qp, &fetch_add, &bad_wr);
+  log_.PushFetchAdd(fetch_add);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1489,8 +1502,8 @@ absl::StatusCode RandomWalkClient::TryCompSwap() {
   ibv_send_wr comp_swap = verbs_util::CreateCompSwapWr(
       next_wr_id_++, &sge, /*num_sge=*/1, remote_addr, memory.rkey, add, swap);
   ibv_send_wr* bad_wr = nullptr;
-  log_.PushCompSwap(comp_swap);
   int result = ibv_post_send(qp, &comp_swap, &bad_wr);
+  log_.PushCompSwap(comp_swap);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;

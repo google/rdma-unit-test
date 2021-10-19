@@ -13,17 +13,30 @@
 // limitations under the License.
 #include "public/verbs_helper_suite.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "glog/logging.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
+#include "absl/memory/memory.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 #include "internal/roce_backend.h"
 #include "internal/roce_extension.h"
+#include "internal/verbs_backend.h"
+#include "internal/verbs_cleanup.h"
 #include "internal/verbs_extension_interface.h"
 #include "public/flags.h"
+#include "public/page_size.h"
+#include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
@@ -69,10 +82,6 @@ absl::Status VerbsHelperSuite::SetQpRtr(ibv_qp* qp,
   return backend_->SetQpRtr(qp, local, remote_gid, remote_qpn);
 }
 
-absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp) {
-  return backend_->SetQpRts(qp);
-}
-
 absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr,
                                         int mask) {
   return backend_->SetQpRts(qp, custom_attr, mask);
@@ -84,19 +93,17 @@ absl::Status VerbsHelperSuite::SetQpError(ibv_qp* qp) {
 
 RdmaMemBlock VerbsHelperSuite::AllocBuffer(int pages,
                                            bool requires_shared_memory) {
-  return AllocAlignedBufferByBytes(pages * verbs_util::kPageSize,
-                                   requires_shared_memory
-                                       ? verbs_util::kPageSize
-                                       : __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+  return AllocAlignedBufferByBytes(
+      pages * kPageSize,
+      requires_shared_memory ? kPageSize : __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 }
 
 RdmaMemBlock VerbsHelperSuite::AllocAlignedBuffer(int pages, size_t alignment) {
-  return AllocAlignedBufferByBytes(pages * verbs_util::kPageSize, alignment);
+  return AllocAlignedBufferByBytes(pages * kPageSize, alignment);
 }
 
 RdmaMemBlock VerbsHelperSuite::AllocHugepageBuffer(int pages) {
-  return AllocAlignedBufferByBytes(pages * verbs_util::kHugePageSize,
-                                   verbs_util::kHugePageSize,
+  return AllocAlignedBufferByBytes(pages * kHugepageSize, kHugepageSize,
                                    /*huge_page=*/true);
 }
 
@@ -260,6 +267,24 @@ int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
   return result;
 }
 
+ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
+                                        ibv_cq_init_attr_ex& cq_attr) {
+  ibv_cq_ex* cq = ibv_create_cq_ex(context, &cq_attr);
+  if (cq) {
+    cleanup_.AddCleanup(cq);
+  }
+  return cq;
+}
+
+int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {
+  ibv_cq* cq = ibv_cq_ex_to_cq(cq_ex);
+  int result = ibv_destroy_cq(cq);
+  if (result == 0) {
+    cleanup_.ReleaseCleanup(cq_ex);
+  }
+  return result;
+}
+
 ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
   ibv_srq_init_attr init_attr;
   init_attr.attr = verbs_util::DefaultSrqAttr();
@@ -335,6 +360,10 @@ verbs_util::PortGid VerbsHelperSuite::GetLocalPortGid(
   CHECK(iter != port_gids_.end());  // Crash ok
   auto& info_array = iter->second;
   return info_array[0];
+}
+
+VerbsExtensionInterface* VerbsHelperSuite::Extensions() const {
+  return extension_.get();
 }
 
 }  // namespace rdma_unit_test

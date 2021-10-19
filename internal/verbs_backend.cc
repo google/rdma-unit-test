@@ -15,8 +15,9 @@
 #include "internal/verbs_backend.h"
 
 #include <cstdint>
+#include <string>
 
-#include "gmock/gmock.h"
+#include "glog/logging.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
@@ -100,38 +101,15 @@ absl::Status VerbsBackend::SetQpInit(ibv_qp* qp, uint8_t port) {
   return absl::OkStatus();
 }
 
-absl::Status VerbsBackend::SetQpRts(ibv_qp* qp) {
+absl::Status VerbsBackend::SetQpRts(ibv_qp* qp, ibv_qp_attr attr, int mask) {
   ibv_qp_attr mod_rts = {};
   mod_rts.qp_state = IBV_QPS_RTS;
-  mod_rts.sq_psn =
-      1225;              // TODO(author1): Eventually randomize for reality.
-  mod_rts.timeout = 17;  // ~500 ms
-  mod_rts.retry_cnt = 5;
-  mod_rts.rnr_retry = 5;
-  mod_rts.max_rd_atomic = 5;
-
-  constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
-                           IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
-                           IBV_QP_MAX_QP_RD_ATOMIC;
-  int result_code = ibv_modify_qp(qp, &mod_rts, kRtsMask);
-  if (result_code != 0) {
-    return absl::InternalError(
-        absl::StrCat("Modify QP (Rts) failed (", result_code, ")."));
-  }
-  return absl::OkStatus();
-}
-
-absl::Status VerbsBackend::SetQpRts(ibv_qp* qp, ibv_qp_attr optional_attr,
-                                    int mask) {
-  ibv_qp_attr mod_rts = {};
-  mod_rts.qp_state = IBV_QPS_RTS;
-  mod_rts.sq_psn = mask & IBV_QP_SQ_PSN ? optional_attr.sq_psn : 1225;
-  mod_rts.timeout =
-      mask & IBV_QP_TIMEOUT ? optional_attr.timeout : 17;  // ~500 ms
-  mod_rts.retry_cnt = mask & IBV_QP_RETRY_CNT ? optional_attr.retry_cnt : 5;
-  mod_rts.rnr_retry = mask & IBV_QP_RNR_RETRY ? optional_attr.rnr_retry : 5;
+  mod_rts.sq_psn = mask & IBV_QP_SQ_PSN ? attr.sq_psn : 1225;
+  mod_rts.timeout = mask & IBV_QP_TIMEOUT ? attr.timeout : 17;  // ~500 ms
+  mod_rts.retry_cnt = mask & IBV_QP_RETRY_CNT ? attr.retry_cnt : 5;
+  mod_rts.rnr_retry = mask & IBV_QP_RNR_RETRY ? attr.rnr_retry : 5;
   mod_rts.max_rd_atomic =
-      mask & IBV_QP_MAX_QP_RD_ATOMIC ? optional_attr.max_rd_atomic : 5;
+      mask & IBV_QP_MAX_QP_RD_ATOMIC ? attr.max_rd_atomic : 5;
 
   constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
                            IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |

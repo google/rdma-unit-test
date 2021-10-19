@@ -20,7 +20,6 @@
 #include "absl/flags/flag.h"
 #include "absl/strings/string_view.h"
 
-
 ABSL_FLAG(uint64_t, verbs_mtu, 4096,
           "The MTU value used in modify_qp. Valid values: 256, 512, 1024, "
           "2048, 4096[default]");

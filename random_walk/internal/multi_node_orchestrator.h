@@ -17,8 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_MULTI_NODE_ORCHESTRATOR_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_MULTI_NODE_ORCHESTRATOR_H_
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <memory>
 #include <vector>
 

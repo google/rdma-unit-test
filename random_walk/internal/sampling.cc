@@ -17,6 +17,7 @@
 #include "random_walk/internal/sampling.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -24,8 +25,9 @@
 
 #include "glog/logging.h"
 #include "absl/random/discrete_distribution.h"
-#include "absl/random/distributions.h"
+#include "absl/random/random.h"
 #include "absl/types/span.h"
+#include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 #include "random_walk/internal/random_walk_config.pb.h"

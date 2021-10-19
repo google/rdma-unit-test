@@ -14,6 +14,7 @@
 #include "internal/roce_extension.h"
 
 #include "infiniband/verbs.h"
+#include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {

@@ -14,6 +14,10 @@
 
 #include "internal/roce_backend.h"
 
+#include <cstdint>
+#include <string>
+
+#include "glog/logging.h"
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"

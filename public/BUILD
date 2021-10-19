@@ -29,12 +29,12 @@ cc_library(
         ":verbs_util",
         "//internal:introspection_registrar",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+        "@libibverbs",
     ],
 )
 
@@ -43,7 +43,7 @@ cc_library(
     srcs = ["rdma_memblock.cc"],
     hdrs = ["rdma_memblock.h"],
     deps = [
-        ":verbs_util",
+        ":page_size",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -73,12 +73,12 @@ cc_library(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+        "@libibverbs",
     ],
 )
 
@@ -88,6 +88,8 @@ cc_library(
     hdrs = ["verbs_helper_suite.h"],
     deps = [
         ":flags",
+        ":page_size",
+        ":rdma_memblock",
         ":verbs_util",
         "//internal:roce_backend",
         "//internal:roce_extension",
@@ -95,9 +97,14 @@ cc_library(
         "//internal:verbs_cleanup",
         "//internal:verbs_extension_interface",
         "@com_glog_glog//:glog",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@libibverbs",
     ],
 )
 
@@ -109,6 +116,12 @@ cc_library(
     deps = [
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
     ],
+)
+
+cc_library(
+    name = "page_size",
+    hdrs = ["page_size.h"],
 )

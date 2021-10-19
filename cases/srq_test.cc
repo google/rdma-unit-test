@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <string.h>
-
+#include <algorithm>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <thread>  // NOLINT
+#include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "public/introspection.h"
+#include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
@@ -386,7 +385,7 @@ TEST_F(SrqMultiThreadTest, MultiThreadedSrqLoopback) {
   static constexpr int kWrPerThread = 20;
   static constexpr int kTotalWr = kThreadCount * kWrPerThread;
   static constexpr uint32_t kRequestMaxWr = kTotalWr + 10;
-  static_assert(kTotalWr <= kBufferMemoryPages * verbs_util::kPageSize,
+  static_assert(kTotalWr <= kBufferMemoryPages * kPageSize,
                 "Buffer too small for one byte send. Reduce total WRs or "
                 "increase buffer size.");
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kRequestMaxWr));

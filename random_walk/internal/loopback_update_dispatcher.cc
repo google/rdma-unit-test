@@ -18,11 +18,10 @@
 
 #include <cstdint>
 #include <memory>
-#include <vector>
+#include <utility>
 
-#include "absl/synchronization/notification.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
+#include "glog/logging.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/types/optional.h"
 #include "public/map_util.h"
 #include "random_walk/internal/client_update_service.pb.h"

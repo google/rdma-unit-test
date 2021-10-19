@@ -29,18 +29,19 @@ cc_library(
         "//public:status_matchers",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
+        "@libibverbs",
     ],
 )
 
@@ -53,11 +54,11 @@ cc_library(
         ":types",
         "//public:map_util",
         "//public:verbs_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/types:optional",
+        "@libibverbs",
     ],
 )
 
@@ -71,7 +72,7 @@ cc_library(
         ":inbound_update_interface",
         ":types",
         ":update_reorder_queue",
-        "@com_github_grpc_grpc//:grpc++_codegen_base",
+        "@com_github_grpc_grpc//:grpc++",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -86,11 +87,12 @@ cc_library(
     deps = [
         ":loopback_update_dispatcher",
         ":random_walk_client",
+        ":random_walk_config_cc_proto",
         ":types",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/time",
+        "@libibverbs",
     ],
 )
 
@@ -108,13 +110,8 @@ cc_library(
         "//public:verbs_helper_suite",
         "//public:verbs_util",
         "@com_github_grpc_grpc//:grpc++",
-        "@com_google_absl//absl/cleanup",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
+        "@libibverbs",
     ],
 )
 
@@ -125,6 +122,7 @@ cc_library(
     deps = [
         ":random_walk_config_cc_proto",
         ":types",
+        "//public:page_size",
         "//public:rdma_memblock",
         "//public:verbs_util",
         "@com_glog_glog//:glog",
@@ -135,6 +133,7 @@ cc_library(
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
+        "@libibverbs",
     ],
 )
 
@@ -142,7 +141,10 @@ cc_library(
     name = "types",
     srcs = ["types.cc"],
     hdrs = ["types.h"],
-    deps = ["@com_glog_glog//:glog"],
+    deps = [
+        "@com_glog_glog//:glog",
+        "@libibverbs",
+    ],
 )
 
 cc_library(
@@ -153,6 +155,7 @@ cc_library(
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/types:optional",
+        "@libibverbs",
     ],
 )
 
@@ -164,7 +167,9 @@ cc_library(
         ":types",
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/types:optional",
+        "@libibverbs",
     ],
 )
 
@@ -181,6 +186,7 @@ cc_library(
         "//public:map_util",
         "//public:status_matchers",
         "@com_github_grpc_grpc//:grpc++",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
@@ -196,6 +202,7 @@ cc_library(
         ":rpc_server",
         "@com_github_grpc_grpc//:grpc++",
         "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ],
 )
@@ -209,9 +216,8 @@ cc_library(
         ":inbound_update_interface",
         ":update_dispatcher_interface",
         "//public:map_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
     ],
 )
@@ -223,8 +229,10 @@ cc_library(
     deps = [
         ":types",
         "//public:rdma_memblock",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@libibverbs",
     ],
 )
 
@@ -248,6 +256,7 @@ cc_library(
         ":client_update_service_cc_proto",
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/types:optional",
     ],
 )

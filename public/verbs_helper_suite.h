@@ -16,16 +16,22 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_HELPER_SUITE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_HELPER_SUITE_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <utility>
+#include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_backend.h"
 #include "internal/verbs_cleanup.h"
 #include "internal/verbs_extension_interface.h"
+#include "public/page_size.h"
+#include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
@@ -62,14 +68,13 @@ class VerbsHelperSuite {
   absl::Status SetQpInit(ibv_qp* qp, uint8_t port);
   absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                         ibv_gid remote_gid, uint32_t remote_qpn);
-  absl::Status SetQpRts(ibv_qp* qp);
-  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr, int mask);
+  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr = {}, int mask = 0);
   absl::Status SetQpError(ibv_qp* qp);
 
-  // See VerbsAllocator.
+  // Helper functions to create/destroy objects which will be automatically
+  // cleaned up when VerbsHelperSuite is destroyed.
   RdmaMemBlock AllocBuffer(int pages, bool requires_shared_memory = false);
-  RdmaMemBlock AllocAlignedBuffer(int pages,
-                                  size_t alignment = verbs_util::kPageSize);
+  RdmaMemBlock AllocAlignedBuffer(int pages, size_t alignment = kPageSize);
   RdmaMemBlock AllocHugepageBuffer(int pages);
   RdmaMemBlock AllocAlignedBufferByBytes(
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__,
@@ -91,6 +96,8 @@ class VerbsHelperSuite {
   ibv_cq* CreateCq(ibv_context* context, int max_wr = verbs_util::kDefaultMaxWr,
                    ibv_comp_channel* channel = nullptr);
   int DestroyCq(ibv_cq* cq);
+  ibv_cq_ex* CreateCqEx(ibv_context* context, ibv_cq_init_attr_ex& cq_attr);
+  int DestroyCqEx(ibv_cq_ex* cq_ex);
   ibv_srq* CreateSrq(ibv_pd* pd, uint32_t max_wr = verbs_util::kDefaultMaxWr);
   ibv_srq* CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr);
   int DestroySrq(ibv_srq* srq);
@@ -102,6 +109,12 @@ class VerbsHelperSuite {
   ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
   int DestroyQp(ibv_qp* qp);
   verbs_util::PortGid GetLocalPortGid(ibv_context* context) const;
+
+  // Returns a pointer the already initialized IbVerbs extension interface. This
+  // is for any user which requires runtime indirection for different IbVerbs
+  // extensions but does not want the overhead/synchronization incurred by the
+  // automatic deletion setup.
+  VerbsExtensionInterface* Extensions() const;
 
  private:
   // Tracks RdmaMemblocks to make sure it outlive MRs.

@@ -19,10 +19,8 @@
 
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/synchronization/notification.h"
 #include "absl/types/optional.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/inbound_update_interface.h"

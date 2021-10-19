@@ -17,9 +17,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_SAMPLING_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_SAMPLING_H_
 
-#include <stddef.h>
-
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <list>
@@ -32,6 +31,8 @@
 #include "absl/random/random.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "infiniband/verbs.h"
+#include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 #include "random_walk/internal/random_walk_config.pb.h"
@@ -50,7 +51,7 @@ class RandomWalkSampler {
   // and register, in pages and bytes.
   static constexpr uint64_t kGroundMemoryPages = 4 * 1024;
   static constexpr uint64_t kGroundMemorySize =
-      kGroundMemoryPages * verbs_util::kPageSize;  // 16MB
+      kGroundMemoryPages * kPageSize;  // 16MB
   static constexpr uint64_t kRcSendRecvBufferSize = 16 * 1024;
   static constexpr uint64_t kUdSendRecvPayloadSize = 1000;  // sub-MTU for UD.
   // Mr sizes is uniformly random in [kMinMrSize, kMaxMrSize].

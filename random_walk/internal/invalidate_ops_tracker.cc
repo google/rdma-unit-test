@@ -19,6 +19,7 @@
 #include <cstdint>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/meta/type_traits.h"
 #include "absl/types/optional.h"
 #include "infiniband/verbs.h"
 #include "public/map_util.h"

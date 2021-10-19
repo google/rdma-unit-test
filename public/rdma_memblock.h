@@ -17,15 +17,12 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_RDMA_MEMBLOCK_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_RDMA_MEMBLOCK_H_
 
-#include <linux/memfd.h>
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <iosfwd>
 #include <memory>
 
 #include "absl/types/span.h"
-#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

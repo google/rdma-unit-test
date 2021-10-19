@@ -18,7 +18,9 @@
 #include <vector>
 
 #include "glog/logging.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "public/status_matchers.h"

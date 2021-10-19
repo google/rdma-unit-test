@@ -1,5 +1,7 @@
 #include "internal/verbs_cleanup.h"
 
+#include "glog/logging.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 
@@ -27,6 +29,11 @@ void VerbsCleanup::ChannelDeleter(ibv_comp_channel* channel) {
 
 void VerbsCleanup::CqDeleter(ibv_cq* cq) {
   int result = ibv_destroy_cq(cq);
+  DCHECK_EQ(0, result);
+}
+
+void VerbsCleanup::CqExDeleter(ibv_cq_ex* cq) {
+  int result = ibv_destroy_cq(ibv_cq_ex_to_cq(cq));
   DCHECK_EQ(0, result);
 }
 
@@ -63,6 +70,11 @@ void VerbsCleanup::AddCleanup(ibv_comp_channel* channel) {
 void VerbsCleanup::AddCleanup(ibv_cq* cq) {
   absl::MutexLock guard(&mtx_cqs_);
   cqs_.emplace(cq, &CqDeleter);
+}
+
+void VerbsCleanup::AddCleanup(ibv_cq_ex* cq) {
+  absl::MutexLock guard(&mtx_cqs_ex_);
+  cqs_ex_.emplace(cq, &CqExDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_pd* pd) {
@@ -116,6 +128,14 @@ void VerbsCleanup::ReleaseCleanup(ibv_cq* cq) {
   auto node = cqs_.extract(cq);
   DCHECK(!node.empty());
   ibv_cq* found = node.value().release();
+  DCHECK_EQ(found, cq);
+}
+
+void VerbsCleanup::ReleaseCleanup(ibv_cq_ex* cq) {
+  absl::MutexLock guard(&mtx_cqs_ex_);
+  auto node = cqs_ex_.extract(cq);
+  DCHECK(!node.empty());
+  ibv_cq_ex* found = node.value().release();
   DCHECK_EQ(found, cq);
 }
 

@@ -17,14 +17,14 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_SINGLE_NODE_ORCHESTRATOR_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_SINGLE_NODE_ORCHESTRATOR_H_
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <memory>
 #include <vector>
 
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "random_walk/internal/random_walk_client.h"
+#include "random_walk/internal/random_walk_config.pb.h"
 
 namespace rdma_unit_test {
 namespace random_walk {

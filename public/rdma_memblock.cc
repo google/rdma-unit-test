@@ -16,20 +16,22 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stddef.h>
+#include <linux/memfd.h>
 #include <sys/mman.h>
 #include <syscall.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 
 #include "glog/logging.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/types/span.h"
-#include "public/verbs_util.h"
+#include "public/page_size.h"
 
 namespace rdma_unit_test {
 
@@ -42,15 +44,14 @@ RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment,
   offset_ = 0;
   size_t pad = 0;
   if (use_huge_page) {
-    pad = (alignment == verbs_util::kHugePageSize) ? 0 : alignment;
+    pad = (alignment == kHugepageSize) ? 0 : alignment;
   } else {
-    pad = (alignment == verbs_util::kPageSize) ? 0 : alignment;
+    pad = (alignment == kPageSize) ? 0 : alignment;
   }
   size_t alloc_size = length + pad;
-  if (use_huge_page && alloc_size % verbs_util::kHugePageSize) {
+  if (use_huge_page && alloc_size % kHugepageSize) {
     // When using huge pages, buffer length must be aligned to the page size.
-    alloc_size +=
-        verbs_util::kHugePageSize - (alloc_size % verbs_util::kHugePageSize);
+    alloc_size += kHugepageSize - (alloc_size % kHugepageSize);
   }
   memblock_ = Create(alloc_size, use_huge_page);
   uint8_t* buffer = memblock_->buffer.data() + pad;

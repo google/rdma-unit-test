@@ -51,8 +51,7 @@ class LogEntry {
 
 class CreateCq : public LogEntry {
  public:
-  CreateCq(uint64_t entry_id);
-  void FillInCq(ibv_cq* cq);
+  CreateCq(uint64_t entry_id, ibv_cq* cq);
   std::string ToString() const override;
 
  private:
@@ -70,8 +69,7 @@ class DestroyCq : public LogEntry {
 
 class AllocPd : public LogEntry {
  public:
-  AllocPd(uint64_t entry_id);
-  void FillInPd(ibv_pd* pd);
+  AllocPd(uint64_t entry_id, ibv_pd* pd);
   std::string ToString() const override;
 
  private:
@@ -89,8 +87,8 @@ class DeallocPd : public LogEntry {
 
 class RegMr : public LogEntry {
  public:
-  RegMr(uint64_t entry_id, ibv_pd* pd, const RdmaMemBlock& memblock);
-  void FillInMr(ibv_mr* mr);
+  RegMr(uint64_t entry_id, ibv_pd* pd, const RdmaMemBlock& memblock,
+        ibv_mr* mr);
   std::string ToString() const override;
 
  private:
@@ -111,8 +109,7 @@ class DeregMr : public LogEntry {
 
 class AllocMw : public LogEntry {
  public:
-  AllocMw(uint64_t entry_id, ibv_pd* pd, ibv_mw_type mw_type);
-  void FillInMw(ibv_mw* mw);
+  AllocMw(uint64_t entry_id, ibv_pd* pd, ibv_mw_type mw_type, ibv_mw* mw);
   std::string ToString() const override;
 
  private:
@@ -276,14 +273,13 @@ class RandomWalkLogger {
   RandomWalkLogger& operator=(const RandomWalkLogger& logger) = delete;
   ~RandomWalkLogger() = default;
 
-  std::shared_ptr<CreateCq> PushCreateCqInput();
+  void PushCreateCq(ibv_cq* cq);
   void PushDestroyCq(ibv_cq* cq);
-  std::shared_ptr<AllocPd> PushAllocPdInput();
+  void PushAllocPd(ibv_pd* pd);
   void PushDeallocPd(ibv_pd* pd);
-  std::shared_ptr<RegMr> PushRegMrInput(ibv_pd* pd,
-                                        const RdmaMemBlock& memblock);
+  void PushRegMr(ibv_pd* pd, const RdmaMemBlock& memblock, ibv_mr* mr);
   void PushDeregMr(ibv_mr* mr);
-  std::shared_ptr<AllocMw> PushAllocMwInput(ibv_pd* pd, ibv_mw_type mw_type);
+  void PushAllocMw(ibv_pd* pd, ibv_mw_type mw_type, ibv_mw* mw);
   void PushDeallocMw(ibv_mw* mw);
   void PushBindMw(const ibv_mw_bind& bind, ibv_mw* mw);
   void PushBindMw(const ibv_send_wr& bind);
@@ -301,15 +297,15 @@ class RandomWalkLogger {
   void PrintLogs() const;
 
  private:
-  // Push a generic log entry to the log queue. If capacity is exceeded, pop the
-  // oldest entry from the queue.
-  void PushToLog(std::shared_ptr<LogEntry> log_entry);
+  // Call logs_.pop_front() until logs_.size() is not larger than log_capacity_.
+  void Flush();
+
   uint64_t next_entry_id_ = 1;
   // The capacity of the log. The log will only keep the last [log_capcity_]
   // entries.
   const uint32_t log_capacity_;
   // The circular queue storing all log entries.
-  std::deque<std::shared_ptr<LogEntry>> logs_;
+  std::deque<std::unique_ptr<LogEntry>> logs_;
 };
 
 }  // namespace random_walk

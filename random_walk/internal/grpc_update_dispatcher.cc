@@ -16,24 +16,26 @@
 
 #include "random_walk/internal/grpc_update_dispatcher.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
+#include "glog/logging.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
-#include "grpcpp/channel.h"
+#include "grpcpp/client_context.h"
 #include "grpcpp/create_channel.h"
 #include "grpcpp/grpcpp.h"
 #include "grpcpp/security/credentials.h"
-#include "grpcpp/security/server_credentials.h"
-#include "grpcpp/server.h"
-#include "grpcpp/server_builder.h"
+#include "grpcpp/support/status.h"
 #include "public/map_util.h"
 #include "public/status_matchers.h"
 #include "random_walk/internal/client_update_service.grpc.pb.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/rpc_server.h"
+#include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {
 namespace random_walk {
@@ -46,7 +48,7 @@ void GrpcUpdateDispatcher::RegisterRemoteUpdateHandler(
   RemoteHandler handler{.client_id = client_id,
                         .server_addr = grpc_server_addr};
   std::shared_ptr<::grpc::ChannelCredentials> creds =
-      ::grpc::InsecureChannelCredentials();
+  ::grpc::InsecureChannelCredentials();
   handler.channel = grpc::CreateChannel(grpc_server_addr, creds);
   handler.stub = ClientUpdateService::NewStub(handler.channel);
   map_util::InsertOrDie(rpc_infos_, client_id, handler);

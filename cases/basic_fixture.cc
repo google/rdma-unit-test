@@ -14,9 +14,10 @@
 
 #include "cases/basic_fixture.h"
 
-#include "absl/flags/flag.h"
+#include "glog/logging.h"
 #include "infiniband/verbs.h"
 #include "public/flags.h"
+#include "public/introspection.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {

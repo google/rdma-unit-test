@@ -17,9 +17,9 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_IBV_RESOURCE_MANAGER_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_IBV_RESOURCE_MANAGER_H_
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"

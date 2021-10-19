@@ -16,6 +16,10 @@
 
 #include "random_walk/internal/update_reorder_queue.h"
 
+#include <cstdint>
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/meta/type_traits.h"
 #include "absl/types/optional.h"
 #include "public/map_util.h"
 #include "random_walk/internal/client_update_service.pb.h"

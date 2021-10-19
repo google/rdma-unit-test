@@ -1,29 +1,23 @@
 #include <mntent.h>
 #include <paths.h>
-#include <sched.h>
 #include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 
-#include <algorithm>
 #include <cstdint>
-#include <memory>
+#include <cstring>
+#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 #include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
-#include "absl/types/span.h"
+#include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "public/introspection.h"
+#include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
@@ -231,8 +225,7 @@ TEST_F(HugePageTest, SendMultipleSge) {
   // Divide the send buffer evenly among 4 sges.
   for (int i = 0; i < 4; i++) {
     lsgl[i] = verbs_util::CreateSge(
-        send_buf.subspan(i * 128 * verbs_util::kHugePageSize,
-                         128 * verbs_util::kHugePageSize),
+        send_buf.subspan(i * 128 * kHugepageSize, 128 * kHugepageSize),
         send_mr);
   }
   ibv_send_wr send = verbs_util::CreateSendWr(/*wr_id=*/1, lsgl, /*num_sge=*/4);

@@ -17,25 +17,16 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_UTIL_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_UTIL_H_
 
-#include <net/ethernet.h>
-
-#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
-#include "glog/logging.h"
-#include "linux/if_ether.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-
-
 
 #include "infiniband/verbs.h"
 
@@ -68,19 +59,10 @@ constexpr uint32_t kDefaultMaxWr = 200;
 constexpr uint32_t kDefaultMaxSge = 1;
 // Default timeout waiting for completion.
 constexpr absl::Duration kDefaultCompletionTimeout = absl::Seconds(2);
-// Default timeout waiting for completion on a known qp error
+// Default timeout waiting for completion on a known qp error.
 constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(10);
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
-
-// Programmatically define the page size in lieue of calling sysconf
-#if defined(__x86_64__) || defined(__i386__)
-static constexpr uint32_t kHugePageShift = 21;
-constexpr uint32_t kPageSize = 4 * 1024;
-constexpr uint32_t kHugePageSize = 1 << kHugePageShift;
-#else
-#error "No page size defined for this architecture"
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //                          Helper Functions
@@ -118,6 +100,8 @@ ibv_srq_attr DefaultSrqAttr();
 ///////////////////////////////////////////////////////////////////////////////
 
 ibv_qp_state GetQpState(ibv_qp* qp);
+
+ibv_qp_cap GetQpCap(ibv_qp* qp);
 
 ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr);
 
@@ -172,6 +156,18 @@ void PostSrqRecv(ibv_srq* srq, const ibv_recv_wr& wr);
 
 absl::StatusOr<ibv_wc> WaitForCompletion(
     ibv_cq* cq, absl::Duration timeout = kDefaultCompletionTimeout);
+
+absl::Status WaitForPollingExtendedCompletion(
+    ibv_cq_ex* cq, absl::Duration timeout = kDefaultCompletionTimeout);
+
+absl::Status WaitForNextExtendedCompletion(
+    ibv_cq_ex* cq, absl::Duration timeout = kDefaultCompletionTimeout);
+
+bool CheckExtendedCompletionHasCapability(ibv_context* context,
+                                          uint64_t wc_flag);
+
+bool ExpectNoCompletion(
+    ibv_cq* cq, absl::Duration timeout = kDefaultErrorCompletionTimeout);
 
 void PrintCompletion(const ibv_wc& completion);
 

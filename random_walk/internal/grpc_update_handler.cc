@@ -20,6 +20,7 @@
 #include <string>
 
 #include "glog/logging.h"
+#include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "grpcpp/security/credentials.h"
@@ -27,6 +28,7 @@
 #include "grpcpp/server.h"
 #include "grpcpp/server_builder.h"
 #include "random_walk/internal/inbound_update_interface.h"
+#include "random_walk/internal/rpc_server.h"
 
 namespace rdma_unit_test {
 namespace random_walk {
@@ -37,7 +39,7 @@ GrpcUpdateHandler::GrpcUpdateHandler(
   ::grpc::ServerBuilder builder;
   int selected_port;
   std::shared_ptr<::grpc::ServerCredentials> creds =
-      ::grpc::InsecureServerCredentials();
+     ::grpc::InsecureServerCredentials();
   builder.AddListeningPort("dns:///localhost:0", creds, &selected_port);
   builder.RegisterService(backend_.get());
   rpc_server_ = builder.BuildAndStart();

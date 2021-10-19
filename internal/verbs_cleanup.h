@@ -1,9 +1,11 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_CLEANUP_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_CLEANUP_H_
 
-#include <vector>
+#include <memory>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
 
@@ -25,6 +27,7 @@ class VerbsCleanup {
   static void ContextDeleter(ibv_context* context);
   static void ChannelDeleter(ibv_comp_channel* channel);
   static void CqDeleter(ibv_cq* cq);
+  static void CqExDeleter(ibv_cq_ex* cq);
   static void PdDeleter(ibv_pd* pd);
   static void AhDeleter(ibv_ah* ah);
   static void SrqDeleter(ibv_srq* srq);
@@ -37,6 +40,7 @@ class VerbsCleanup {
   void AddCleanup(ibv_context* context);
   void AddCleanup(ibv_comp_channel* channel);
   void AddCleanup(ibv_cq* cq);
+  void AddCleanup(ibv_cq_ex* cq_ex);
   void AddCleanup(ibv_pd* pd);
   void AddCleanup(ibv_ah* ah);
   void AddCleanup(ibv_srq* srq);
@@ -52,6 +56,7 @@ class VerbsCleanup {
   void ReleaseCleanup(ibv_context* context);
   void ReleaseCleanup(ibv_comp_channel* channel);
   void ReleaseCleanup(ibv_cq* cq);
+  void ReleaseCleanup(ibv_cq_ex* cq);
   void ReleaseCleanup(ibv_pd* pd);
   void ReleaseCleanup(ibv_ah* ah);
   void ReleaseCleanup(ibv_srq* srq);
@@ -67,6 +72,8 @@ class VerbsCleanup {
       channels_ ABSL_GUARDED_BY(mtx_channels_);
   absl::flat_hash_set<std::unique_ptr<ibv_cq, decltype(&CqDeleter)>> cqs_
       ABSL_GUARDED_BY(mtx_cqs_);
+  absl::flat_hash_set<std::unique_ptr<ibv_cq_ex, decltype(&CqExDeleter)>>
+      cqs_ex_ ABSL_GUARDED_BY(mtx_cqs_ex_);
   absl::flat_hash_set<std::unique_ptr<ibv_pd, decltype(&PdDeleter)>> pds_
       ABSL_GUARDED_BY(mtx_pds_);
   absl::flat_hash_set<std::unique_ptr<ibv_ah, decltype(&AhDeleter)>> ahs_
@@ -86,6 +93,7 @@ class VerbsCleanup {
   absl::Mutex mtx_ahs_;
   absl::Mutex mtx_channels_;
   absl::Mutex mtx_cqs_;
+  absl::Mutex mtx_cqs_ex_;
   absl::Mutex mtx_srqs_;
   absl::Mutex mtx_qps_;
   absl::Mutex mtx_mrs_;

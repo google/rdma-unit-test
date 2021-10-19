@@ -17,19 +17,17 @@
 #include "random_walk/internal/single_node_orchestrator.h"
 
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <thread>  // NOLINT
 #include <vector>
 
-#include "absl/container/flat_hash_map.h"
-#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
 #include "random_walk/internal/loopback_update_dispatcher.h"
 #include "random_walk/internal/random_walk_client.h"
+#include "random_walk/internal/random_walk_config.pb.h"
 #include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {

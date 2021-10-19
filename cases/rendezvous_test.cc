@@ -12,34 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <sched.h>
-#include <string.h>
-
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <list>
-#include <memory>
-#include <optional>
 #include <string>
 #include <thread>  // NOLINT
+#include <utility>
 #include <vector>
 
 #include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/base/attributes.h"
 #include "absl/container/fixed_array.h"
 #include "absl/random/random.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
+#include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
+#include "public/verbs_util.h"
 
 #define ASSERT_NOT_NULL(p) ASSERT_TRUE((p) != nullptr)
 #define CHECK_NOT_NULL(p) CHECK((p) != nullptr)
@@ -660,7 +663,7 @@ class RpcServer : public RpcBase {
 class RendezvousTest : public BasicFixture {
  public:
   static constexpr int kControlPages = 4;
-  static constexpr int kRpcSize = verbs_util::kPageSize;
+  static constexpr int kRpcSize = kPageSize;
   static constexpr int kDataPages = 101;
   static constexpr int kMaxOutstanding = 100;
 
@@ -721,7 +724,7 @@ TEST_F(RendezvousTest, Batched) {
 
   static constexpr uint64_t kMaxRpcSize = 10 * 1024;
   static constexpr uint64_t kMaxOutstanding =
-      kDataPages * verbs_util::kPageSize / kMaxRpcSize - 2;
+      kDataPages * kPageSize / kMaxRpcSize - 2;
   absl::BitGen random;
   uint64_t outstanding = 0;
   uint64_t total_complete = 0;
@@ -831,10 +834,10 @@ TEST_F(RendezvousTest, WriteCancellation) {
 class RendezvousPair {
  public:
   static constexpr uint64_t kMaxOutstanding = 25;
-  static constexpr uint64_t kMaxRpcSize = verbs_util::kPageSize * 2;
+  static constexpr uint64_t kMaxRpcSize = kPageSize * 2;
   static constexpr uint64_t kControlPages = 4;
   static constexpr uint64_t kDataPages =
-      kMaxOutstanding * kMaxRpcSize / verbs_util::kPageSize + kMaxRpcSize;
+      kMaxOutstanding * kMaxRpcSize / kPageSize + kMaxRpcSize;
   explicit RendezvousPair(VerbsHelperSuite& ibv)
       : client_(ibv, kControlPages, kDataPages, kMaxOutstanding),
         server_(ibv, kControlPages, kDataPages, kMaxOutstanding) {
@@ -928,6 +931,5 @@ class RendezvousPair {
   RpcClient client_;
   RpcServer server_;
 };
-
 
 }  // namespace rdma_unit_test

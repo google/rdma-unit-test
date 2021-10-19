@@ -17,6 +17,9 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 
+#include <string>
+#include <tuple>
+
 #include "absl/container/flat_hash_set.h"
 #include "infiniband/verbs.h"
 #include "public/verbs_util.h"
@@ -79,6 +82,9 @@ class NicIntrospection {
 
   // Returns true if the NIC supports RC Remote Memory Window Atomic.
   virtual bool SupportsRcRemoteMwAtomic() const { return true; }
+
+  // Returns a boolean indicating if the NIC supports extended CQs.
+  virtual bool SupportsExtendedCqs() const { return true; }
 
   // Returns true if the provider requires the use of file backed shared
   // memory.

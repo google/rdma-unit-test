@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <arpa/inet.h>
 #include <errno.h>
-#include <netinet/in.h>
-#include <string.h>
 
-#include <array>
 #include <cstdint>
-#include <thread>  // NOLINT
 #include <vector>
 
 #include "glog/logging.h"
@@ -60,17 +55,6 @@ class QpTest : public BasicFixture {
     constexpr int kInitMask =
         IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
     return ibv_modify_qp(qp, &mod_init, kInitMask);
-  }
-
-  static ibv_send_wr DummySend() {
-    ibv_send_wr send;
-    send.wr_id = 1;
-    send.next = nullptr;
-    send.sg_list = nullptr;
-    send.num_sge = 0;
-    send.opcode = IBV_WR_SEND;
-    send.send_flags = IBV_SEND_SIGNALED;
-    return send;
   }
 
  protected:
@@ -258,32 +242,6 @@ TEST_F(QpTest, ZeroSendWr) {
   EXPECT_THAT(ibv_.CreateQp(setup.pd, setup.basic_attr), NotNull());
 }
 
-TEST_F(QpTest, OverflowSendWr) {
-  if (!Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr uint32_t kTargetQueueSize = 300;
-  setup.basic_attr.cap.max_send_wr = kTargetQueueSize;
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  // mlx treats max_send_wr as a recommendation use the actual value, but make
-  // sure we got at least the amount requested.
-  LOG(INFO) << "size " << setup.basic_attr.cap.max_send_wr;
-  ASSERT_GE(setup.basic_attr.cap.max_send_wr, kTargetQueueSize);
-  uint64_t queue_size = setup.basic_attr.cap.max_send_wr;
-
-  // Issue enough commands to overflow the queue.
-  ibv_send_wr wqe = DummySend();
-  std::vector<ibv_send_wr> wqes(queue_size + 1, wqe);
-  for (unsigned int i = 0; i < wqes.size() - 1; ++i) {
-    wqes[i].wr_id = wqe.wr_id + i;
-    wqes[i].next = &wqes[i + 1];
-  }
-  ibv_send_wr* bad_wr = nullptr;
-  EXPECT_EQ(ibv_post_send(qp, wqes.data(), &bad_wr), ENOMEM);
-  EXPECT_EQ(bad_wr, &wqes[queue_size]);
-}
-
 TEST_F(QpTest, QueueRefs) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.cq);
@@ -331,73 +289,6 @@ TEST_F(QpTest, ExceedsMaxQp) {
   }
   // Create one more..
   EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr);
-}
-
-TEST_F(QpTest, ThreadedCreate) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kQpsPerThread = 50;
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-
-  std::array<std::array<ibv_qp*, kQpsPerThread>, kThreadCount> qps;
-  qps = {{{nullptr}}};
-  auto create_qps = [this, &setup, &qps](int thread_id) {
-    // No QPs can share the same position in the array, so no need for thread
-    // synchronization.
-    for (int i = 0; i < kQpsPerThread; ++i) {
-      ibv_qp_init_attr basic_attr = CreateBasicInitAttr(setup.cq);
-      qps[thread_id][i] = ibv_.CreateQp(setup.pd, basic_attr);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(create_qps, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_qps : qps) {
-    for (const auto& qp : thread_qps) {
-      EXPECT_THAT(qp, NotNull());
-    }
-  }
-}
-
-TEST_F(QpTest, ThreadedCreateAndDestroy) {
-  static constexpr int kThreadCount = 5;
-  static constexpr int kQpsPerThread = 50;
-
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-
-  // Initialize to 1 since we are expecting the values to be 0 after destroying
-  // QPs.
-  std::array<std::array<int, kQpsPerThread>, kThreadCount> destroy_results;
-  std::fill(destroy_results.front().begin(), destroy_results.back().end(), 1);
-  auto create_destroy_qps = [this, &setup, &destroy_results](int thread_id) {
-    for (int i = 0; i < kQpsPerThread; ++i) {
-      ibv_qp_init_attr basic_attr = CreateBasicInitAttr(setup.cq);
-      ibv_qp* qp = ibv_.CreateQp(setup.pd, basic_attr);
-      ASSERT_THAT(qp, NotNull());
-      destroy_results[thread_id][i] = ibv_.DestroyQp(qp);
-    }
-  };
-
-  std::vector<std::thread> threads;
-  for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    threads.push_back(std::thread(create_destroy_qps, thread_id));
-  }
-
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  for (const auto& thread_results : destroy_results) {
-    for (const auto& destroy_result : thread_results) {
-      EXPECT_EQ(destroy_result, 0);
-    }
-  }
 }
 
 // TODO(author1): Cross context objects.
@@ -791,6 +682,101 @@ TEST_F(QpStateTest, ModRtsToError) {
   ibv_qp_attr_mask attr_mask = IBV_QP_STATE;
   ASSERT_EQ(ibv_modify_qp(setup.qp, &attr, attr_mask), 0);
   ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_ERR);
+}
+
+// This is a set of test that test the response (in particular error code) of
+// the QP when posting.
+class QpPostTest : public BasicFixture {
+ protected:
+  struct BasicSetup {
+    ibv_context* context = nullptr;
+    verbs_util::PortGid port_gid;
+    ibv_cq* cq = nullptr;
+    ibv_pd* pd = nullptr;
+    ibv_qp* qp = nullptr;
+    ibv_qp_init_attr init_attr;
+    ibv_qp* remote_qp = nullptr;
+    RdmaMemBlock buffer;
+    ibv_mr* mr = nullptr;
+  };
+
+  absl::StatusOr<BasicSetup> CreateBasicSetup() {
+    BasicSetup setup;
+    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.cq = ibv_.CreateCq(setup.context);
+    if (!setup.cq) {
+      return absl::InternalError("Failed to create cq.");
+    }
+    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.pd = ibv_.AllocPd(setup.context);
+    if (!setup.pd) {
+      return absl::InternalError("Failed to allocate pd.");
+    }
+    setup.init_attr = ibv_qp_init_attr{.send_cq = setup.cq,
+                                       .recv_cq = setup.cq,
+                                       .srq = nullptr,
+                                       .cap = verbs_util::DefaultQpCap(),
+                                       .qp_type = IBV_QPT_RC,
+                                       .sq_sig_all = 0};
+    setup.qp = ibv_.CreateQp(setup.pd, setup.init_attr);
+    if (!setup.qp) {
+      return absl::InternalError("Failed to create qp.");
+    }
+    setup.remote_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    if (!setup.remote_qp) {
+      return absl::InternalError("Failed to create remote qp.");
+    }
+    ibv_.SetUpLoopbackRcQps(setup.qp, setup.remote_qp, setup.port_gid);
+    setup.buffer = ibv_.AllocBuffer(/*pages=*/1);
+    setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
+    if (!setup.mr) {
+      return absl::InternalError("Failed to register mr.");
+    }
+    return setup;
+  }
+
+  static ibv_send_wr DummySend() {
+    ibv_send_wr send;
+    send.wr_id = 1;
+    send.next = nullptr;
+    send.sg_list = nullptr;
+    send.num_sge = 0;
+    send.opcode = IBV_WR_SEND;
+    send.send_flags = IBV_SEND_SIGNALED;
+    return send;
+  }
+};
+
+TEST_F(QpPostTest, OverflowSendWr) {
+  if (!Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  // Issue enough commands to overflow the queue.
+  ibv_send_wr wqe = DummySend();
+  int max_send_wr = setup.init_attr.cap.max_send_wr;
+  std::vector<ibv_send_wr> wqes(max_send_wr + 1, wqe);
+  for (unsigned int i = 0; i < wqes.size() - 1; ++i) {
+    wqes[i].wr_id = wqe.wr_id + i;
+    wqes[i].next = &wqes[i + 1];
+  }
+  ibv_send_wr* bad_wr = nullptr;
+  EXPECT_EQ(ibv_post_send(setup.qp, wqes.data(), &bad_wr), ENOMEM);
+  EXPECT_EQ(bad_wr, &wqes[max_send_wr]);
+}
+
+TEST_F(QpPostTest, PostInlineInvalidOp) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+  ibv_send_wr read = verbs_util::CreateReadWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mr->rkey);
+  read.send_flags |= IBV_SEND_INLINE;
+  ibv_send_wr* bad_wr = nullptr;
+  // Some NICs use ENOMEM.
+  EXPECT_THAT(ibv_post_send(setup.qp, &read, &bad_wr), AnyOf(ENOMEM, EINVAL));
+  EXPECT_EQ(bad_wr, &read);
 }
 
 // TODO(author1): Test larger MTU than the device allows

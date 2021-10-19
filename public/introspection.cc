@@ -16,10 +16,12 @@
 
 #include <functional>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "glog/logging.h"
 #include "gtest/gtest.h"
-#include "absl/cleanup/cleanup.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"

@@ -63,13 +63,11 @@ class VerbsBackend {
   virtual absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                                 ibv_gid remote_gid, uint32_t remote_qpn) = 0;
 
-  // Modify the QP to RTS(ready to send) state.
-  absl::Status SetQpRts(ibv_qp* qp);
-
-  // Modify the QP to RTS(ready to send) state, also setting a set of optional
-  // attributes: sq_psn, timeout, retry_cnt, rnr_retry, max_rd_atomic.
-  // Any other attributes will be ignored.
-  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr optional_attr, int mask);
+  // Modify the QP to RTS(ready to send) state. We can set a set of custom
+  // attributes specified using [attr] and [mask]. The set of attributes
+  // are: sq_psn, timeout, retry_cnt, rnr_retry and max_rd_atomic. All other
+  // attributes are currently ignored.
+  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr attr = {}, int mask = 0);
 
   // Modify the Qp to ERROR state.
   absl::Status SetQpError(ibv_qp* qp);
