@@ -65,6 +65,23 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "batch_op_fixture",
+    srcs = ["batch_op_fixture.cc"],
+    hdrs = ["batch_op_fixture.h"],
+    deps = [
+        ":basic_fixture",
+        "//public:rdma_memblock",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+        "@libibverbs",
+    ],
+)
+
 cc_test(
     name = "buffer_test",
     srcs = ["buffer_test.cc"],
@@ -112,6 +129,7 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":basic_fixture",
+        ":batch_op_fixture",
         ":gunit_main",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -136,6 +154,7 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":basic_fixture",
+        ":batch_op_fixture",
         ":gunit_main",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -422,6 +441,7 @@ cc_library(
     ],
     deps = [
         ":basic_fixture",
+        ":batch_op_fixture",
         ":loopback_fixture",
         "//internal:verbs_extension_interface",
         "//public:flags",

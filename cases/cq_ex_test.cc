@@ -30,6 +30,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "cases/batch_op_fixture.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -169,22 +170,8 @@ TEST_F(CqExTest, AboveMaxCompVector) {
   ASSERT_THAT(cq, IsNull());
 }
 
-class CqExOpTest : public BasicFixture {
+class CqExOpTest : public BatchOpFixture {
  protected:
-  static constexpr int kBufferSize = 16 * 1024 * 1024;  // 16 MB
-  static constexpr uint8_t kSrcContent = 1;
-  static constexpr uint8_t kDstContent = 0;
-
-  struct QpInfo {
-    ibv_qp* qp;
-    uint64_t next_send_wr_id = 0;
-    uint64_t next_recv_wr_id = 0;
-    // Each Qp write/recv to a separate remote buffer and each op should write
-    // to one distinct byte of memory. Therefore the size of the buffer
-    // should be at least as large as the number of ops.
-    absl::Span<uint8_t> dst_buffer;
-  };
-
   struct WcInfo {
     uint64_t wr_id;
     ibv_wc_status status;
@@ -193,46 +180,8 @@ class CqExOpTest : public BasicFixture {
     uint64_t timestamp_wallclock = 0;
   };
 
-  struct BasicSetup {
-    // Each index of src_memblock contains the index value.
-    RdmaMemBlock src_memblock;
-    // Initially initialized to 0. Each QP targets its wrs to write to the index
-    // of dst_memblock which corresponds to the QP.
-    RdmaMemBlock dst_memblock;
-    ibv_context* context;
-    verbs_util::PortGid port_gid;
-    ibv_pd* pd;
-    ibv_mr* src_mr;
-    ibv_mr* dst_mr;
-  };
-
-  enum class WorkType : uint8_t { kSend, kWrite };
-
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
-    BasicSetup setup;
-    setup.src_memblock = ibv_.AllocAlignedBufferByBytes(kBufferSize);
-    std::fill_n(setup.src_memblock.data(), setup.src_memblock.size(),
-                kSrcContent);
-    setup.dst_memblock = ibv_.AllocAlignedBufferByBytes(kBufferSize);
-    std::fill_n(setup.dst_memblock.data(), setup.dst_memblock.size(),
-                kDstContent);
-    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
-    setup.pd = ibv_.AllocPd(setup.context);
-    if (!setup.pd) {
-      return absl::InternalError("Failed to allocate pd.");
-    }
-
-    setup.src_mr = ibv_.RegMr(setup.pd, setup.src_memblock);
-    if (!setup.src_mr) {
-      return absl::InternalError("Failed to register source mr.");
-    }
-    memset(setup.dst_memblock.data(), 0, setup.dst_memblock.size());
-    setup.dst_mr = ibv_.RegMr(setup.pd, setup.dst_memblock);
-    if (!setup.dst_mr) {
-      return absl::InternalError("Failed to register destination mr.");
-    }
-
+    ASSIGN_OR_RETURN(BasicSetup setup, BatchOpFixture::CreateBasicSetup());
     // Set the supported timestamp types.
     support_completion_timestamp_hcaclock_ =
         verbs_util::CheckExtendedCompletionHasCapability(
@@ -241,55 +190,6 @@ class CqExOpTest : public BasicFixture {
         verbs_util::CheckExtendedCompletionHasCapability(
             setup.context, IBV_WC_EX_WITH_COMPLETION_TIMESTAMP_WALLCLOCK);
     return setup;
-  }
-
-  // Posts send WQE.
-  int QueueSend(BasicSetup& setup, QpInfo& qp) {
-    return QueueWork(setup, qp, WorkType::kSend);
-  }
-
-  // Posts write WQE.
-  int QueueWrite(BasicSetup& setup, QpInfo& qp) {
-    return QueueWork(setup, qp, WorkType::kWrite);
-  }
-
-  // Posts recv WQE.
-  int QueueRecv(BasicSetup& setup, QpInfo& qp) {
-    uint32_t wr_id = qp.next_recv_wr_id++;
-    DCHECK_LT(wr_id, setup.dst_memblock.size());
-    auto dst_buffer =
-        qp.dst_buffer.subspan(wr_id, 1);  // use wr_id as index to the buffer.
-    ibv_sge sge = verbs_util::CreateSge(dst_buffer, setup.dst_mr);
-    ibv_recv_wr wqe = verbs_util::CreateRecvWr(wr_id, &sge, /*num_sge=*/1);
-    ibv_recv_wr* bad_wr;
-    return ibv_post_recv(qp.qp, &wqe, &bad_wr);
-  }
-
-  // Post a Send or Write WR to a QP. The WR uses a 1-byte buffer at byte 1,
-  // then byte 2, and so on.
-  int QueueWork(BasicSetup& setup, QpInfo& qp, WorkType work_type) {
-    uint64_t wr_id = qp.next_send_wr_id++;
-    CHECK_LT(wr_id, setup.src_memblock.size());
-    auto src_buffer = setup.src_memblock.subspan(
-        wr_id, 1);  // use wr_id as index to the buffer.
-    ibv_sge sge = verbs_util::CreateSge(src_buffer, setup.src_mr);
-    ibv_send_wr wqe;
-    switch (work_type) {
-      case WorkType::kSend: {
-        wqe = verbs_util::CreateSendWr(wr_id, &sge, /*num_sge=*/1);
-        break;
-      }
-      case WorkType::kWrite: {
-        CHECK_LT(wr_id, setup.dst_memblock.size());
-        auto dst_buffer = qp.dst_buffer.subspan(
-            wr_id, 1);  // use wr_id as index to the buffer.
-        wqe = verbs_util::CreateWriteWr(wr_id, &sge, /*num_sge=*/1,
-                                        dst_buffer.data(), setup.dst_mr->rkey);
-        break;
-      }
-    }
-    ibv_send_wr* bad_wr;
-    return ibv_post_send(qp.qp, &wqe, &bad_wr);
   }
 
   uint64_t GetWcFlags() {
@@ -314,99 +214,6 @@ class CqExOpTest : public BasicFixture {
       wc.timestamp_wallclock = ibv_wc_read_completion_wallclock_ns(cq);
     }
     return wc;
-  }
-
-  // Whether WCs support HCA clock timestamps or not.
-  bool support_completion_timestamp_hcaclock_ = false;
-  // Whether WCs support wallclock timestamps or not.
-  bool support_completion_timestamp_wallclock_ = false;
-};
-
-TEST_F(CqExOpTest, BasicPollSendCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kMaxQpWr = 1;
-  ibv_cq_init_attr_ex cq_attr = {
-      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
-      .wc_flags = GetWcFlags()};
-  ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  QpInfo qp;
-  qp.qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                        ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr, kMaxQpWr,
-                        IBV_QPT_RC, /*sig_all=*/0);
-  ASSERT_THAT(qp.qp, NotNull()) << "Failed to create qp - " << errno;
-  qp.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ibv_.SetUpSelfConnectedRcQp(qp.qp, setup.port_gid);
-  QueueWrite(setup, qp);
-
-  // Wait for completion and verify timestamp.
-  ASSERT_OK(verbs_util::WaitForPollingExtendedCompletion(send_cq));
-  ASSERT_EQ(send_cq->status, IBV_WC_SUCCESS);
-  if (support_completion_timestamp_hcaclock_) {
-    EXPECT_GT(ibv_wc_read_completion_ts(send_cq), 0);
-  }
-  if (support_completion_timestamp_wallclock_) {
-    EXPECT_GT(ibv_wc_read_completion_wallclock_ns(send_cq), 0);
-  }
-  ibv_end_poll(send_cq);
-}
-
-TEST_F(CqExOpTest, BasicPollRecvCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kMaxQpWr = 1;
-  ibv_cq_init_attr_ex cq_attr = {
-      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
-      .wc_flags = GetWcFlags()};
-  ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  QpInfo qp;
-  qp.qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                        ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr, kMaxQpWr,
-                        IBV_QPT_RC, /*sig_all=*/0);
-  ASSERT_THAT(qp.qp, NotNull()) << "Failed to create qp - " << errno;
-  qp.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ibv_.SetUpSelfConnectedRcQp(qp.qp, setup.port_gid);
-  QueueRecv(setup, qp);
-  QueueSend(setup, qp);
-
-  // Wait for completion and verify timestamp.
-  ASSERT_OK(verbs_util::WaitForPollingExtendedCompletion(recv_cq));
-  ASSERT_EQ(recv_cq->status, IBV_WC_SUCCESS);
-  if (support_completion_timestamp_hcaclock_) {
-    EXPECT_GT(ibv_wc_read_completion_ts(recv_cq), 0);
-  }
-  if (support_completion_timestamp_wallclock_) {
-    EXPECT_GT(ibv_wc_read_completion_wallclock_ns(recv_cq), 0);
-  }
-  ibv_end_poll(recv_cq);
-}
-
-class CqExBatchOpTest : public CqExOpTest {
- protected:
-  // Create |count| qps.
-  std::vector<QpInfo> CreateTestQps(BasicSetup& setup, ibv_cq* send_cq,
-                                    ibv_cq* recv_cq, size_t max_qp_wr,
-                                    int count) {
-    CHECK_LE(max_qp_wr * count, setup.dst_memblock.size())
-        << "Not enough space on destination buffer for all QPs.";
-    std::vector<QpInfo> qps;
-    for (int i = 0; i < count; ++i) {
-      QpInfo qp;
-      qp.qp = ibv_.CreateQp(setup.pd, send_cq, recv_cq, nullptr, max_qp_wr,
-                            max_qp_wr, IBV_QPT_RC,
-                            /*sig_all=*/0);
-      CHECK(qp.qp) << "Failed to create qp - " << errno;
-      ibv_.SetUpSelfConnectedRcQp(qp.qp, setup.port_gid);
-      qp.dst_buffer = setup.dst_memblock.subspan(i * max_qp_wr, max_qp_wr);
-      qps.push_back(qp);
-    }
-    return qps;
   }
 
   void WaitForAndVerifyCompletions(ibv_cq_ex* cq, int count) {
@@ -442,61 +249,143 @@ class CqExBatchOpTest : public CqExOpTest {
     }
     ibv_end_poll(cq);
   }
+
+  // Whether WCs support HCA clock timestamps or not.
+  bool support_completion_timestamp_hcaclock_ = false;
+  // Whether WCs support wallclock timestamps or not.
+  bool support_completion_timestamp_wallclock_ = false;
 };
 
-TEST_F(CqExBatchOpTest, PollSendCq) {
+TEST_F(CqExOpTest, BasicPollSendCq) {
   if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP();
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kCqSize = 60;
-  static constexpr int kQpCount = 20;
-  static constexpr int kWritesPerQp = kCqSize / kQpCount;
+  static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
       .wc_flags = GetWcFlags()};
   ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  std::vector<QpInfo> qps =
-      CreateTestQps(setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
-                    kWritesPerQp, kQpCount);
+  QpPair qp_pair;
+  qp_pair.send_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
+                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
+                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(qp_pair.send_qp, NotNull())
+      << "Failed to create send qp - " << errno;
+  qp_pair.recv_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
+                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
+                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(qp_pair.recv_qp, NotNull())
+      << "Failed to create recv qp - " << errno;
+  qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
+  ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp, setup.port_gid);
+  QueueWrite(setup, qp_pair);
 
-  for (auto& qp : qps) {
-    for (int i = 0; i < kWritesPerQp; ++i) {
-      QueueWrite(setup, qp);
-    }
+  // Wait for completion and verify timestamp.
+  ASSERT_OK(verbs_util::WaitForPollingExtendedCompletion(send_cq));
+  ASSERT_EQ(send_cq->status, IBV_WC_SUCCESS);
+  if (support_completion_timestamp_hcaclock_) {
+    EXPECT_GT(ibv_wc_read_completion_ts(send_cq), 0);
   }
-  WaitForAndVerifyCompletions(send_cq, kWritesPerQp * kQpCount);
+  if (support_completion_timestamp_wallclock_) {
+    EXPECT_GT(ibv_wc_read_completion_wallclock_ns(send_cq), 0);
+  }
+  ibv_end_poll(send_cq);
 }
 
-TEST_F(CqExBatchOpTest, PollRecvCq) {
+TEST_F(CqExOpTest, BasicPollRecvCq) {
   if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP();
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kCqSize = 60;
-  static constexpr int kQpCount = 20;
-  static constexpr int kSendsPerQp = kCqSize / kQpCount;
+  static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
       .wc_flags = GetWcFlags()};
   ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  std::vector<QpInfo> qps =
-      CreateTestQps(setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
-                    kSendsPerQp, kQpCount);
+  QpPair qp_pair;
+  qp_pair.send_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
+                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
+                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(qp_pair.send_qp, NotNull())
+      << "Failed to create send qp - " << errno;
+  qp_pair.recv_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
+                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
+                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+  ASSERT_THAT(qp_pair.recv_qp, NotNull())
+      << "Failed to create recv qp - " << errno;
+  qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
+  ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp, setup.port_gid);
+  QueueRecv(setup, qp_pair);
+  QueueSend(setup, qp_pair);
 
-  for (auto& qp : qps) {
-    for (int i = 0; i < kSendsPerQp; ++i) {
-      QueueRecv(setup, qp);
+  // Wait for completion and verify timestamp.
+  ASSERT_OK(verbs_util::WaitForPollingExtendedCompletion(recv_cq));
+  ASSERT_EQ(recv_cq->status, IBV_WC_SUCCESS);
+  if (support_completion_timestamp_hcaclock_) {
+    EXPECT_GT(ibv_wc_read_completion_ts(recv_cq), 0);
+  }
+  if (support_completion_timestamp_wallclock_) {
+    EXPECT_GT(ibv_wc_read_completion_wallclock_ns(recv_cq), 0);
+  }
+  ibv_end_poll(recv_cq);
+}
+
+TEST_F(CqExOpTest, BatchPollSendCq) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  static constexpr int kCqSize = 60;
+  static constexpr int kQpPairCount = 20;
+  static constexpr int kWritesPerQpPair = kCqSize / kQpPairCount;
+  ibv_cq_init_attr_ex cq_attr = {
+      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
+      .wc_flags = GetWcFlags()};
+  ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
+      setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
+      kWritesPerQpPair, kQpPairCount);
+
+  for (auto& qp_pair : qp_pairs) {
+    for (int i = 0; i < kWritesPerQpPair; ++i) {
+      QueueWrite(setup, qp_pair);
     }
   }
-  for (auto& qp : qps) {
-    for (int i = 0; i < kSendsPerQp; ++i) {
-      QueueSend(setup, qp);
+  WaitForAndVerifyCompletions(send_cq, kWritesPerQpPair * kQpPairCount);
+}
+
+TEST_F(CqExOpTest, BatchPollRecvCq) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  static constexpr int kCqSize = 60;
+  static constexpr int kQpPairCount = 20;
+  static constexpr int kSendsPerQpPair = kCqSize / kQpPairCount;
+  ibv_cq_init_attr_ex cq_attr = {
+      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
+      .wc_flags = GetWcFlags()};
+  ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
+      setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
+      kSendsPerQpPair, kQpPairCount);
+
+  for (auto& qp_pair : qp_pairs) {
+    for (int i = 0; i < kSendsPerQpPair; ++i) {
+      QueueRecv(setup, qp_pair);
     }
   }
-  WaitForAndVerifyCompletions(recv_cq, kSendsPerQp);
+  for (auto& qp_pair : qp_pairs) {
+    for (int i = 0; i < kSendsPerQpPair; ++i) {
+      QueueSend(setup, qp_pair);
+    }
+  }
+  WaitForAndVerifyCompletions(recv_cq, kSendsPerQpPair);
 }
 
 }  // namespace rdma_unit_test
