@@ -36,6 +36,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:flags",
         "//public:introspection",
         "//public:status_matchers",
@@ -77,6 +78,7 @@ cc_library(
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@libibverbs",
     ],
@@ -110,6 +112,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -131,6 +134,7 @@ cc_test(
         ":basic_fixture",
         ":batch_op_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -156,6 +160,7 @@ cc_test(
         ":basic_fixture",
         ":batch_op_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -197,9 +202,19 @@ cc_library(
         "//internal:introspection_mlx4",
         "//internal:introspection_mlx5",
         "//internal:introspection_rxe",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/debugging:failure_signal_handler",
         "@com_google_absl//absl/flags:parse",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_binary(
+    name = "run_unit_test",
+    srcs = [],
+    deps = [
+        ":gunit_main",
+        ":test_collection",
     ],
 )
 
@@ -254,6 +269,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -274,6 +290,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -297,6 +314,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -315,6 +333,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -362,6 +381,7 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -443,6 +463,7 @@ cc_library(
         ":basic_fixture",
         ":batch_op_fixture",
         ":loopback_fixture",
+        "//internal:handle_garble",
         "//internal:verbs_extension_interface",
         "//public:flags",
         "//public:introspection",

@@ -37,6 +37,7 @@
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "cases/batch_op_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -76,6 +77,14 @@ TEST_F(CqTest, Basic) {
   ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
   ASSERT_EQ(ibv_destroy_cq(cq), 0);
+}
+
+TEST_F(CqTest, DestroyInvalidCq) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq* cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(cq, NotNull());
+  HandleGarble garble(cq->handle);
+  ASSERT_EQ(ibv_destroy_cq(cq), ENOENT);
 }
 
 TEST_F(CqTest, NegativeCqe) {
@@ -235,7 +244,7 @@ class CqOverflowTest : public CqBatchOpTest {
     bool completed = false;
     for (absl::Time now = absl::Now(); now < stop; now = absl::Now()) {
       completed = true;
-      for (int i = 0; i < dst_buffer.size(); ++i) {
+      for (size_t i = 0; i < dst_buffer.size(); ++i) {
         if (read_value(dst_buffer.data() + i) != expected_value) {
           completed = false;
         }

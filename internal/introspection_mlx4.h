@@ -47,17 +47,16 @@ class IntrospectionMlx4 : public NicIntrospection {
         // Can dealloc PD with outstanding AHs.
         {"AhTest", "DeallocPdWithOutstandingAh", ""},
         // Deregistering unknown AH handles will cause client crashes.
-        {"AhTest", "DeregUnknownAh", ""},
+        {"AhTest", "DeregInvalidAh", ""},
         // Zero byte read is an error.
-        {"BufferTest", "BasicReadZeroByte", ""},
-        {"BufferTest", "BasicReadZeroByteOutsideMr", ""},
-        {"BufferTest", "BasicReadZeroByteFromZeroByteMr", ""},
-        {"BufferTest", "BasicReadZeroByteOutsideZeroByteMr", ""},
-        // The local zero byte access errors before the invalid rkey.
-        {"BufferTest", "ZeroByteReadInvalidRKey", "local error"},
+        {"BufferMrTest", "ReadZeroByte", ""},
+        {"BufferMrTest", "ReadZeroByteOutsideMr", ""},
+        {"BufferMrTest", "ReadZeroByteFromZeroByteMr", ""},
+        {"BufferMrTest", "ReadZeroByteOutsideZeroByteMr", ""},
+        {"BufferMrTest", "ReadZeroByteInvalidRKey", ""},
         {"BufferMwTest", "ReadZeroByte", ""},
         {"BufferMwTest", "ReadZeroByteOutsideMw", ""},
-        {"BufferMwTest", "MwReadZeroByteFromZeroByteMr", ""},
+        {"BufferMwTest", "ReadZeroByteFromZeroByteMw", ""},
         {"BufferMwTest", "ReadZeroByteOutsideZeroByteMw", ""},
         // Zero byte write is successful.
         {"BufferTest", "ZeroByteWriteInvalidRKey", ""},

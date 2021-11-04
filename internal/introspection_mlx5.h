@@ -16,7 +16,7 @@ namespace rdma_unit_test {
 //    appears to SIGSEGV if max_inline_data is set.
 class IntrospectionMlx5 : public NicIntrospection {
  public:
-  // Register MLX4 NIC with the Introspection Registrar.
+  // Register MLX5 NIC with the Introspection Registrar.
   static void Register() {
     IntrospectionRegistrar::GetInstance().Register(
         "mlx5", [](const ibv_device_attr& attr) {
@@ -32,15 +32,10 @@ class IntrospectionMlx5 : public NicIntrospection {
   const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
     static const absl::flat_hash_set<DeviationEntry> deviations{
         // Deregistering unknown AH handles will cause client crashes.
-        {"AhTest", "DeregUnknownAh", ""},
-        // Returns success completion.
-        {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
-        // Zero byte write is successful.
-        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        {"AhTest", "DeregInvalidAh", ""},
         // MW address not checked at bind.
-        {"BufferMwTest", "ExceedFront", ""},
-        // MW address not checked at bind.
-        {"BufferMwTest", "ExceedRear", ""},
+        {"BufferMwTest", "BindExceedFront", ""},
+        {"BufferMwTest", "BindExceedRear", ""},
         // No check for invalid cq.
         {"CompChannelTest", "RequestNotificationInvalidCq", ""},
         // Hardware returns true when requesting notification on a CQ without a
@@ -50,9 +45,6 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
         // Will hang.
         {"CompChannelTest", "AcknowledgeTooMany", ""},
-        // Completions are returned but no data transferred which results in the
-        // WaitingForChange to fail.
-        {"CqAdvancedTest", "RecvSharedCq", ""},
         // Allows invalid SGE size for atomics.
         {"LoopbackRcQpTest", "FetchAddInvalidSize", ""},
         {"LoopbackRcQpTest", "FetchAddSmallSge", ""},
@@ -86,14 +78,11 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"MwBindTest", "MissingBind", ""},
         // Allows binding when MR is missing bind permissions.
         {"MwBindTest", "NoMrBindAccess", ""},
-        // User API misuse causes crash.
-        {"PdTest", "DeleteUnknownPd", ""},
-        // User API misuse causes crash.
-        {"PdTest", "DeleteInvalidPd", ""},
-        // Allows creation over max qp.
-        {"QpTest", "ExceedsMaxQp", ""},
         // Allows creation over device cap.
-        {"QpTest", "ExceedsDeviceCap", ""}};
+        {"QpTest", "ExceedsDeviceCap", ""},
+        // Incorrectly report device cap on QPs..
+        {"QpTest", "ExceedsMaxQp", ""}};
+
     return deviations;
   }
 

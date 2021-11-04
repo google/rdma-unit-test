@@ -31,6 +31,7 @@
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
 #include "cases/batch_op_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -43,6 +44,13 @@ using ::testing::IsNull;
 using ::testing::NotNull;
 
 class CqExTest : public BasicFixture {
+ public:
+  void SetUp() override {
+    if (!Introspection().SupportsExtendedCqs()) {
+      GTEST_SKIP() << "NIC does not support extended CQs.";
+    }
+  }
+
  protected:
   struct BasicSetup {
     ibv_context* context;
@@ -66,9 +74,6 @@ class CqExTest : public BasicFixture {
 };
 
 TEST_F(CqExTest, Basic) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 10};
   ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
@@ -76,10 +81,16 @@ TEST_F(CqExTest, Basic) {
   ASSERT_EQ(ibv_destroy_cq(ibv_cq_ex_to_cq(cq)), 0);
 }
 
+TEST_F(CqExTest, DestroyInvalidCqEx) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq_init_attr_ex attr{.cqe = 10};
+  ibv_cq_ex* cq = ibv_.CreateCqEx(setup.context, attr);
+  ASSERT_THAT(cq, NotNull());
+  HandleGarble garble(cq->handle);
+  ASSERT_EQ(ibv_destroy_cq(ibv_cq_ex_to_cq(cq)), ENOENT);
+}
+
 TEST_F(CqExTest, ZeroCqe) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 0};
   ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
@@ -87,9 +98,6 @@ TEST_F(CqExTest, ZeroCqe) {
 }
 
 TEST_F(CqExTest, MaxCqe) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe)};
@@ -99,9 +107,6 @@ TEST_F(CqExTest, MaxCqe) {
 }
 
 TEST_F(CqExTest, AboveMaxCqe) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe) + 1};
@@ -110,9 +115,6 @@ TEST_F(CqExTest, AboveMaxCqe) {
 }
 
 TEST_F(CqExTest, WithChannel) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 10, .channel = setup.channel};
   ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
@@ -121,9 +123,6 @@ TEST_F(CqExTest, WithChannel) {
 }
 
 TEST_F(CqExTest, ShareChannel) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 10, .channel = setup.channel};
   ibv_cq_ex* cq1 = ibv_create_cq_ex(setup.context, &cq_attr);
@@ -135,9 +134,6 @@ TEST_F(CqExTest, ShareChannel) {
 }
 
 TEST_F(CqExTest, ZeroCompVector) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 10};
   ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
@@ -146,9 +142,6 @@ TEST_F(CqExTest, ZeroCompVector) {
 }
 
 TEST_F(CqExTest, LargeCompVector) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{.cqe = 10,
                               .comp_vector = static_cast<uint32_t>(
@@ -159,9 +152,6 @@ TEST_F(CqExTest, LargeCompVector) {
 }
 
 TEST_F(CqExTest, AboveMaxCompVector) {
-  if (!Introspection().SupportsExtendedCqs()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq_init_attr_ex cq_attr{
       .cqe = 10,
@@ -171,6 +161,13 @@ TEST_F(CqExTest, AboveMaxCompVector) {
 }
 
 class CqExOpTest : public BatchOpFixture {
+ public:
+  void SetUp() override {
+    if (!Introspection().SupportsExtendedCqs()) {
+      GTEST_SKIP() << "NIC does not support extended CQs.";
+    }
+  }
+
  protected:
   struct WcInfo {
     uint64_t wr_id;
@@ -257,9 +254,6 @@ class CqExOpTest : public BatchOpFixture {
 };
 
 TEST_F(CqExOpTest, BasicPollSendCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
@@ -295,9 +289,6 @@ TEST_F(CqExOpTest, BasicPollSendCq) {
 }
 
 TEST_F(CqExOpTest, BasicPollRecvCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
@@ -334,9 +325,6 @@ TEST_F(CqExOpTest, BasicPollRecvCq) {
 }
 
 TEST_F(CqExOpTest, BatchPollSendCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kCqSize = 60;
   static constexpr int kQpPairCount = 20;
@@ -359,9 +347,6 @@ TEST_F(CqExOpTest, BatchPollSendCq) {
 }
 
 TEST_F(CqExOpTest, BatchPollRecvCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   static constexpr int kCqSize = 60;
   static constexpr int kQpPairCount = 20;
@@ -386,6 +371,92 @@ TEST_F(CqExOpTest, BatchPollRecvCq) {
     }
   }
   WaitForAndVerifyCompletions(recv_cq, kSendsPerQpPair);
+}
+
+class CqExOverflowTest : public CqExOpTest {
+ protected:
+  // Maximum amount of time for waiting for data to land in destination buffer.
+  static constexpr absl::Duration kPollTime = absl::Seconds(10);
+  // There is a time discrepancy between the data landing on the remote buffer
+  // and the completion being generated in the local queue pair. Waiting a
+  // small amount of time after WaitForData() returns before polling the
+  // completion queue helps to reduce the race.
+  static constexpr absl::Duration kCompletionWaitTime = absl::Seconds(1);
+
+  // Wait for send/write data to land on the remote buffer. The function will
+  // block until all bytes on |dst_buffer| is of |expected_value|. Notice there
+  // is still a time discrepancy between the data landing on the desination
+  // buffer and the completion entry being generated (but not pushed to
+  // completion queue). Use to detect the completion of an op whose completion
+  // entries is dropped due to CQ overflow.
+  void WaitForData(absl::Span<uint8_t> dst_buffer, uint8_t expected_value,
+                   absl::Duration poll_timeout = kPollTime) {
+    auto read_value = [](uint8_t* target) {
+      return reinterpret_cast<volatile std::atomic<uint8_t>*>(target)->load();
+    };
+    absl::Time stop = absl::Now() + poll_timeout;
+    bool completed = false;
+    for (absl::Time now = absl::Now(); now < stop; now = absl::Now()) {
+      completed = true;
+      for (size_t i = 0; i < dst_buffer.size(); ++i) {
+        if (read_value(dst_buffer.data() + i) != expected_value) {
+          completed = false;
+        }
+      }
+      if (completed == false) {
+        absl::SleepFor(absl::Milliseconds(10));
+      } else {
+        return;
+      }
+    }
+    LOG(FATAL) << "Data failed to land.";  // Crash ok;
+  }
+};
+
+TEST_F(CqExOverflowTest, SendCqOverflow) {
+  if (Introspection().FullCqIdlesQp()) {
+    GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq_init_attr_ex cq_attr = {.cqe = verbs_util::kDefaultMaxWr,
+                                 .wc_flags = GetWcFlags()};
+  ibv_cq_ex* cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  const int total_writes = cq->cqe + 10;
+  std::vector<QpPair> qp_pairs =
+      CreateTestQpPairs(setup, ibv_cq_ex_to_cq(cq), ibv_cq_ex_to_cq(cq),
+                        total_writes, /*count=*/1);
+  for (int i = 0; i < total_writes; ++i) {
+    QueueWrite(setup, qp_pairs[0]);
+  }
+  WaitForData(setup.dst_memblock.subspan(0, total_writes), kSrcContent);
+  absl::SleepFor(kCompletionWaitTime);
+  WaitForAndVerifyCompletions(cq, cq->cqe);
+  verbs_util::ExpectNoExtendedCompletion(cq, absl::Seconds(1));
+}
+
+TEST_F(CqExOverflowTest, RecvCqOverflow) {
+  if (Introspection().FullCqIdlesQp()) {
+    GTEST_SKIP() << "This test assumes CQ overflow overwrites completions.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_cq_init_attr_ex cq_attr = {.cqe = verbs_util::kDefaultMaxWr,
+                                 .wc_flags = GetWcFlags()};
+  ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
+  const int total_sends = recv_cq->cqe + 10;
+  std::vector<QpPair> qp_pairs =
+      CreateTestQpPairs(setup, ibv_cq_ex_to_cq(send_cq),
+                        ibv_cq_ex_to_cq(recv_cq), total_sends, /*count=*/1);
+  for (int i = 0; i < total_sends; ++i) {
+    QueueRecv(setup, qp_pairs[0]);
+  }
+  for (int i = 0; i < total_sends; ++i) {
+    QueueSend(setup, qp_pairs[0]);
+  }
+  WaitForData(setup.dst_memblock.subspan(0, total_sends), kSrcContent);
+  absl::SleepFor(kCompletionWaitTime);
+  WaitForAndVerifyCompletions(recv_cq, recv_cq->cqe);
+  verbs_util::ExpectNoExtendedCompletion(recv_cq, absl::Seconds(1));
 }
 
 }  // namespace rdma_unit_test

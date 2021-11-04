@@ -444,7 +444,8 @@ bool CheckExtendedCompletionHasCapability(ibv_context* context,
   ibv_cq_init_attr_ex cq_attr = {.cqe = 1, .wc_flags = wc_flag};
   ibv_cq_ex* cq = ibv_create_cq_ex(context, &cq_attr);
   if (cq != nullptr) {
-    DCHECK_EQ(ibv_destroy_cq(ibv_cq_ex_to_cq(cq)), 0);
+    int result = ibv_destroy_cq(ibv_cq_ex_to_cq(cq));
+    DCHECK_EQ(result, 0);
     return true;
   }
   return false;
@@ -452,6 +453,11 @@ bool CheckExtendedCompletionHasCapability(ibv_context* context,
 
 bool ExpectNoCompletion(ibv_cq* cq, absl::Duration timeout) {
   return absl::IsDeadlineExceeded(WaitForCompletion(cq, timeout).status());
+}
+
+bool ExpectNoExtendedCompletion(ibv_cq_ex* cq, absl::Duration timeout) {
+  return absl::IsDeadlineExceeded(
+      WaitForPollingExtendedCompletion(cq, timeout));
 }
 
 void PrintCompletion(const ibv_wc& completion) {

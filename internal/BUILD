@@ -115,6 +115,13 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/synchronization",
+        "@com_google_googletest//:gtest",
         "@libibverbs",
     ],
+)
+
+cc_library(
+    name = "handle_garble",
+    srcs = ["handle_garble.cc"],
+    hdrs = ["handle_garble.h"],
 )

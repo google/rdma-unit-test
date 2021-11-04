@@ -25,6 +25,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -55,6 +56,7 @@ class SrqTest : public BasicFixture {
     ibv_cq* send_cq = nullptr;
     ibv_cq* recv_cq = nullptr;
     ibv_srq* srq = nullptr;
+    ibv_srq_init_attr srq_attr;
     ibv_qp* send_qp = nullptr;
     ibv_qp* recv_qp = nullptr;
   };
@@ -90,7 +92,8 @@ class SrqTest : public BasicFixture {
     if (!setup.recv_cq) {
       return absl::InternalError("Failed to create recv cq.");
     }
-    setup.srq = ibv_.CreateSrq(setup.pd);
+    setup.srq_attr.attr = verbs_util::DefaultSrqAttr();
+    setup.srq = ibv_.CreateSrq(setup.pd, setup.srq_attr);
     if (!setup.srq) {
       return absl::InternalError("Failed to create srq.");
     }
@@ -120,15 +123,25 @@ TEST_F(SrqTest, Create) {
   EXPECT_EQ(ibv_destroy_srq(srq), 0);
 }
 
+TEST_F(SrqTest, DestroyInvalidSrq) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ASSERT_THAT(context, NotNull());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_srq_init_attr attr{.attr = verbs_util::DefaultSrqAttr()};
+  ibv_srq* srq = ibv_.CreateSrq(pd, attr);
+  ASSERT_THAT(srq, NotNull());
+  HandleGarble garble(srq->handle);
+  EXPECT_EQ(ibv_destroy_srq(srq), ENOENT);
+}
+
 TEST_F(SrqTest, CreateWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ASSERT_THAT(context, NotNull());
-  ibv_pd pd = {};
-  pd.context = context;
-  pd.handle = -1;
-  ibv_srq_init_attr attr;
-  attr.attr = verbs_util::DefaultSrqAttr();
-  ASSERT_THAT(ibv_create_srq(&pd, &attr), IsNull());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  HandleGarble garble(pd->handle);
+  ibv_srq_init_attr attr{.attr = verbs_util::DefaultSrqAttr()};
+  ASSERT_THAT(ibv_create_srq(pd, &attr), IsNull());
 }
 
 TEST_F(SrqTest, Loopback) {
@@ -162,13 +175,8 @@ TEST_F(SrqTest, PostRecvToSrqQp) {
 }
 
 TEST_F(SrqTest, MaxWr) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_srq_attr attr;
-  ASSERT_EQ(ibv_query_srq(setup.srq, &attr), 0);
-  uint32_t max_wr = attr.max_wr;
+  uint32_t max_wr = setup.srq_attr.attr.max_wr;
 
   ibv_sge sge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
@@ -182,23 +190,19 @@ TEST_F(SrqTest, MaxWr) {
 }
 
 TEST_F(SrqTest, ExceedsMaxWr) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_srq_attr attr;
-  ASSERT_EQ(ibv_query_srq(setup.srq, &attr), 0);
-  uint32_t max_wr = attr.max_wr;
+  uint32_t num_wrs = setup.srq_attr.attr.max_wr + 1;
 
   ibv_sge sge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
-  std::vector<ibv_recv_wr> recv_wrs(max_wr, recv);
+  std::vector<ibv_recv_wr> recv_wrs(num_wrs, recv);
   for (size_t i = 0; i < recv_wrs.size() - 1; ++i) {
     recv_wrs[i].next = &recv_wrs[i + 1];
     recv_wrs[i + 1].wr_id = i + 1;
   }
   ibv_recv_wr* bad_wr = nullptr;
-  EXPECT_EQ(ibv_post_srq_recv(setup.srq, recv_wrs.data(), &bad_wr), 0);
+  EXPECT_THAT(ibv_post_srq_recv(setup.srq, recv_wrs.data(), &bad_wr),
+              AnyOf(-1, ENOMEM));
 }
 
 TEST_F(SrqTest, ModifyMaxWr) {

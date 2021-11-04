@@ -39,3 +39,31 @@ cc_library(
     ],
     alwayslink = 1,
 )
+
+cc_binary(
+    name = "run_random_walk",
+    srcs = ["random_walk_main.cc"],
+    deps = [
+        ":flags",
+        "//internal:introspection_mlx4",
+        "//internal:introspection_mlx5",
+        "//internal:introspection_rxe",
+        "//public:introspection",
+        "//random_walk/internal:multi_node_orchestrator",
+        "//random_walk/internal:random_walk_config_cc_proto",
+        "//random_walk/internal:single_node_orchestrator",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/debugging:failure_signal_handler",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "flags",
+    srcs = ["flags.cc"],
+    hdrs = ["flags.h"],
+    deps = ["@com_google_absl//absl/flags:flag"],
+)

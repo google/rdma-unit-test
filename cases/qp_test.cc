@@ -26,6 +26,7 @@
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -182,41 +183,32 @@ TEST_F(QpTest, CreateWithInlineMax) {
 
 TEST_F(QpTest, CreateWithInvalidSendCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
-  static_assert(sizeof(ibv_cq) < sizeof(ibv_qp), "Unsafe cast below");
-  ibv_cq* fake_cq = reinterpret_cast<ibv_cq*>(qp);
-  EXPECT_THAT(
-      ibv_.CreateQp(setup.pd, fake_cq /*send_cq*/, setup.cq /*recv_cq*/,
-                    nullptr /*srq*/, 1 /*max_send_wqr*/, 1 /*max_recv_rw*/,
-                    IBV_QPT_RC /*qp_type*/, true /*sig_all*/),
-      IsNull());
+  ibv_cq* cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(cq, NotNull());
+  HandleGarble garble(cq->handle);
+  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  attr.send_cq = cq;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
 
 TEST_F(QpTest, CreateWithInvalidRecvCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
-  static_assert(sizeof(ibv_cq) < sizeof(ibv_qp), "Unsafe cast below");
-  ibv_cq* fake_cq = reinterpret_cast<ibv_cq*>(qp);
-  EXPECT_THAT(
-      ibv_.CreateQp(setup.pd, setup.cq /*send_cq*/, fake_cq /*recv_cq*/,
-                    nullptr /*srq*/, 1 /*max_send_wqr*/, 1 /*max_recv_rw*/,
-                    IBV_QPT_RC /*qp_type*/, true /*sig_all*/),
-      IsNull());
+  ibv_cq* cq = ibv_.CreateCq(setup.context);
+  ASSERT_THAT(cq, NotNull());
+  HandleGarble garble(cq->handle);
+  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  attr.recv_cq = cq;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
 
 TEST_F(QpTest, CreateWithInvalidSrq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
-  static_assert(sizeof(ibv_srq) < sizeof(ibv_qp), "Unsafe cast below");
-  ibv_srq* fake_srq = reinterpret_cast<ibv_srq*>(qp);
-  EXPECT_THAT(
-      ibv_.CreateQp(setup.pd, setup.cq /*send_cq*/, setup.cq /*recv_cq*/,
-                    fake_srq /*srq*/, 1 /*max_send_wqr*/, 1 /*max_recv_rw*/,
-                    IBV_QPT_RC /*qp_type*/, true /*sig_all*/),
-      IsNull());
+  ibv_srq* srq = ibv_.CreateSrq(setup.pd);
+  ASSERT_THAT(srq, NotNull());
+  HandleGarble garble(srq->handle);
+  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  attr.srq = srq;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
 
 TEST_F(QpTest, UnknownType) {
@@ -248,6 +240,31 @@ TEST_F(QpTest, QueueRefs) {
   ASSERT_THAT(qp, NotNull());
   // Rejected because QP holds ref.
   EXPECT_EQ(ibv_destroy_cq(setup.cq), EBUSY);
+}
+
+TEST_F(QpTest, ExactDeviceCap) {
+  const ibv_device_attr& device_attr = Introspection().device_attr();
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  setup.basic_attr.cap = kBasicQpCap;
+  setup.basic_attr.cap.max_send_wr = device_attr.max_qp_wr;
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  EXPECT_THAT(qp, NotNull());
+
+  setup.basic_attr.cap = kBasicQpCap;
+  setup.basic_attr.cap.max_recv_wr = device_attr.max_qp_wr;
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  EXPECT_THAT(qp, NotNull());
+
+  setup.basic_attr.cap = kBasicQpCap;
+  setup.basic_attr.cap.max_send_sge = device_attr.max_sge;
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  EXPECT_THAT(qp, NotNull());
+
+  setup.basic_attr.cap = kBasicQpCap;
+  setup.basic_attr.cap.max_recv_sge = device_attr.max_sge;
+  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
+  EXPECT_THAT(qp, NotNull());
 }
 
 TEST_F(QpTest, ExceedsDeviceCap) {
@@ -487,7 +504,7 @@ class QpStateTest : public BasicFixture {
     verbs_util::PortGid port_gid;
     ibv_cq* cq = nullptr;
     ibv_pd* pd = nullptr;
-    ibv_qp* qp = nullptr;
+    ibv_qp* local_qp = nullptr;
     ibv_qp* remote_qp = nullptr;
     RdmaMemBlock buffer;
     ibv_mr* mr = nullptr;
@@ -505,8 +522,8 @@ class QpStateTest : public BasicFixture {
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
     }
-    setup.qp = ibv_.CreateQp(setup.pd, setup.cq);
-    if (!setup.qp) {
+    setup.local_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    if (!setup.local_qp) {
       return absl::InternalError("Failed to create qp.");
     }
     setup.remote_qp = ibv_.CreateQp(setup.pd, setup.cq);
@@ -528,112 +545,129 @@ class QpStateTest : public BasicFixture {
 // performance. Hence here we expect the post to be successful.
 TEST_F(QpStateTest, PostSendReset) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RESET);
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RESET);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mr->rkey);
   ibv_send_wr* bad_wr = nullptr;
   // This deviates from IBTA spec, see comment above the test.
-  EXPECT_THAT(ibv_post_send(setup.qp, &read, &bad_wr), 0);
+  EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
+  // Modify the QP to RTS before we poll for completion.
+  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.remote_qp->qp_num));
+  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 TEST_F(QpStateTest, PostRecvReset) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RESET);
+  ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RESET);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
-  EXPECT_THAT(ibv_post_recv(setup.qp, &recv, &bad_wr), 0);
+  EXPECT_THAT(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
+  // Modify the QP to RTS before we poll for completion.
+  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.local_qp->qp_num));
+  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 TEST_F(QpStateTest, PostSendInit) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.qp, setup.port_gid.port));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_INIT);
+  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_INIT);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mr->rkey);
   ibv_send_wr* bad_wr = nullptr;
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
-  EXPECT_THAT(ibv_post_send(setup.qp, &read, &bad_wr), 0);
+  EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
+  // Modify the QP to RTS before we poll for completion.
+  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.remote_qp->qp_num));
+  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 // We are allowed to post to recv queue in INIT or RTR state, but the WR will
 // not get processed.
 TEST_F(QpStateTest, PostRecvInit) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.qp, setup.port_gid.port));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_INIT);
+  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
+  ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_INIT);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
-  ASSERT_EQ(ibv_post_recv(setup.qp, &recv, &bad_wr), 0);
-  absl::SleepFor(absl::Seconds(1));
-  ibv_wc completion;
-  EXPECT_EQ(ibv_poll_cq(setup.cq, 1, &completion), 0);
+  ASSERT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
+  // Modify the QP to RTS state before we poll for completion.
+  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.local_qp->qp_num));
+  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 TEST_F(QpStateTest, PostSendRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.qp, setup.port_gid, setup.port_gid.gid,
-                          setup.qp->qp_num));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RTR);
+  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.remote_qp->qp_num));
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTR);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mr->rkey);
   ibv_send_wr* bad_wr = nullptr;
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
-  EXPECT_THAT(ibv_post_send(setup.qp, &read, &bad_wr), 0);
+  EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
+  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 TEST_F(QpStateTest, PostRecvRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.qp, setup.port_gid, setup.port_gid.gid,
-                          setup.qp->qp_num));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RTR);
+  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
+                          setup.local_qp->qp_num));
+  ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTR);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
-  EXPECT_EQ(ibv_post_recv(setup.qp, &recv, &bad_wr), 0);
-  absl::SleepFor(absl::Seconds(1));
-  ibv_wc completion;
-  EXPECT_EQ(ibv_poll_cq(setup.cq, 1, &completion), 0);
+  EXPECT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
+  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
 TEST_F(QpStateTest, PostSendErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RTS);
-  ASSERT_THAT(verbs_util::FetchAddSync(setup.qp, setup.buffer.data(), setup.mr,
-                                       setup.buffer.data() + 1, setup.mr->rkey,
-                                       /*comp_add=*/1),
-              IsOkAndHolds(IBV_WC_REM_INV_REQ_ERR));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_ERR);
-
+  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetQpError(setup.local_qp));
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_ERR);
   ASSERT_OK_AND_ASSIGN(
       ibv_wc_status status,
-      verbs_util::ReadSync(setup.qp, setup.buffer.span(), setup.mr,
+      verbs_util::ReadSync(setup.local_qp, setup.buffer.span(), setup.mr,
                            setup.buffer.data(), setup.mr->rkey));
   EXPECT_EQ(status, IBV_WC_WR_FLUSH_ERR);
 }
 
 TEST_F(QpStateTest, PostRecvErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RTS);
-  ASSERT_THAT(verbs_util::FetchAddSync(setup.qp, setup.buffer.data(), setup.mr,
-                                       setup.buffer.data() + 1, setup.mr->rkey,
-                                       /*comp_add=*/1),
-              IsOkAndHolds(IBV_WC_REM_INV_REQ_ERR));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_ERR);
+  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetQpError(setup.remote_qp));
+  ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv =
       verbs_util::CreateRecvWr(/*wr_id=*/2, &rsge, /*num_sge=*/1);
-  verbs_util::PostRecv(setup.qp, recv);
+  verbs_util::PostRecv(setup.remote_qp, recv);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
   EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
@@ -641,14 +675,14 @@ TEST_F(QpStateTest, PostRecvErr) {
 
 TEST_F(QpStateTest, RtsSendToRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.qp, setup.port_gid, setup.port_gid.gid,
+  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
+  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
                           setup.remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.qp));
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_RTS);
+  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
   ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
   ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.qp->qp_num));
+                          setup.local_qp->qp_num));
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTR);
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
@@ -658,7 +692,7 @@ TEST_F(QpStateTest, RtsSendToRtr) {
   ibv_sge ssge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/0, &ssge, /*num_sge=*/1);
-  verbs_util::PostSend(setup.qp, send);
+  verbs_util::PostSend(setup.local_qp, send);
 
   for (int i = 0; i < 2; ++i) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
@@ -676,12 +710,12 @@ TEST_F(QpStateTest, RtsSendToRtr) {
 
 TEST_F(QpStateTest, ModRtsToError) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
+  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
   ibv_qp_attr attr;
   attr.qp_state = IBV_QPS_ERR;
   ibv_qp_attr_mask attr_mask = IBV_QP_STATE;
-  ASSERT_EQ(ibv_modify_qp(setup.qp, &attr, attr_mask), 0);
-  ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_ERR);
+  ASSERT_EQ(ibv_modify_qp(setup.local_qp, &attr, attr_mask), 0);
+  ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_ERR);
 }
 
 // This is a set of test that test the response (in particular error code) of

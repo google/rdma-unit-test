@@ -21,6 +21,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/flags.h"
 #include "public/introspection.h"
 #include "public/status_matchers.h"
@@ -57,15 +58,14 @@ TEST_F(AhTest, CreateAh) {
   EXPECT_THAT(ah, NotNull());
 }
 
-TEST_F(AhTest, DeregUnknownAh) {
+TEST_F(AhTest, DeregInvalidAh) {
   if (Introspection().ShouldDeviateForCurrentTest()) {
     GTEST_SKIP() << "transport handling of unknown AH will crash.";
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah dummy;
-  dummy.context = setup.context;
-  dummy.handle = -1;
-  EXPECT_EQ(ibv_destroy_ah(&dummy), ENOENT);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  HandleGarble garble(ah->handle);
+  EXPECT_EQ(ibv_destroy_ah(ah), ENOENT);
 }
 
 TEST_F(AhTest, DeallocPdWithOutstandingAh) {

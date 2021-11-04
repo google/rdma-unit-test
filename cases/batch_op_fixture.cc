@@ -23,6 +23,7 @@
 
 #include "glog/logging.h"
 #include "absl/status/status.h"
+#include "absl/synchronization/barrier.h"
 #include "infiniband/verbs.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"

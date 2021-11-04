@@ -14,6 +14,7 @@
 
 #include <errno.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -32,6 +33,7 @@
 
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -40,7 +42,6 @@
 
 namespace rdma_unit_test {
 
-using ::testing::AnyOf;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
@@ -73,21 +74,12 @@ TEST_F(MrTest, RegisterMemory) {
   EXPECT_THAT(mr, NotNull());
 }
 
-// Check with a pointer in the correct range.
 TEST_F(MrTest, DeregInvalidMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_.CreateCq(setup.context);
-  ASSERT_THAT(cq, NotNull());
-  ibv_cq original;
-  // Save original so we can restore for cleanup.
-  memcpy(&original, cq, sizeof(original));
-  static_assert(sizeof(ibv_mr) < sizeof(ibv_cq), "Unsafe cast below");
-  ibv_mr* fake_mr = reinterpret_cast<ibv_mr*>(cq);
-  fake_mr->context = setup.context;
-  fake_mr->handle = original.handle;
-  EXPECT_THAT(ibv_dereg_mr(fake_mr), AnyOf(EINVAL, ENOENT));
-  // Restore original.
-  memcpy(cq, &original, sizeof(original));
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  EXPECT_THAT(mr, NotNull());
+  HandleGarble garble(mr->handle);
+  EXPECT_EQ(ibv_dereg_mr(mr), ENOENT);
 }
 
 // Cannot have remote write without local write.
@@ -178,8 +170,9 @@ TEST_F(MrTest, ReregMrInvalidBuffer) {
 class MrLoopbackTest : public BasicFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
-  static constexpr int kQueueSize = 200;
-  static constexpr int kQKey = 200;
+  // The tests can issue up to 100 requests across 4 threads.
+  static constexpr int kQueueSize = 400;
+  static constexpr int kQKey = 400;
 
   struct Client {
     ibv_context* context = nullptr;
@@ -232,9 +225,14 @@ class MrLoopbackTest : public BasicFixture {
                    std::function<void()> dereg,
                    std::vector<uint64_t>* results) {
     // Submit in batches of 10.
-    std::vector<ibv_send_wr> wqes(10, wqe);
+    static constexpr int kBatchSize = 10;
+    uint32_t wr_id = 1;
+    std::vector<ibv_send_wr> wqes(kBatchSize, wqe);
     for (size_t i = 0; i < wqes.size() - 1; ++i) {
       wqes[i].next = &wqes[i + 1];
+    }
+    for (auto& wqe : wqes) {
+      wqe.wr_id = wr_id++;
     }
 
     // Indicates that the client filled the outstanding queue.
@@ -256,6 +254,9 @@ class MrLoopbackTest : public BasicFixture {
             ibv_send_wr* bad_wr = nullptr;
             EXPECT_EQ(ibv_post_send(local.qp, wqes.data(), &bad_wr), 0);
             outstanding += wqes.size();
+            for (auto& wqe : wqes) {
+              wqe.wr_id += kBatchSize;
+            }
           } else {
             saturation = true;
           }

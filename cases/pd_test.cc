@@ -24,6 +24,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -55,86 +56,39 @@ TEST_F(PdTest, OpenManyPd) {
   }
 }
 
-TEST_F(PdTest, DeleteUnknownPd) {
-  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_pd dummy{.context = context, .handle = 0};
-  EXPECT_EQ(ENOENT, ibv_dealloc_pd(&dummy));
-}
-
-// Check with a pointer in the correct range.
 TEST_F(PdTest, DeleteInvalidPd) {
   if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_THAT(cq, NotNull());
-  ibv_cq original;
-  // Save original so we can restore for cleanup.
-  memcpy(&original, cq, sizeof(original));
-  static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
-  ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
-  fake_pd->context = context;
-  fake_pd->handle = original.handle;
-  EXPECT_THAT(ibv_dealloc_pd(fake_pd), AnyOf(EINVAL, ENOENT));
-  // Restore original.
-  memcpy(cq, &original, sizeof(original));
+  ibv_pd* pd = ibv_.AllocPd(context);
+  HandleGarble garble(pd->handle);
+  EXPECT_EQ(ibv_dealloc_pd(pd), ENOENT);
 }
 
-TEST_F(PdTest, AllocQpWithFakePd) {
+TEST_F(PdTest, AllocQpWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
   ASSERT_THAT(cq, NotNull());
-  ibv_cq* cq2 = ibv_.CreateCq(context);
-  ASSERT_THAT(cq2, NotNull());
-  ibv_cq original;
-  // Save original so we can restore for cleanup.
-  memcpy(&original, cq, sizeof(original));
-  static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
-  ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
-  fake_pd->context = context;
-  EXPECT_THAT(ibv_.CreateQp(fake_pd, cq2), IsNull());
-  // Restore original.
-  memcpy(cq, &original, sizeof(original));
-}
-
-TEST_F(PdTest, AllocMrWithPd) {
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());
-  ibv_mr* mr = ibv_.RegMr(pd, buffer);
-  EXPECT_THAT(mr, NotNull());
+  HandleGarble garble(pd->handle);
+  EXPECT_THAT(ibv_.CreateQp(pd, cq), IsNull());
 }
 
 TEST_F(PdTest, AllocMrWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-  ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_THAT(cq, NotNull());
-  ibv_cq original;
-  // Save original so we can restore for cleanup.
-  memcpy(&original, cq, sizeof(original));
-  static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
-  ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
-  fake_pd->context = context;
-  EXPECT_THAT(ibv_.RegMr(fake_pd, buffer), IsNull());
-  // Restore original.
-  memcpy(cq, &original, sizeof(original));
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  HandleGarble garble(pd->handle);
+  EXPECT_THAT(ibv_.RegMr(pd, buffer), IsNull());
 }
 
 TEST_F(PdTest, AllocMwWithInvalidPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_cq* cq = ibv_.CreateCq(context);
-  ASSERT_THAT(cq, NotNull());
-  ibv_cq original;
-  // Save original so we can restore for cleanup.
-  memcpy(&original, cq, sizeof(original));
-  static_assert(sizeof(ibv_pd) < sizeof(ibv_cq), "Unsafe cast below");
-  ibv_pd* fake_pd = reinterpret_cast<ibv_pd*>(cq);
-  fake_pd->context = context;
-  EXPECT_EQ(ibv_.AllocMw(fake_pd, IBV_MW_TYPE_1), nullptr);
-  // Restore original.
-  memcpy(cq, &original, sizeof(original));
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  HandleGarble garble(pd->handle);
+  EXPECT_THAT(ibv_.AllocMw(pd, IBV_MW_TYPE_1), IsNull());
 }
 
 class PdBindTest : public BasicFixture,

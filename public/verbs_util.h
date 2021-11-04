@@ -60,7 +60,7 @@ constexpr uint32_t kDefaultMaxSge = 1;
 // Default timeout waiting for completion.
 constexpr absl::Duration kDefaultCompletionTimeout = absl::Seconds(2);
 // Default timeout waiting for completion on a known qp error.
-constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(10);
+constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(2);
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
 
@@ -168,6 +168,9 @@ bool CheckExtendedCompletionHasCapability(ibv_context* context,
 
 bool ExpectNoCompletion(
     ibv_cq* cq, absl::Duration timeout = kDefaultErrorCompletionTimeout);
+
+bool ExpectNoExtendedCompletion(
+    ibv_cq_ex* cq, absl::Duration timeout = kDefaultErrorCompletionTimeout);
 
 void PrintCompletion(const ibv_wc& completion);
 

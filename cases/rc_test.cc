@@ -42,13 +42,14 @@
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
+namespace {
 
 // TODO(author1): Add tests stressing SGEs.
 // TODO(author1): Send with insufficient recv buffering (RC and UD).
+// TODO(author2): Add QP error state check for relevant testcases.
 
 using ::testing::AnyOf;
 using ::testing::Each;
-using ::testing::Eq;
 using ::testing::NotNull;
 
 class LoopbackRcQpTest : public LoopbackFixture {
@@ -1235,6 +1236,40 @@ TEST_F(LoopbackRcQpTest, WriteImmData) {
   EXPECT_THAT(dummy_buf.span(), Each('d'));
 }
 
+TEST_F(LoopbackRcQpTest, WriteImmDataInvalidRKey) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  const uint32_t kImm = 0xBADDCAFE;
+
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, nullptr, /*num_sge=*/0);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  // Post write to remote.buffer.
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr write = verbs_util::CreateWriteWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(),
+      /*rkey=*/0xDEADBEEF);
+  write.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  write.imm_data = kImm;
+  verbs_util::PostSend(local.qp, write);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    return;
+  }
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_ACCESS_ERR);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(remote.buffer.span(), Each(kRemoteBufferContent));
+}
+
 TEST_F(LoopbackRcQpTest, WriteImmDataRnR) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -2253,16 +2288,16 @@ TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
   // Submit a batch at a time.
   std::vector<ibv_send_wr> submissions(batch_size, read);
-  for (int i = 0; i < batch_size; ++i) {
+  for (uint32_t i = 0; i < batch_size; ++i) {
     submissions[i].next = &submissions[i + 1];
   }
   submissions[batch_size - 1].next = nullptr;
 
   // At this value we should issue more work.
-  int32_t target_outstanding = send_queue_size - batch_size;
+  uint32_t target_outstanding = send_queue_size - batch_size;
   std::vector<ibv_wc> completions(batch_size);
-  int outstanding = 0;
-  int total = 0;
+  uint32_t outstanding = 0;
+  uint32_t total = 0;
   // Issue 20 batches of work.
   while (total < batch_size * 20) {
     if (outstanding <= target_outstanding) {
@@ -2306,4 +2341,46 @@ TEST_F(LoopbackRcQpTest, PostToRecvQueueInErrorState) {
   EXPECT_EQ(recv.wr_id, completion.wr_id);
 }
 
+// This test issues 2 reads. The first read has an invalid lkey that will send
+// the requester into an error state. The second read is a valid read that will
+// not land because the qp will be in an error state.
+TEST_F(LoopbackRcQpTest, FlushErrorPollTogether) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+
+  ibv_sge read_sg = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  read_sg.lkey = read_sg.lkey * 10 + 7;
+  ibv_send_wr read =
+      verbs_util::CreateReadWr(/*wr_id=*/1, &read_sg, /*num_sge=*/1,
+                               remote.buffer.data(), remote.mr->rkey);
+  verbs_util::PostSend(local.qp, read);
+
+  ibv_sge read_sg_2 = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr read_2 =
+      verbs_util::CreateWriteWr(/*wr_id=*/1, &read_sg_2, /*num_sge=*/1,
+                                remote.buffer.data(), remote.mr->rkey);
+  read_2.wr_id = 2;
+  verbs_util::PostSend(local.qp, read_2);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  // Verify buffer is unchanged.
+  EXPECT_THAT(local.buffer.span(), Each(kLocalBufferContent));
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_RTS);
+
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 2);
+  EXPECT_THAT(local.buffer.span(), Each(kLocalBufferContent));
+
+  EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
+  EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_RTS);
+}
+
+}  // namespace
 }  // namespace rdma_unit_test

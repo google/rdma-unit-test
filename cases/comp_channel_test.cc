@@ -28,6 +28,7 @@
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -221,13 +222,10 @@ TEST_F(CompChannelTest, RequestNotificationInvalidCq) {
     GTEST_SKIP() << "allows request notification with invalid cq.";
   }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
+  ibv_cq* cq = ibv_.CreateCq(context);
   ASSERT_THAT(cq, NotNull());
-  ibv_cq original = *cq;
-  cq->handle = ~cq->handle;
+  HandleGarble garble(cq->handle);
   ASSERT_THAT(ibv_req_notify_cq(cq, kNotifyAny), AnyOf(ENOENT, EFAULT));
-  *cq = original;
-  ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CompChannelTest, Atomic) {

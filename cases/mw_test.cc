@@ -37,6 +37,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -104,10 +105,12 @@ TEST_F(MwTest, Alloc) {
   EXPECT_THAT(mw, NotNull());
 }
 
-TEST_F(MwTest, DeallocUnknown) {
+TEST_F(MwTest, DeallocInvalidMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mw dummy_mw = {.context = setup.context, .handle = 1225};
-  EXPECT_EQ(ENOENT, ibv_dealloc_mw(&dummy_mw));
+  ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
+  ASSERT_THAT(mw, NotNull());
+  HandleGarble garble(mw->handle);
+  EXPECT_EQ(ibv_dealloc_mw(mw), ENOENT);
 }
 
 TEST_F(MwTest, Bind) {
@@ -194,54 +197,79 @@ TEST_F(MwTest, Unbind) {
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
-TEST_F(MwTest, InvalidMr) {
+// Binding with invalid resource (QP, MW, MR) handle can go three ways:
+// 1. Interface returns immediate error when trying to post to the QP.
+// 2. Posting to QP is successful but completes in error.
+// 3  Posting to QP is successful and the bind succeeds. This is probably due to
+//    some driver ignoring handles and only using the relevant info in the user
+//    space struct.
+TEST_F(MwTest, BindInvalidMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ibv_mr dummy_mr_val{};
-  ibv_mr* dummy_mr = &dummy_mr_val;
-  dummy_mr->handle = -1;
-  // Some clients do client side validation on type 1. First check
-  // succcess/failure of the bind and if successful than check for completion.
+  HandleGarble garble(setup.mr->handle);
   ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
-      /*wr_id=*/1, setup.buffer.span(), dummy_mr,
-      IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
-          IBV_ACCESS_REMOTE_ATOMIC);
+      /*wr_id=*/1, setup.buffer.span(), setup.mr);
   int result = ibv_bind_mw(setup.qp, mw, &bind_args);
-  EXPECT_THAT(result, AnyOf(0, EPERM, EOPNOTSUPP));
+  ASSERT_THAT(result, AnyOf(0, ENOENT));
   if (result == 0) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(setup.qp->send_cq));
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_MW_BIND_ERR));
+    EXPECT_EQ(completion.wr_id, 1);
+    EXPECT_EQ(completion.qp_num, setup.qp->qp_num);
     if (completion.status == IBV_WC_SUCCESS) {
-      EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
+      EXPECT_THAT(verbs_util::ReadSync(setup.qp, setup.buffer.span(), setup.mr,
+                                       setup.buffer.data(), mw->rkey),
+                  IsOkAndHolds(IBV_WC_SUCCESS));
     }
   }
 }
 
-TEST_F(MwTest, InvalidMw) {
+TEST_F(MwTest, BindInvalidMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ibv_mw dummy_mw{};
+  HandleGarble garble(mw->handle);
   ibv_mw_bind bind_arg =
       verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
-  ibv_mw* target = &dummy_mw;
-  EXPECT_EQ(ibv_bind_mw(setup.qp, target, &bind_arg), EINVAL);
+  int result = ibv_bind_mw(setup.qp, mw, &bind_arg);
+  ASSERT_THAT(result, AnyOf(0, ENOENT));
+  if (result == 0) {
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.qp->send_cq));
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_MW_BIND_ERR));
+    EXPECT_EQ(completion.wr_id, 1);
+    EXPECT_EQ(completion.qp_num, setup.qp->qp_num);
+    if (completion.status == IBV_WC_SUCCESS) {
+      EXPECT_THAT(verbs_util::ReadSync(setup.qp, setup.buffer.span(), setup.mr,
+                                       setup.buffer.data(), mw->rkey),
+                  IsOkAndHolds(IBV_WC_SUCCESS));
+    }
+  }
 }
 
-TEST_F(MwTest, InvalidQp) {
+TEST_F(MwTest, BindInvalidQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  // Only modify the handle of the qp instance as the underlying ibv_qp is a
-  // cast of an internal structure.
-  uint32_t original_handle = setup.qp->handle;
-  setup.qp->handle = -1;
+  HandleGarble garble(setup.qp->handle);
   ibv_mw_bind bind_arg =
       verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
-  EXPECT_EQ(ibv_bind_mw(setup.qp, mw, &bind_arg),
-            Introspection().ShouldDeviateForCurrentTest() ? 0 : EINVAL);
-  setup.qp->handle = original_handle;
+  int result = ibv_bind_mw(setup.qp, mw, &bind_arg);
+  ASSERT_THAT(result, AnyOf(0, ENOENT));
+  if (result == 0) {
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.qp->send_cq));
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_MW_BIND_ERR));
+    EXPECT_EQ(completion.wr_id, 1);
+    EXPECT_EQ(completion.qp_num, setup.qp->qp_num);
+    if (completion.status == IBV_WC_SUCCESS) {
+      EXPECT_THAT(verbs_util::ReadSync(setup.qp, setup.buffer.span(), setup.mr,
+                                       setup.buffer.data(), mw->rkey),
+                  IsOkAndHolds(IBV_WC_SUCCESS));
+    }
+  }
 }
 
 TEST_F(MwTest, DeregMrWhenBound) {
@@ -291,6 +319,11 @@ TEST_F(MwTest, BindFullCommandQueue) {
   ASSERT_THAT(cq, NotNull());
   ibv_qp* qp = ibv_.CreateQp(setup.pd, cq);
   ASSERT_THAT(qp, NotNull());
+  // Presetup memory window request.
+  ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
+  ASSERT_THAT(mw, NotNull());
+  ibv_mw_bind bind_arg =
+      verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
   // Fill the send queue.
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, nullptr, /*num_sge=*/0);
@@ -301,11 +334,6 @@ TEST_F(MwTest, BindFullCommandQueue) {
     send_result = ibv_post_send(qp, &send, &bad_wr);
   }
   ASSERT_EQ(ENOMEM, send_result);
-
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
-  ASSERT_THAT(mw, NotNull());
-  ibv_mw_bind bind_arg =
-      verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
   EXPECT_EQ(
       ibv_bind_mw(qp, mw, &bind_arg),
       Introspection().ShouldDeviateForCurrentTest() ? IBV_WC_SUCCESS : ENOMEM);
@@ -923,11 +951,7 @@ TEST_P(MwBindTest, NoMrBindAccess) {
 TEST_P(MwBindTest, BindWhenQpError) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
-  ASSERT_OK_AND_ASSIGN(ibv_wc_status error,
-                       verbs_util::FetchAddSync(setup.qp, setup.buffer.data(),
-                                                mr, setup.buffer.data() + 1,
-                                                mr->rkey, /*comp_add=*/1));
-  ASSERT_EQ(error, IBV_WC_REM_INV_REQ_ERR);
+  ASSERT_OK(ibv_.SetQpError(setup.qp));
   ASSERT_EQ(verbs_util::GetQpState(setup.qp), IBV_QPS_ERR);
 
   ibv_wc_status status;
