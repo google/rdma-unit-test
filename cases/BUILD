@@ -421,6 +421,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":loopback_fixture",
+        "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -430,6 +431,25 @@ cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "stress_test",
+    srcs = ["stress_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":basic_fixture",
+        ":gunit_main",
+        "//public:rdma_memblock",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@libibverbs",
@@ -456,6 +476,7 @@ cc_library(
         "rc_test.cc",
         "rendezvous_test.cc",
         "srq_test.cc",
+        "stress_test.cc",
         "threaded_test.cc",
         "ud_test.cc",
     ],

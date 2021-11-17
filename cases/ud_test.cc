@@ -35,6 +35,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "cases/loopback_fixture.h"
+#include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -44,9 +45,6 @@
 namespace rdma_unit_test {
 namespace {
 
-// TODO(author1): UD send with invalid AH.
-// TODO(author1): UD send with invalid qpn.
-// TODO(author1): UD send with invalid qkey.
 // TODO(author1): UD send to invalid dst IP (via AH).
 // TODO(author1): UD with GRH split across many SGE.
 // TODO(author1): Send between RC and UD.
@@ -110,8 +108,8 @@ TEST_F(LoopbackUdQpTest, Send) {
   EXPECT_EQ(completion.opcode, IBV_WC_RECV);
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
-  auto recv_payload = remote.buffer.span();
-  recv_payload = recv_payload.subspan(sizeof(ibv_grh), kPayloadLength);
+  absl::Span<uint8_t> recv_payload =
+      remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
   EXPECT_THAT(recv_payload, Each(kLocalBufferContent));
 }
 
@@ -184,27 +182,47 @@ TEST_F(LoopbackUdQpTest, SendInvalidAh) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah dummy_ah{.context = nullptr, .pd = nullptr, .handle = 1234};
-  send.wr.ud.ah = &dummy_ah;
+  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ASSERT_THAT(ah, NotNull());
+  HandleGarble garble(ah->handle);
+  send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
   send.wr.ud.remote_qkey = kQKey;
   verbs_util::PostSend(local.qp, send);
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  // Several acceptable outcomes posting a send WR to a UD QP with invalid AH:
-  // 1. IBTA spec indicates the NIC should return an immediate error. But this
-  // is not following by many of the Mellanox NICs.
-  // 2. Instead, Mellanox will return a IBV_WC_SUCCESS on completion.
-  // 3. Based on description on both IBTA spec and Mellanox RDMA manual,
-  // IBV_WC_LOC_QP_OP_ERR also matches the semantic for any invalidity of AH.
-  EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_LOC_QP_OP_ERR));
-  EXPECT_EQ(IBV_WC_SEND, completion.opcode);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
+  if (completion.status == IBV_WC_SUCCESS) {
+    // Some provider will ignore the handle of ibv_ah and only examine its
+    // PD and ibv_grh.
+    EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+    ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS));
+    EXPECT_EQ(IBV_WC_RECV, completion.opcode);
+    EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 0);
+    absl::Span<uint8_t> recv_payload =
+        remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
+    EXPECT_THAT(recv_payload, Each(kLocalBufferContent));
+  } else {
+    // Otherwise packet won't be sent.
+    EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
+    absl::Span<uint8_t> recv_payload =
+        remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
+    EXPECT_THAT(recv_payload, Each(kRemoteBufferContent));
+  }
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
@@ -222,7 +240,7 @@ TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
   ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
-  send.wr.ud.remote_qpn = remote.qp->qp_num + 10;  // Make invalid.
+  send.wr.ud.remote_qpn = 0xDEADBEEF;
   send.wr.ud.remote_qkey = kQKey;
   verbs_util::PostSend(local.qp, send);
 
@@ -233,6 +251,47 @@ TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
+  absl::Span<uint8_t> recv_payload =
+      remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
+  EXPECT_THAT(recv_payload, Each(kRemoteBufferContent));
+}
+
+TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
+
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = kPayloadLength + sizeof(ibv_grh);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ASSERT_THAT(ah, NotNull());
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  // MSB of remote_qkey must be unset for SR's QKey to be effective.
+  send.wr.ud.remote_qkey = 0xDEADBEEF & 0x7FFFFFF;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
+  absl::Span<uint8_t> recv_payload =
+      remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
+  EXPECT_THAT(recv_payload, Each(kRemoteBufferContent));
 }
 
 // Read not supported on UD.

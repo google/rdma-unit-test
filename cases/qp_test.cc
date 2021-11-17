@@ -448,49 +448,33 @@ TEST_F(QpTest, ModifyInvalidQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
-
-  // Modify on invalid qp.
-  ibv_qp original = *qp;
-  qp->handle = setup.cq->handle;
+  HandleGarble garble(qp->handle);
   ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
   EXPECT_THAT(ibv_modify_qp(qp, &mod_init, kRcQpInitMask),
-              AnyOf(ENOENT, EPERM, EINVAL));
-  *qp = original;
+              AnyOf(ENOENT, EINVAL));
 }
 
 TEST_F(QpTest, QueryInvalidQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
-
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
+  ASSERT_EQ(verbs_util::GetQpState(qp), IBV_QPS_INIT);
+  // Query on invalid qp.
   ibv_qp_attr attr;
   ibv_qp_init_attr init_attr;
-  ASSERT_EQ(ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr), 0);
-  EXPECT_EQ(attr.qp_state, IBV_QPS_INIT);
-
-  // Query on invalid qp.
-  ibv_qp original = *qp;
-  qp->handle = setup.cq->handle;
+  HandleGarble garble(qp->handle);
   EXPECT_THAT(ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr),
-              AnyOf(EFAULT, ENOENT, EINVAL));
-  *qp = original;
+              AnyOf(ENOENT, EINVAL));
 }
 
 TEST_F(QpTest, DestroyInvalidQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_qp* qp = ibv_create_qp(setup.pd, &setup.basic_attr);
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
-
-  // Destroy on invalid qp. Only modify the handle in this instance as the
-  // underlying ibv_qp is a cast of an internal structure.
-  uint32_t original_handle = qp->handle;
-  qp->handle = setup.cq->handle;
-  int result = ibv_destroy_qp(qp);
-  EXPECT_THAT(result, AnyOf(ENOENT, EPERM, EINVAL));
-  qp->handle = original_handle;
-  EXPECT_EQ(ibv_destroy_qp(qp), 0);
+  HandleGarble garble(qp->handle);
+  EXPECT_THAT(ibv_destroy_qp(qp), AnyOf(ENOENT, EINVAL));
 }
 
 // This is a series of test to test whether a QP correctly responds to a posted

@@ -40,7 +40,7 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"CompChannelTest", "RequestNotificationInvalidCq", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
-        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
         // Will hang.
         {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
         // Will hang.
@@ -70,8 +70,6 @@ class IntrospectionMlx5 : public NicIntrospection {
         // Permissions not checked at bind.
         {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
         {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
-        // Deregistering a bound window reports success.
-        {"MwTest", "DeregMrWhenBound", ""},
         // Allows bind to invalid qp.
         {"MwTest", "InvalidQp", ""},
         // Allows binding when MR is missing bind permissions.

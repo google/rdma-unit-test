@@ -206,7 +206,7 @@ TEST_F(CompChannelTest, DestroyChannelWithCqRef) {
   ASSERT_EQ(ibv_destroy_comp_channel(channel), 0);
 }
 
-TEST_F(CompChannelTest, RequestNoificationOnCqWithoutCompChannel) {
+TEST_F(CompChannelTest, RequestNotificationOnCqWithoutCompChannel) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
@@ -323,33 +323,6 @@ TEST_F(CompChannelTest, RecvUnsolicitedNofitySolicited) {
   ASSERT_NO_FATAL_FAILURE(CheckRecv(setup.remote.cq));
   ASSERT_FALSE(IsReady(setup.local.channel));
   ASSERT_FALSE(IsReady(setup.remote.channel));
-}
-
-TEST_F(CompChannelTest, AcknowledgeWithoutOutstanding) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "transport hangs when acknowledging too many.";
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_comp_channel* channel = ibv_.CreateChannel(setup.context);
-  ASSERT_THAT(channel, NotNull());
-  ibv_cq* cq = ibv_.CreateCq(setup.context, kCqMaxWr, channel);
-  ibv_ack_cq_events(cq, 1);
-}
-
-TEST_F(CompChannelTest, AcknowledgeTooMany) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "transport hangs when acknowledging too many.";
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
-  ASSERT_FALSE(IsReady(setup.local.channel));
-  DoWrite(setup, setup.local.qp);
-  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(setup.local.cq));
-  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
-  ASSERT_TRUE(IsReady(setup.local.channel));
-  ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
-  ibv_ack_cq_events(setup.local.cq, /*nevents=*/10);
 }
 
 TEST_F(CompChannelTest, DeleteWithUnacked) {

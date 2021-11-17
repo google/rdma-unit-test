@@ -64,7 +64,7 @@ class IntrospectionMlx4 : public NicIntrospection {
         {"CompChannelTest", "RequestNotificationInvalidCq", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
-        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
         // Will hang.
         {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
         // Will hang.

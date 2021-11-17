@@ -266,9 +266,7 @@ TEST_F(SrqTest, MaxSge) {
     GTEST_SKIP();
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_srq_attr attr;
-  ASSERT_EQ(ibv_query_srq(setup.srq, &attr), 0);
-  uint32_t max_sge = attr.max_sge;
+  uint32_t max_sge = setup.srq_attr.attr.max_sge;
 
   ASSERT_LT(max_sge, setup.recv_buffer.size());
   std::vector<ibv_sge> sges(max_sge);
@@ -290,9 +288,7 @@ TEST_F(SrqTest, ExceedsMaxSge) {
     GTEST_SKIP();
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_srq_attr attr;
-  ASSERT_EQ(ibv_query_srq(setup.srq, &attr), 0);
-  uint32_t max_sge = attr.max_sge;
+  uint32_t max_sge = setup.srq_attr.attr.max_sge;
 
   ASSERT_LT(max_sge, setup.recv_buffer.size());
   std::vector<ibv_sge> sges(max_sge + 1);

@@ -49,7 +49,7 @@ class IntrospectionRxe : public NicIntrospection {
         {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
-        {"CompChannelTest", "RequestNoificationOnCqWithoutCompChannel", ""},
+        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
         // Will hang.
         {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
         // Will hang.
