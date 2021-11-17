@@ -69,14 +69,18 @@ class IntrospectionMlx4 : public NicIntrospection {
         {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
         // Will hang.
         {"CompChannelTest", "AcknowledgeTooMany", ""},
+        // Creating too many Ahs will cause client crashes.
+        {"DeviceLimitTest", "MaxAh", ""},
+        // Does not correctly report max_mw. Report 0.
+        {"DeviceLimitTest", "MaxMw", ""},
+        // Can create much more (around 64k) than allowed.
+        {"DeviceLimitTest", "MaxQp", ""},
         // Does not fail with bad recv length.
         {"LoopbackRcQpTest", "BadRecvLength", ""},
         // Supports multiple SGEs for atomics.
         {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
         // Allows bind to invalid qp.
         {"MwTest", "InvalidQp", ""},
-        // Allows creation over max qp.
-        {"QpTest", "ExceedsMaxQp", ""},
     };
     return deviations;
   }

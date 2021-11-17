@@ -99,19 +99,9 @@ TEST_F(CqExTest, ZeroCqe) {
 
 TEST_F(CqExTest, MaxCqe) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq_init_attr_ex cq_attr{
-      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe)};
-  ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
-  ASSERT_THAT(cq, NotNull());
-  ASSERT_EQ(ibv_destroy_cq(ibv_cq_ex_to_cq(cq)), 0);
-}
-
-TEST_F(CqExTest, AboveMaxCqe) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq_init_attr_ex cq_attr{
-      .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe) + 1};
-  ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
-  EXPECT_THAT(cq, IsNull());
+  uint32_t max_cqe = Introspection().device_attr().max_cqe;
+  EXPECT_THAT(ibv_.CreateCqEx(setup.context, max_cqe), NotNull());
+  EXPECT_THAT(ibv_.CreateCqEx(setup.context, max_cqe + 1), IsNull());
 }
 
 TEST_F(CqExTest, WithChannel) {

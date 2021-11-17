@@ -48,14 +48,6 @@ TEST_F(PdTest, OpenPd) {
   EXPECT_THAT(pd, NotNull());
 }
 
-TEST_F(PdTest, OpenManyPd) {
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  for (int i = 0; i < 500; ++i) {
-    auto* pd = ibv_.AllocPd(context);
-    EXPECT_THAT(pd, NotNull());
-  }
-}
-
 TEST_F(PdTest, DeleteInvalidPd) {
   if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());

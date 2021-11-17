@@ -46,6 +46,7 @@
 
 namespace rdma_unit_test {
 
+using ::testing::_;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
@@ -99,19 +100,18 @@ TEST_F(CqTest, ZeroCqe) {
 
 TEST_F(CqTest, MaxCqe) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq =
-      ibv_create_cq(setup.context, Introspection().device_attr().max_cqe,
-                    nullptr, nullptr, 0);
-  ASSERT_THAT(cq, NotNull());
-  ASSERT_EQ(ibv_destroy_cq(cq), 0);
+  uint32_t max_cqe = Introspection().device_attr().max_cqe;
+  EXPECT_THAT(ibv_.CreateCq(setup.context, max_cqe), NotNull());
+  EXPECT_THAT(ibv_.CreateCq(setup.context, max_cqe + 1), IsNull());
 }
 
-TEST_F(CqTest, AboveMaxCqe) {
+TEST_F(CqTest, MaxCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq =
-      ibv_create_cq(setup.context, Introspection().device_attr().max_cqe + 1,
-                    nullptr, nullptr, 0);
-  EXPECT_THAT(cq, IsNull());
+  uint32_t max_cq = Introspection().device_attr().max_cq;
+  for (uint32_t i = 0; i < max_cq; ++i) {
+    EXPECT_THAT(ibv_.CreateCq(setup.context), _);
+  }
+  EXPECT_THAT(ibv_.CreateCq(setup.context), _);
 }
 
 TEST_F(CqTest, WithChannel) {

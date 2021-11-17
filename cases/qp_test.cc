@@ -242,70 +242,52 @@ TEST_F(QpTest, QueueRefs) {
   EXPECT_EQ(ibv_destroy_cq(setup.cq), EBUSY);
 }
 
-TEST_F(QpTest, ExactDeviceCap) {
+TEST_F(QpTest, MaxQpWr) {
   const ibv_device_attr& device_attr = Introspection().device_attr();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
 
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_send_wr = device_attr.max_qp_wr;
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
+  ibv_qp_init_attr attr = setup.basic_attr;
+  attr.cap = kBasicQpCap;
+  attr.cap.max_send_wr = device_attr.max_qp_wr;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), NotNull());
+  attr.cap.max_send_wr = device_attr.max_qp_wr + 1;
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
+  if (qp != nullptr) {
+    EXPECT_LE(attr.cap.max_send_wr, device_attr.max_qp_wr);
+  }
 
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_recv_wr = device_attr.max_qp_wr;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
-
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_send_sge = device_attr.max_sge;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
-
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_recv_sge = device_attr.max_sge;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, NotNull());
+  attr.cap = kBasicQpCap;
+  attr.cap.max_recv_wr = device_attr.max_qp_wr;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), NotNull());
+  attr.cap.max_recv_wr = device_attr.max_qp_wr + 1;
+  qp = ibv_.CreateQp(setup.pd, attr);
+  if (qp != nullptr) {
+    EXPECT_LE(attr.cap.max_send_wr, device_attr.max_qp_wr);
+  }
 }
 
-TEST_F(QpTest, ExceedsDeviceCap) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "Some NICs allow QP creation over device cap.";
-  }
-  // Some devices will fail the qp creation. Other will just adjust the QP
-  // capacity accordingly.
+TEST_F(QpTest, MaxSge) {
   const ibv_device_attr& device_attr = Introspection().device_attr();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_qp_init_attr attr = setup.basic_attr;
 
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_send_wr = device_attr.max_qp_wr + 1;
-  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, IsNull());
-
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_recv_wr = device_attr.max_qp_wr + 1;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, IsNull());
-
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_send_sge = device_attr.max_sge + 1;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, IsNull());
-
-  setup.basic_attr.cap = kBasicQpCap;
-  setup.basic_attr.cap.max_recv_sge = device_attr.max_sge + 1;
-  qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
-  EXPECT_THAT(qp, IsNull());
-}
-
-TEST_F(QpTest, ExceedsMaxQp) {
-  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const ibv_device_attr& device_attr = Introspection().device_attr();
-  for (int qpn = 0; qpn < device_attr.max_qp; ++qpn) {
-    ASSERT_THAT(ibv_.CreateQp(setup.pd, setup.basic_attr), NotNull());
+  attr.cap = kBasicQpCap;
+  attr.cap.max_send_sge = device_attr.max_sge;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), NotNull());
+  attr.cap.max_send_sge = device_attr.max_sge + 1;
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
+  if (qp != nullptr) {
+    EXPECT_LE(attr.cap.max_send_sge, device_attr.max_sge);
   }
-  // Create one more..
-  EXPECT_EQ(ibv_.CreateQp(setup.pd, setup.basic_attr), nullptr);
+
+  attr.cap = kBasicQpCap;
+  attr.cap.max_recv_sge = device_attr.max_sge;
+  EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), NotNull());
+  attr.cap.max_recv_sge = device_attr.max_sge + 1;
+  qp = ibv_.CreateQp(setup.pd, attr);
+  if (qp != nullptr) {
+    EXPECT_LE(attr.cap.max_recv_sge, device_attr.max_sge);
+  }
 }
 
 // TODO(author1): Cross context objects.

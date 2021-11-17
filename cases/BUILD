@@ -182,6 +182,8 @@ cc_test(
     deps = [
         ":basic_fixture",
         ":gunit_main",
+        "//public:introspection",
+        "//public:rdma_memblock",
         "//public:status_matchers",
         "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",

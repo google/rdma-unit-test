@@ -249,9 +249,9 @@ int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
   return result;
 }
 
-ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int max_wr,
+ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
                                    ibv_comp_channel* channel) {
-  ibv_cq* cq = ibv_create_cq(context, max_wr, /*cq_context=*/nullptr, channel,
+  ibv_cq* cq = ibv_create_cq(context, cqe, /*cq_context=*/nullptr, channel,
                              /*cq_vector=*/0);
   if (cq) {
     cleanup_.AddCleanup(cq);
@@ -274,6 +274,12 @@ ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
     cleanup_.AddCleanup(cq);
   }
   return cq;
+}
+
+ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
+                                        uint32_t max_cqe) {
+  ibv_cq_init_attr_ex attr{.cqe = max_cqe};
+  return CreateCqEx(context, attr);
 }
 
 int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {

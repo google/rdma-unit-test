@@ -104,8 +104,6 @@ TEST_F(MrTest, DestroyPdWithOutstandingMr) {
   EXPECT_EQ(ibv_.DeallocPd(setup.pd), EBUSY);
 }
 
-// TODO(author1): Create Many/Max
-
 // Test using ibv_rereg_mr to associate the MR with another buffer.
 TEST_F(MrTest, ReregMrChangeAddress) {
   if (!Introspection().SupportsReRegMr()) {

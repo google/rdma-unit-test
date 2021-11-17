@@ -93,10 +93,12 @@ class VerbsHelperSuite {
   int DeallocMw(ibv_mw* mw);
   ibv_comp_channel* CreateChannel(ibv_context* context);
   int DestroyChannel(ibv_comp_channel* channel);
-  ibv_cq* CreateCq(ibv_context* context, int max_wr = verbs_util::kDefaultMaxWr,
+  ibv_cq* CreateCq(ibv_context* context, int cqe = verbs_util::kDefaultMaxWr,
                    ibv_comp_channel* channel = nullptr);
   int DestroyCq(ibv_cq* cq);
   ibv_cq_ex* CreateCqEx(ibv_context* context, ibv_cq_init_attr_ex& cq_attr);
+  ibv_cq_ex* CreateCqEx(ibv_context* context,
+                        uint32_t cqe = verbs_util::kDefaultMaxWr);
   int DestroyCqEx(ibv_cq_ex* cq_ex);
   ibv_srq* CreateSrq(ibv_pd* pd, uint32_t max_wr = verbs_util::kDefaultMaxWr);
   ibv_srq* CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr);

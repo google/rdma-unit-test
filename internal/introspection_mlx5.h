@@ -78,9 +78,7 @@ class IntrospectionMlx5 : public NicIntrospection {
         {"MwBindTest", "NoMrBindAccess", ""},
         // Allows creation over device cap.
         {"QpTest", "ExceedsDeviceCap", ""},
-        // Incorrectly report device cap on QPs..
-        {"QpTest", "ExceedsMaxQp", ""}};
-
+    };
     return deviations;
   }
 

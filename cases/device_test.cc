@@ -14,6 +14,7 @@
 
 #include <errno.h>
 
+#include <cstdlib>
 #include <thread>  // NOLINT
 #include <vector>
 
@@ -23,6 +24,8 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "cases/basic_fixture.h"
+#include "public/introspection.h"
+#include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 
@@ -94,6 +97,183 @@ TEST_F(DeviceTest, ContextTomfoolery) {
   ASSERT_EQ(ENOENT, ibv_dealloc_pd(pd));
   pd->context = context1;
   ASSERT_EQ(ibv_dealloc_pd(pd), 0);
+}
+
+// The fixture is used to test validity of resource limit on an ibv_device as
+// stated in ibv_device_attr.
+class DeviceLimitTest : public DeviceTest {
+ protected:
+  // In most NICs, the actual elements you can create in a resource might be
+  // deviating from the indicated limit in ibv_device_attr. This constant
+  // specifies the tolerable limits.
+  static constexpr int kErrorMax = 200;
+};
+
+TEST_F(DeviceLimitTest, MaxAh) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_gid gid = ibv_.GetLocalPortGid(context).gid;
+  int max_ah = Introspection().device_attr().max_ah;
+  int actual_max = 0;
+  for (int i = 0; i < max_ah + kErrorMax + 10; ++i) {
+    if (ibv_.CreateAh(pd, gid) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_ah = " << max_ah;
+  LOG(INFO) << "max_ah (actual) = " << actual_max;
+  ASSERT_GE(actual_max, 0);
+  EXPECT_LE(std::abs(max_ah - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxCq) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  int max_cq = Introspection().device_attr().max_cq;
+  int actual_max = 0;
+  for (int i = 0; i < max_cq + kErrorMax + 10; ++i) {
+    if (ibv_.CreateCq(context) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_cq = " << max_cq;
+  LOG(INFO) << "max_cq (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_cq - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxCqEx) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  int max_cq = Introspection().device_attr().max_cq;
+  int actual_max = 0;
+  for (int i = 0; i < max_cq + kErrorMax + 10; ++i) {
+    if (ibv_.CreateCqEx(context) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_cq = " << max_cq;
+  LOG(INFO) << "max_cq (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_cq - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxMr) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  RdmaMemBlock buffer = ibv_.AllocBuffer(/*pages=*/1);
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  int max_mr = Introspection().device_attr().max_mr;
+  int actual_max = 0;
+  for (int i = 0; i < max_mr + kErrorMax + 10; ++i) {
+    if (ibv_.RegMr(pd, buffer) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_mr = " << max_mr;
+  LOG(INFO) << "max_mr (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_mr - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxMw) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  int max_mw = Introspection().device_attr().max_mw;
+  int actual_max = 0;
+  for (int i = 0; i < max_mw + kErrorMax + 10; ++i) {
+    if (ibv_.AllocMw(pd, i & 1 ? IBV_MW_TYPE_1 : IBV_MW_TYPE_2) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_mw = " << max_mw;
+  LOG(INFO) << "max_mw (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_mw - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxPd) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  int max_pd = Introspection().device_attr().max_pd;
+  int actual_max = 0;
+  for (int i = 0; i < max_pd + kErrorMax + 10; ++i) {
+    if (ibv_.AllocPd(context) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_pd = " << max_pd;
+  LOG(INFO) << "max_pd (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_pd - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxQp) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_cq* cq = ibv_.CreateCq(context);
+  ASSERT_THAT(cq, NotNull());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  int max_qp = Introspection().device_attr().max_qp;
+  int actual_max = 0;
+  for (int i = 0; i < 2 * max_qp; ++i) {
+    if (ibv_.CreateQp(pd, cq) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_qp = " << max_qp;
+  LOG(INFO) << "max_qp (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_qp - actual_max), kErrorMax);
+}
+
+TEST_F(DeviceLimitTest, MaxSrq) {
+  if (Introspection().ShouldDeviateForCurrentTest()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  int max_srq = Introspection().device_attr().max_srq;
+  int actual_max = 0;
+  for (int i = 0; i < max_srq + kErrorMax + 10; ++i) {
+    if (ibv_.CreateSrq(pd) != nullptr) {
+      ++actual_max;
+    } else {
+      break;
+    }
+  }
+  LOG(INFO) << "max_srq = " << max_srq;
+  LOG(INFO) << "max_srq (actual) = " << actual_max;
+  EXPECT_LE(std::abs(max_srq - actual_max), kErrorMax);
 }
 
 // TODO(author1): Create Max
