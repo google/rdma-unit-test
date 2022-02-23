@@ -35,8 +35,8 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
 #include "cases/batch_op_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -50,7 +50,7 @@ using ::testing::_;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class CqTest : public BasicFixture {
+class CqTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
@@ -190,8 +190,9 @@ TEST_F(CqBatchOpTest, SendSharedCq) {
   static constexpr int kQueuePairCount = 2;
   const int writes_per_queue_pair = (cq->cqe - 10) / kQueuePairCount;
   const int total_completions = writes_per_queue_pair * kQueuePairCount;
-  std::vector<QpPair> qp_pairs =
-      CreateTestQpPairs(setup, cq, cq, writes_per_queue_pair, kQueuePairCount);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, cq, cq, writes_per_queue_pair, kQueuePairCount));
   ThreadedSubmission(
       qp_pairs, writes_per_queue_pair,
       [&setup, this](QpPair& qp_pair) { QueueWrite(setup, qp_pair); });
@@ -200,15 +201,16 @@ TEST_F(CqBatchOpTest, SendSharedCq) {
 
 // 2 CQs posting recv completions to a single completion queue.
 TEST_F(CqBatchOpTest, RecvSharedCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* send_cq = ibv_.CreateCq(setup.context);
   ibv_cq* recv_cq = ibv_.CreateCq(setup.context);
   static constexpr int kQueuePairCount = 2;
   const int sends_per_queue_pair = (recv_cq->cqe - 10) / kQueuePairCount;
   const int total_completions = sends_per_queue_pair * kQueuePairCount;
-  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
-      setup, send_cq, recv_cq, sends_per_queue_pair, kQueuePairCount);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, send_cq, recv_cq, sends_per_queue_pair,
+                        kQueuePairCount));
   for (auto& qp_pair : qp_pairs) {
     for (int i = 0; i < sends_per_queue_pair; ++i) {
       QueueRecv(setup, qp_pair);
@@ -267,8 +269,9 @@ TEST_F(CqOverflowTest, SendCqOverflow) {
   ibv_cq* cq = ibv_.CreateCq(setup.context);
   static constexpr int kQueuePairCount = 1;
   const int total_writes = cq->cqe + 10;
-  std::vector<QpPair> qp_pairs =
-      CreateTestQpPairs(setup, cq, cq, total_writes, kQueuePairCount);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, cq, cq, total_writes, kQueuePairCount));
   for (int i = 0; i < total_writes; ++i) {
     QueueWrite(setup, qp_pairs[0]);
   }
@@ -287,8 +290,9 @@ TEST_F(CqOverflowTest, SendSharedCqOverflow) {
   const int cq_size = cq->cqe;
   static constexpr int kQueuePairCount = 5;
   const int writes_per_queue_pair = cq_size;
-  std::vector<QpPair> qp_pairs =
-      CreateTestQpPairs(setup, cq, cq, writes_per_queue_pair, kQueuePairCount);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, cq, cq, writes_per_queue_pair, kQueuePairCount));
   ThreadedSubmission(qp_pairs, writes_per_queue_pair,
                      [&setup, this](QpPair& qp) { QueueWrite(setup, qp); });
   WaitForData(
@@ -307,8 +311,9 @@ TEST_F(CqOverflowTest, RecvCqOverflow) {
   ibv_cq* send_cq = ibv_.CreateCq(setup.context);
   ibv_cq* recv_cq = ibv_.CreateCq(setup.context);
   const int total_sends = recv_cq->cqe + 10;
-  std::vector<QpPair> qp_pairs =
-      CreateTestQpPairs(setup, send_cq, recv_cq, total_sends, /*count=*/1);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, send_cq, recv_cq, total_sends, /*count=*/1));
   for (int i = 0; i < total_sends; ++i) {
     QueueRecv(setup, qp_pairs[0]);
   }
@@ -331,8 +336,10 @@ TEST_F(CqOverflowTest, RecvSharedCqOverflow) {
   const int sends_per_queue_pair = recv_cq->cqe;
   static constexpr int kQueuePairCount = 5;
   const int total_sends = sends_per_queue_pair * kQueuePairCount;
-  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
-      setup, send_cq, recv_cq, sends_per_queue_pair, kQueuePairCount);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
+      CreateTestQpPairs(setup, send_cq, recv_cq, sends_per_queue_pair,
+                        kQueuePairCount));
   for (auto& qp_pair : qp_pairs) {
     for (int i = 0; i < sends_per_queue_pair; ++i) {
       QueueRecv(setup, qp_pair);

@@ -17,7 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
 
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/introspection.h"
@@ -39,39 +39,43 @@ class IntrospectionRxe : public NicIntrospection {
   bool SupportsRcQp() const override { return false; }
 
  protected:
-  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
-    static const absl::flat_hash_set<DeviationEntry> deviations{
-        // Supports multiple SGEs for atomics.
-        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
+  const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
+      const override {
+    static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
         // Returns success completion.
-        {"BufferTest", "ZeroByteReadInvalidRKey", "no error"},
+        {{"BufferTest", "ZeroByteReadInvalidRKey"}, ""},
         // Zero byte write is successful.
-        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
+        {{"BufferTest", "ZeroByteWriteInvalidRKey"}, ""},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
-        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
-        // Will hang.
-        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
-        // Will hang.
-        {"CompChannelTest", "AcknowledgeTooMany", ""},
-        // RXE PD support is lacking.
-        {"PdRcLoopbackMrTest", "BasicReadMrOtherPdLocal", ""},
-        {"PdRcLoopbackMrTest", "BasicReadMrOtherPdRemote", ""},
-        {"PdRcLoopbackMrTest", "BasicWriteMrOtherPdLocal", ""},
-        {"PdRcLoopbackMrTest", "BasicWriteMrOtherPdRemote", ""},
-        {"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdLocal", ""},
-        {"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdRemote", ""},
-        {"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdLocal", ""},
-        {"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdRemote", ""},
-        {"PdUdLoopbackTest", "SendAhOnOtherPd", ""},
-        {"SrqPdTest", "SrqRecvMrSrqMatch", ""},
-        {"SrqPdTest", "SrqRecvMrSrqMismatch", ""},
+        {{"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel"}, ""},
+        {{"CompChannelTest", "AcknowledgeWithoutOutstanding"},
+         "Provider crashes when ack-ing without outstanding completion."},
+        {{"PdRcLoopbackMrTest", "BasicReadMrOtherPdLocal"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicReadMrOtherPdRemote"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicWriteMrOtherPdLocal"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicWriteMrOtherPdRemote"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdLocal"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicFetchAddMrOtherPdRemote"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdLocal"},
+         "Provider does not support PD."},
+        {{"PdRcLoopbackMrTest", "BasicCompSwapMrOtherPdRemote"},
+         "Provider does not support PD."},
+        {{"PdUdLoopbackTest", "SendAhOnOtherPd"},
+         "Provider does not support PD."},
+        {{"SrqPdTest", "SrqRecvMrSrqMatch"}, ""},
+        {{"SrqPdTest", "SrqRecvMrSrqMismatch"}, ""},
+        // TODO(author2): Be more specific.
+        {{"QpTest", "OverflowSendWr"}, "Does not handle overflow QP."},
+        {{"QpTest", "UnknownType"}, "Can create QPs of unknown type."},
         // Does not handle overflow well.
-        {"QpTest", "OverflowSendWr", ""},
-        // Can create QPs of unknown type.
-        {"QpTest", "UnknownType", ""},
-        // Does not handle overflow well.
-        {"SrqTest", "OverflowSrq", ""},
+        {{"SrqTest", "OverflowSrq"}, ""},
     };
     return deviations;
   }

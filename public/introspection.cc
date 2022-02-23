@@ -15,13 +15,14 @@
 #include "public/introspection.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "glog/logging.h"
 #include "gtest/gtest.h"
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"
@@ -33,8 +34,7 @@
 
 namespace rdma_unit_test {
 
-bool NicIntrospection::ShouldDeviateForCurrentTest(
-    const std::string& identifier) const {
+std::optional<std::string> NicIntrospection::KnownIssue() const {
   const testing::TestInfo* const test_info =
       testing::UnitTest::GetInstance()->current_test_info();
   // These two modifications strip off extra bits added for parameterized tests.
@@ -43,7 +43,11 @@ bool NicIntrospection::ShouldDeviateForCurrentTest(
                           .back();
   std::string name =
       std::vector<std::string>(absl::StrSplit(test_info->name(), '/')).front();
-  return GetDeviations().contains(std::make_tuple(suite, name, identifier));
+  auto iter = GetDeviations().find(std::make_tuple(suite, name));
+  if (iter == GetDeviations().end()) {
+    return std::nullopt;
+  }
+  return iter->second;
 }
 
 const NicIntrospection& Introspection() {

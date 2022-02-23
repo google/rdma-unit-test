@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_HELPER_SUITE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_VERBS_HELPER_SUITE_H_
 
@@ -27,9 +28,8 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "infiniband/verbs.h"
-#include "internal/verbs_backend.h"
 #include "internal/verbs_cleanup.h"
-#include "internal/verbs_extension_interface.h"
+#include "internal/verbs_extension.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
@@ -55,20 +55,19 @@ class VerbsHelperSuite {
   VerbsHelperSuite& operator=(VerbsHelperSuite&& helper) = default;
   VerbsHelperSuite(const VerbsHelperSuite& helper) = delete;
   VerbsHelperSuite& operator=(const VerbsHelperSuite& helper) = delete;
-  ~VerbsHelperSuite() = default;
+  virtual ~VerbsHelperSuite() = default;
 
   // See VerbsBackend.
   absl::Status SetUpRcQp(ibv_qp* local_qp, const verbs_util::PortGid& local,
                          ibv_gid remote_gid, uint32_t remote_qpn);
-  void SetUpSelfConnectedRcQp(ibv_qp* qp, const verbs_util::PortGid& local);
-  void SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2,
-                          const verbs_util::PortGid& local);
-  absl::Status SetUpUdQp(ibv_qp* qp, const verbs_util::PortGid& local,
-                         uint32_t qkey);
+  absl::Status SetUpRcQp(ibv_qp* local_qp, ibv_qp* remote_qp);
+  absl::Status SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2);
+  absl::Status SetUpUdQp(ibv_qp* qp, verbs_util::PortGid local, uint32_t qkey);
+  absl::Status SetUpUdQp(ibv_qp* qp, uint32_t qkey);
   absl::Status SetQpInit(ibv_qp* qp, uint8_t port);
   absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
                         ibv_gid remote_gid, uint32_t remote_qpn);
-  absl::Status SetQpRts(ibv_qp* qp, ibv_qp_attr custom_attr = {}, int mask = 0);
+  absl::Status SetQpRts(ibv_qp* qp);
   absl::Status SetQpError(ibv_qp* qp);
 
   // Helper functions to create/destroy objects which will be automatically
@@ -88,6 +87,8 @@ class VerbsHelperSuite {
                 int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                              IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
                              IBV_ACCESS_MW_BIND);
+  int ReregMr(ibv_mr* mr, int flags, ibv_pd* pd, const RdmaMemBlock* memblock,
+              int access);
   int DeregMr(ibv_mr* mr);
   ibv_mw* AllocMw(ibv_pd* pd, ibv_mw_type type);
   int DeallocMw(ibv_mw* mw);
@@ -116,7 +117,15 @@ class VerbsHelperSuite {
   // is for any user which requires runtime indirection for different IbVerbs
   // extensions but does not want the overhead/synchronization incurred by the
   // automatic deletion setup.
-  VerbsExtensionInterface* Extensions() const;
+  VerbsExtension* extension();
+
+ protected:
+  // Creates proper subclass of VerbsExtensionInterface and initialize
+  // the extension.
+  virtual std::unique_ptr<VerbsExtension> InitVerbsExtension();
+
+  // Returns the VerbsCleanup object for registering for auto-deletion.
+  VerbsCleanup& cleanup();
 
  private:
   // Tracks RdmaMemblocks to make sure it outlive MRs.
@@ -130,9 +139,8 @@ class VerbsHelperSuite {
   absl::Mutex mtx_memblocks_;
   mutable absl::Mutex mtx_port_gids_;
 
-  std::unique_ptr<VerbsExtensionInterface> extension_;
-  std::unique_ptr<VerbsBackend> backend_;
-  VerbsCleanup cleanup_;
+  std::unique_ptr<VerbsExtension> extension_;
+  std::unique_ptr<VerbsCleanup> cleanup_;
 };
 
 }  // namespace rdma_unit_test

@@ -27,7 +27,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -41,7 +41,7 @@ using ::testing::AnyOf;
 using ::testing::Ne;
 using ::testing::NotNull;
 
-class CompChannelTest : public BasicFixture {
+class CompChannelTest : public RdmaVerbsFixture {
  protected:
   static constexpr int kNotifyAny = 0;
   static constexpr int kNotifySolicited = 1;
@@ -56,7 +56,6 @@ class CompChannelTest : public BasicFixture {
       ibv_qp* qp;
     };
     ibv_context* context;
-    verbs_util::PortGid port_gid;
     ibv_pd* pd;
     RdmaMemBlock buffer;
     ibv_mr* mr;
@@ -72,7 +71,6 @@ class CompChannelTest : public BasicFixture {
       return context_or.status();
     }
     ASSIGN_OR_RETURN(setup.context, context_or);
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -109,7 +107,7 @@ class CompChannelTest : public BasicFixture {
     if (!setup.remote.qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp, setup.port_gid);
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp));
     return setup;
   }
 
@@ -210,22 +208,16 @@ TEST_F(CompChannelTest, RequestNotificationOnCqWithoutCompChannel) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_create_cq(context, 10, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
-  int result = ibv_req_notify_cq(cq, kNotifyAny);
-  if (!Introspection().ShouldDeviateForCurrentTest()) {
-    ASSERT_THAT(result, Ne(0));
-  }
+  ASSERT_THAT(ibv_req_notify_cq(cq, kNotifyAny), Ne(0));
   ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 
 TEST_F(CompChannelTest, RequestNotificationInvalidCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "allows request notification with invalid cq.";
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
   ASSERT_THAT(cq, NotNull());
   HandleGarble garble(cq->handle);
-  ASSERT_THAT(ibv_req_notify_cq(cq, kNotifyAny), AnyOf(ENOENT, EFAULT));
+  ASSERT_THAT(ibv_req_notify_cq(cq, kNotifyAny), AnyOf(ENOENT, EFAULT, EINVAL));
 }
 
 TEST_F(CompChannelTest, Atomic) {
@@ -374,10 +366,14 @@ TEST_F(CompChannelTest, MuxOntoSingleChannel) {
   for (int i = 0; i < kNumberOfPairs; ++i) {
     QpPair new_pair;
     new_pair.cq1 = ibv_.CreateCq(setup.context, kCqMaxWr, channel);
+    ASSERT_THAT(new_pair.cq1, NotNull());
     new_pair.cq2 = ibv_.CreateCq(setup.context, kCqMaxWr, channel);
+    ASSERT_THAT(new_pair.cq2, NotNull());
     new_pair.qp1 = ibv_.CreateQp(setup.pd, new_pair.cq1);
+    ASSERT_THAT(new_pair.qp1, NotNull());
     new_pair.qp2 = ibv_.CreateQp(setup.pd, new_pair.cq2);
-    ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2, setup.port_gid);
+    ASSERT_THAT(new_pair.qp2, NotNull());
+    ASSERT_OK(ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2));
     qps.push_back(new_pair);
   }
   for (auto& pair : qps) {

@@ -20,7 +20,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/flags.h"
 #include "public/introspection.h"
@@ -32,7 +32,7 @@ namespace rdma_unit_test {
 
 using ::testing::NotNull;
 
-class AhTest : public BasicFixture {
+class AhTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
@@ -59,9 +59,6 @@ TEST_F(AhTest, CreateAh) {
 }
 
 TEST_F(AhTest, DeregInvalidAh) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "transport handling of unknown AH will crash.";
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
   HandleGarble garble(ah->handle);
@@ -73,11 +70,7 @@ TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
   ASSERT_THAT(ah, NotNull());
   int result = ibv_.DeallocPd(setup.pd);
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(result, 0);
-  } else {
-    EXPECT_EQ(result, EBUSY);
-  }
+  EXPECT_EQ(result, EBUSY);
 }
 
 }  // namespace rdma_unit_test

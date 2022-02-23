@@ -25,7 +25,7 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
@@ -34,7 +34,7 @@ namespace rdma_unit_test {
 
 using ::testing::NotNull;
 
-class StressTest : public BasicFixture {
+class StressTest : public RdmaVerbsFixture {
  public:
   static constexpr char kRequestorMemContent = 'a';
   static constexpr char kResponderMemContent = 'b';
@@ -103,7 +103,7 @@ class StressTest : public BasicFixture {
       if (!pair.responder) {
         return absl::InternalError("Failed to create responder qp.");
       }
-      ibv_.SetUpLoopbackRcQps(pair.requestor, pair.responder, setup.port_gid);
+      RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(pair.requestor, pair.responder));
       qps.emplace_back(pair);
     }
     return qps;
@@ -133,15 +133,16 @@ class StressTest : public BasicFixture {
     absl::Span<uint8_t> resp_buf = responder.buffer.subspan(
         (wr_id * op_size) % responder.buffer.size(), op_size);
     ibv_send_wr wr;
+    ibv_sge sge;
     switch (opcode) {
       case IBV_WR_RDMA_READ: {
-        ibv_sge sge = verbs_util::CreateSge(req_buf, requestor.mr);
+        sge = verbs_util::CreateSge(req_buf, requestor.mr);
         wr = verbs_util::CreateReadWr(wr_id, &sge, /*num_sge=*/1,
                                       resp_buf.data(), responder.mr->rkey);
         break;
       }
       case IBV_WR_RDMA_WRITE: {
-        ibv_sge sge = verbs_util::CreateSge(req_buf, requestor.mr);
+        sge = verbs_util::CreateSge(req_buf, requestor.mr);
         wr = verbs_util::CreateWriteWr(wr_id, &sge, /*num_sge=*/1,
                                        resp_buf.data(), responder.mr->rkey);
         break;
@@ -169,11 +170,11 @@ class StressTest : public BasicFixture {
     uint32_t total_outstanding = 0;
     uint32_t total_completion = 0;
 
-    const absl::Duration kTimeout = absl::Seconds(100);
-    absl::Time stop = absl::Now() + kTimeout;
+    const absl::Duration kTimeout = absl::Seconds(20);
+    absl::Time last_completion_time = absl::Now();
     uint32_t rr_next = 0;
     while ((total_remaining_ops > 0 || total_outstanding > 0) &&
-           absl::Now() < stop) {
+           ((absl::Now() - last_completion_time) < kTimeout)) {
       // Poll completion.
       ibv_wc wc;
       if (total_outstanding > 0 && ibv_poll_cq(cq, 1, &wc) > 0) {
@@ -181,6 +182,7 @@ class StressTest : public BasicFixture {
         --outstanding_ops[ExtractQpIndex(wc.wr_id)];
         --total_outstanding;
         ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+        last_completion_time = absl::Now();
       }
 
       // Post next WR.

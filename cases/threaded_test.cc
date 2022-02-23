@@ -24,8 +24,8 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
-#include "internal/verbs_extension_interface.h"
+#include "cases/rdma_verbs_fixture.h"
+#include "internal/verbs_extension.h"
 #include "public/flags.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -41,7 +41,7 @@ using ::testing::NotNull;
 // creating/destroying MR/MW/PD/CQ/etc in multiple threads. For more complex
 // multithreaded test, we still put them in the test files corresponding to each
 // individual resource being test (e.g. mw_test.cc).
-class ThreadedTest : public BasicFixture {
+class ThreadedTest : public RdmaVerbsFixture {
  protected:
   static constexpr int kThreadCount = 5;
   static constexpr int kResourcePerThread = 100;
@@ -100,8 +100,8 @@ TEST_F(ThreadedTest, CreateDestroyAh) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &results]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_ah* ah = ibv_.Extensions()->CreateAh(setup.pd, setup.port_gid,
-                                                 setup.port_gid.gid);
+        ibv_ah* ah = ibv_.extension()->CreateAh(setup.pd, setup.port_gid,
+                                                setup.port_gid.gid);
         ASSERT_THAT(ah, NotNull());
         results[thread_id][i] = ibv_destroy_ah(ah);
       }
@@ -199,13 +199,13 @@ TEST_F(ThreadedTest, RegDeregMr) {
   std::fill(results.front().begin(), results.back().end(), 1);
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
+    pool.Add([this, setup, thread_id, &results]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_mr* mr =
-            ibv_reg_mr(setup.pd, setup.buffer.data(), setup.buffer.size(),
-                       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                           IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
-                           IBV_ACCESS_MW_BIND);
+        ibv_mr* mr = ibv_.extension()->RegMr(
+            setup.pd, setup.buffer,
+            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
+                IBV_ACCESS_MW_BIND);
         ASSERT_THAT(mr, NotNull());
         results[thread_id][i] = ibv_dereg_mr(mr);
       }
@@ -263,7 +263,7 @@ TEST_F(ThreadedTest, CreateDestroyQp) {
                                    .cap = verbs_util::DefaultQpCap(),
                                    .qp_type = IBV_QPT_RC,
                                    .sq_sig_all = 0};
-        ibv_qp* qp = ibv_.Extensions()->CreateQp(setup.pd, init_attr);
+        ibv_qp* qp = ibv_.extension()->CreateQp(setup.pd, init_attr);
         ASSERT_THAT(qp, NotNull());
         results[thread_id][i] = ibv_destroy_qp(qp);
       }
@@ -312,8 +312,8 @@ TEST_F(ThreadedTest, CreateAh) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &ahs]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ahs[thread_id][i] = ibv_.Extensions()->CreateAh(
-            setup.pd, setup.port_gid, setup.port_gid.gid);
+        ahs[thread_id][i] = ibv_.extension()->CreateAh(setup.pd, setup.port_gid,
+                                                       setup.port_gid.gid);
       }
     });
   }
@@ -408,13 +408,13 @@ TEST_F(ThreadedTest, RegMr) {
   std::fill(mrs.front().begin(), mrs.back().end(), nullptr);
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &mrs]() {
+    pool.Add([this, setup, thread_id, &mrs]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        mrs[thread_id][i] =
-            ibv_reg_mr(setup.pd, setup.buffer.data(), setup.buffer.size(),
-                       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                           IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
-                           IBV_ACCESS_MW_BIND);
+        mrs[thread_id][i] = ibv_.extension()->RegMr(
+            setup.pd, setup.buffer,
+            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
+                IBV_ACCESS_MW_BIND);
       }
     });
   }
@@ -470,7 +470,7 @@ TEST_F(ThreadedTest, CreateQp) {
                                    .cap = verbs_util::DefaultQpCap(),
                                    .qp_type = IBV_QPT_RC,
                                    .sq_sig_all = 0};
-        qps[thread_id][i] = ibv_.Extensions()->CreateQp(setup.pd, init_attr);
+        qps[thread_id][i] = ibv_.extension()->CreateQp(setup.pd, init_attr);
       }
     });
   }

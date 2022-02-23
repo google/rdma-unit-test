@@ -21,7 +21,7 @@
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -37,7 +37,7 @@ using ::testing::Pair;
 
 // For testing the functions of verbs on different buffer memory layouts, e.g.
 // MW memory out of bounds, 0 length buffers for MW/MRs, etc.
-class BufferTest : public BasicFixture {
+class BufferTest : public RdmaVerbsFixture {
  public:
   // Memory layout
   //                  buffer
@@ -78,6 +78,9 @@ class BufferTest : public BasicFixture {
 };
 
 TEST_F(BufferTest, RegisterZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, buffer);
@@ -129,7 +132,7 @@ class BufferMrTest : public BufferTest {
     if (!setup.recv_qp) {
       return absl::InternalError("Failed to create recv qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp, setup.port_gid);
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp));
     return setup;
   }
 };
@@ -145,6 +148,9 @@ TEST_F(BufferMrTest, SendZeroByte) {
 }
 
 TEST_F(BufferMrTest, SendZeroByteFromZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, mr_buffer);
@@ -204,9 +210,7 @@ TEST_F(BufferMrTest, ReadZeroByte) {
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteOutsideMr) {
@@ -216,12 +220,13 @@ TEST_F(BufferMrTest, ReadZeroByteOutsideMr) {
   absl::Span<uint8_t> remote_buffer = setup.buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteFromZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock zerobyte_mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* zerobyte_mr = ibv_.RegMr(setup.pd, zerobyte_mr_buffer);
@@ -230,12 +235,13 @@ TEST_F(BufferMrTest, ReadZeroByteFromZeroByteMr) {
   absl::Span<uint8_t> remote_buffer = zerobyte_mr_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteOutsideZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock zerobyte_mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* zerobyte_mr = ibv_.RegMr(setup.pd, zerobyte_mr_buffer);
@@ -245,9 +251,7 @@ TEST_F(BufferMrTest, ReadZeroByteOutsideZeroByteMr) {
   absl::Span<uint8_t> remote_buffer = zerobyte_mr_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteInvalidRKey) {
@@ -258,11 +262,7 @@ TEST_F(BufferMrTest, ReadZeroByteInvalidRKey) {
       ibv_wc_status result,
       verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                            remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(result, IBV_WC_LOC_QP_OP_ERR);
-  } else {
     EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
-  }
 }
 
 TEST_F(BufferMrTest, WriteExceedFront) {
@@ -315,6 +315,9 @@ TEST_F(BufferMrTest, WriteZeroByteOutsideMr) {
 }
 
 TEST_F(BufferMrTest, WriteZeroByteToZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock zerobyte_mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* zerobyte_mr = ibv_.RegMr(setup.pd, zerobyte_mr_buffer);
@@ -327,6 +330,9 @@ TEST_F(BufferMrTest, WriteZeroByteToZeroByteMr) {
 }
 
 TEST_F(BufferMrTest, WriteZeroByteOutsideZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock zerobyte_mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* zerobyte_mr = ibv_.RegMr(setup.pd, zerobyte_mr_buffer);
@@ -347,17 +353,14 @@ TEST_F(BufferMrTest, WriteZeroByteInvalidRKey) {
       ibv_wc_status result,
       verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
                             remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_EQ(result, IBV_WC_LOC_QP_OP_ERR);
-  } else {
     EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
-  }
 }
 
 class BufferMwTest : public BufferMrTest,
                      public ::testing::WithParamInterface<ibv_mw_type> {
  public:
   void SetUp() override {
+    BasicFixture::SetUp();
     if (GetParam() == IBV_MW_TYPE_1 && !Introspection().SupportsType1()) {
       GTEST_SKIP() << "Nic does not support Type1 MW";
     }
@@ -397,9 +400,7 @@ TEST_P(BufferMwTest, BindExceedFront) {
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   EXPECT_THAT(mw, NotNull());
   EXPECT_THAT(DoBind(setup, mw, invalid_buffer),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_SUCCESS
-                               : IBV_WC_MW_BIND_ERR));
+              IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
 
 TEST_P(BufferMwTest, BindExceedRear) {
@@ -412,9 +413,7 @@ TEST_P(BufferMwTest, BindExceedRear) {
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
   ASSERT_THAT(mw, NotNull());
   EXPECT_THAT(DoBind(setup, mw, invalid_buffer),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_SUCCESS
-                               : IBV_WC_MW_BIND_ERR));
+              IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
 
 TEST_P(BufferMwTest, BindZeroByteFront) {
@@ -455,6 +454,9 @@ TEST_P(BufferMwTest, BindZeroByteOutsideFront) {
 }
 
 TEST_P(BufferMwTest, BindZeroByteInZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, buffer);
@@ -465,6 +467,9 @@ TEST_P(BufferMwTest, BindZeroByteInZeroByteMr) {
 }
 
 TEST_P(BufferMwTest, BindZeroByteOutsideZeroByteMr) {
+  if (!Introspection().SupportsZeroLengthMr()) {
+    GTEST_SKIP() << "NIC does not support zero length mr.";
+  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   RdmaMemBlock mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
   ibv_mr* mr = ibv_.RegMr(setup.pd, mr_buffer);
@@ -534,9 +539,7 @@ TEST_P(BufferMwTest, ReadZeroByte) {
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_P(BufferMwTest, ReadZeroByteOutsideMw) {
@@ -553,9 +556,7 @@ TEST_P(BufferMwTest, ReadZeroByteOutsideMw) {
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_P(BufferMwTest, ReadZeroByteFromZeroByteMw) {
@@ -572,9 +573,7 @@ TEST_P(BufferMwTest, ReadZeroByteFromZeroByteMw) {
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_P(BufferMwTest, ReadZeroByteOutsideZeroByteMw) {
@@ -591,9 +590,7 @@ TEST_P(BufferMwTest, ReadZeroByteOutsideZeroByteMw) {
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
   EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(Introspection().ShouldDeviateForCurrentTest()
-                               ? IBV_WC_LOC_QP_OP_ERR
-                               : IBV_WC_SUCCESS));
+              IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_P(BufferMwTest, WriteExceedFront) {

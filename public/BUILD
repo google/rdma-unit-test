@@ -1,3 +1,17 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Public Interface for rdma unit tests:
 # Note: These are the target directly referenced by test fixtures and test cases.
 
@@ -29,7 +43,7 @@ cc_library(
         ":verbs_util",
         "//internal:introspection_registrar",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -90,12 +104,10 @@ cc_library(
         ":flags",
         ":page_size",
         ":rdma_memblock",
+        ":status_matchers",
         ":verbs_util",
-        "//internal:roce_backend",
-        "//internal:roce_extension",
-        "//internal:verbs_backend",
         "//internal:verbs_cleanup",
-        "//internal:verbs_extension_interface",
+        "//internal:verbs_extension",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -103,6 +115,7 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@libibverbs",
     ],
@@ -114,6 +127,7 @@ cc_library(
     srcs = ["status_matchers.cc"],
     hdrs = ["status_matchers.h"],
     deps = [
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",

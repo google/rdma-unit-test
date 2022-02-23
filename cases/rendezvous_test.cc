@@ -36,7 +36,7 @@
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -660,7 +660,7 @@ class RpcServer : public RpcBase {
 // Set of tests to simulate expected RPC Rendezvous.
 // The Rpc client/server strike a balance between resource sharing and
 // complexity to somewhat approximate production use.
-class RendezvousTest : public BasicFixture {
+class RendezvousTest : public RdmaVerbsFixture {
  public:
   static constexpr int kControlPages = 4;
   static constexpr int kRpcSize = kPageSize;

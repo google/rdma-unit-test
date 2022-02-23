@@ -25,7 +25,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -39,7 +39,7 @@ using ::testing::AnyOf;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class QpTest : public BasicFixture {
+class QpTest : public RdmaVerbsFixture {
  public:
   int InitRcQP(ibv_qp* qp) const {
     ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
@@ -216,9 +216,7 @@ TEST_F(QpTest, UnknownType) {
   ibv_qp_init_attr attr = setup.basic_attr;
   attr.qp_type = static_cast<ibv_qp_type>(0xf0);
   ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
-  if (!Introspection().ShouldDeviateForCurrentTest()) {
-    EXPECT_THAT(qp, IsNull());
-  }
+  EXPECT_THAT(qp, IsNull());
 }
 
 TEST_F(QpTest, CreateUd) {
@@ -463,7 +461,7 @@ TEST_F(QpTest, DestroyInvalidQp) {
 // WR when QP is in different state. The expectation is set based on the IBTA
 // spec, but some low level drivers will deviate from the spec for better
 // performance. See specific testcases for explanation.
-class QpStateTest : public BasicFixture {
+class QpStateTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context = nullptr;
@@ -615,7 +613,7 @@ TEST_F(QpStateTest, PostRecvRtr) {
 
 TEST_F(QpStateTest, PostSendErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
   ASSERT_OK(ibv_.SetQpError(setup.local_qp));
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_ERR);
   ASSERT_OK_AND_ASSIGN(
@@ -627,7 +625,7 @@ TEST_F(QpStateTest, PostSendErr) {
 
 TEST_F(QpStateTest, PostRecvErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
   ASSERT_OK(ibv_.SetQpError(setup.remote_qp));
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
@@ -676,7 +674,7 @@ TEST_F(QpStateTest, RtsSendToRtr) {
 
 TEST_F(QpStateTest, ModRtsToError) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
   ibv_qp_attr attr;
   attr.qp_state = IBV_QPS_ERR;
   ibv_qp_attr_mask attr_mask = IBV_QP_STATE;
@@ -686,7 +684,7 @@ TEST_F(QpStateTest, ModRtsToError) {
 
 // This is a set of test that test the response (in particular error code) of
 // the QP when posting.
-class QpPostTest : public BasicFixture {
+class QpPostTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context = nullptr;
@@ -726,7 +724,7 @@ class QpPostTest : public BasicFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.qp, setup.remote_qp, setup.port_gid);
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.qp, setup.remote_qp));
     setup.buffer = ibv_.AllocBuffer(/*pages=*/1);
     setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
     if (!setup.mr) {
@@ -748,11 +746,7 @@ class QpPostTest : public BasicFixture {
 };
 
 TEST_F(QpPostTest, OverflowSendWr) {
-  if (!Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-
   // Issue enough commands to overflow the queue.
   ibv_send_wr wqe = DummySend();
   int max_send_wr = setup.init_attr.cap.max_send_wr;

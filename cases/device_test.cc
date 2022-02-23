@@ -23,7 +23,7 @@
 #include "gtest/gtest.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -33,7 +33,7 @@ namespace rdma_unit_test {
 
 using ::testing::NotNull;
 
-class DeviceTest : public BasicFixture {};
+class DeviceTest : public RdmaVerbsFixture {};
 
 TEST_F(DeviceTest, GetDeviceList) {
   int num_devices = 0;
@@ -110,9 +110,6 @@ class DeviceLimitTest : public DeviceTest {
 };
 
 TEST_F(DeviceLimitTest, MaxAh) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());
@@ -132,37 +129,23 @@ TEST_F(DeviceLimitTest, MaxAh) {
   EXPECT_LE(std::abs(max_ah - actual_max), kErrorMax);
 }
 
-TEST_F(DeviceLimitTest, MaxCq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
+TEST_F(DeviceLimitTest, MaxCqMixed) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   int max_cq = Introspection().device_attr().max_cq;
   int actual_max = 0;
   for (int i = 0; i < max_cq + kErrorMax + 10; ++i) {
-    if (ibv_.CreateCq(context) != nullptr) {
-      ++actual_max;
+    if (i & 1 || !Introspection().SupportsExtendedCqs()) {
+      if (ibv_.CreateCq(context) != nullptr) {
+        ++actual_max;
+      } else {
+        break;
+      }
     } else {
-      break;
-    }
-  }
-  LOG(INFO) << "max_cq = " << max_cq;
-  LOG(INFO) << "max_cq (actual) = " << actual_max;
-  EXPECT_LE(std::abs(max_cq - actual_max), kErrorMax);
-}
-
-TEST_F(DeviceLimitTest, MaxCqEx) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
-  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  int max_cq = Introspection().device_attr().max_cq;
-  int actual_max = 0;
-  for (int i = 0; i < max_cq + kErrorMax + 10; ++i) {
-    if (ibv_.CreateCqEx(context) != nullptr) {
-      ++actual_max;
-    } else {
-      break;
+      if (ibv_.CreateCqEx(context) != nullptr) {
+        ++actual_max;
+      } else {
+        break;
+      }
     }
   }
   LOG(INFO) << "max_cq = " << max_cq;
@@ -171,9 +154,6 @@ TEST_F(DeviceLimitTest, MaxCqEx) {
 }
 
 TEST_F(DeviceLimitTest, MaxMr) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   RdmaMemBlock buffer = ibv_.AllocBuffer(/*pages=*/1);
   ibv_pd* pd = ibv_.AllocPd(context);
@@ -193,9 +173,6 @@ TEST_F(DeviceLimitTest, MaxMr) {
 }
 
 TEST_F(DeviceLimitTest, MaxMw) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());
@@ -214,9 +191,6 @@ TEST_F(DeviceLimitTest, MaxMw) {
 }
 
 TEST_F(DeviceLimitTest, MaxPd) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   int max_pd = Introspection().device_attr().max_pd;
   int actual_max = 0;
@@ -233,9 +207,6 @@ TEST_F(DeviceLimitTest, MaxPd) {
 }
 
 TEST_F(DeviceLimitTest, MaxQp) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_cq* cq = ibv_.CreateCq(context);
   ASSERT_THAT(cq, NotNull());
@@ -256,9 +227,6 @@ TEST_F(DeviceLimitTest, MaxQp) {
 }
 
 TEST_F(DeviceLimitTest, MaxSrq) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());

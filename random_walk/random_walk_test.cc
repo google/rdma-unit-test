@@ -26,6 +26,13 @@ namespace rdma_unit_test {
 namespace random_walk {
 
 class RandomWalkTest : public testing::Test {
+ public:
+  RandomWalkTest() {
+  }
+
+  ~RandomWalkTest() {
+  }
+
  protected:
   static void SetUpTestSuite() {
     Introspection();

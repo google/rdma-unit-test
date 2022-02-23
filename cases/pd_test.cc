@@ -22,8 +22,10 @@
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/loopback_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -37,7 +39,7 @@ using ::testing::AnyOf;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class PdTest : public BasicFixture {
+class PdTest : public RdmaVerbsFixture {
  protected:
   static constexpr size_t kBufferMemoryPages = 1;
 };
@@ -49,7 +51,6 @@ TEST_F(PdTest, OpenPd) {
 }
 
 TEST_F(PdTest, DeleteInvalidPd) {
-  if (Introspection().ShouldDeviateForCurrentTest()) GTEST_SKIP();
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
   HandleGarble garble(pd->handle);
@@ -83,7 +84,7 @@ TEST_F(PdTest, AllocMwWithInvalidPd) {
   EXPECT_THAT(ibv_.AllocMw(pd, IBV_MW_TYPE_1), IsNull());
 }
 
-class PdBindTest : public BasicFixture,
+class PdBindTest : public LoopbackFixture,
                    public ::testing::WithParamInterface<ibv_mw_type> {
  public:
   void SetUp() override {
@@ -98,78 +99,46 @@ class PdBindTest : public BasicFixture,
  protected:
   static constexpr uint32_t kType2RKey = 1024;
   static constexpr uint32_t kClientMemoryPages = 1;
-
-  struct BasicSetup {
-    RdmaMemBlock buffer;
-    verbs_util::PortGid port_gid;
-    ibv_context* context;
-    ibv_cq* cq;
-    ibv_pd* qp_pd;
-    ibv_pd* other_pd;
-    ibv_qp* qp;
-  };
-
-  absl::StatusOr<BasicSetup> CreateBasicSetup() {
-    BasicSetup setup;
-    setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
-    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
-    setup.cq = ibv_.CreateCq(setup.context);
-    if (!setup.cq) {
-      return absl::InternalError("Failed to create cq.");
-    }
-    setup.qp_pd = ibv_.AllocPd(setup.context);
-    if (!setup.qp_pd) {
-      return absl::InternalError("Failed to create the qp's pd.");
-    }
-    setup.other_pd = ibv_.AllocPd(setup.context);
-    if (!setup.other_pd) {
-      return absl::InternalError("Failed to create the other pd.");
-    }
-    setup.qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
-    if (!setup.qp) {
-      return absl::InternalError("Failed to create qp.");
-    }
-    ibv_.SetUpSelfConnectedRcQp(setup.qp, setup.port_gid);
-    return setup;
-  }
 };
 
 TEST_P(PdBindTest, MwOnOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
-  ASSERT_THAT(mr, NotNull());
-  ibv_mw* mw = ibv_.AllocMw(setup.other_pd, GetParam());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ibv_pd* alternate_pd = ibv_.AllocPd(setup.context);
+  ASSERT_THAT(alternate_pd, NotNull());
+  ibv_mw* mw = ibv_.AllocMw(alternate_pd, GetParam());
   ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
     // succcess/failure of the bind and if successful than check for completion.
     ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
-        /*wr_id=*/1, setup.buffer.span(), mr,
+        /*wr_id=*/1, setup.buffer.span(), setup.mr,
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
-    int result = ibv_bind_mw(setup.qp, mw, &bind_args);
+    int result = ibv_bind_mw(setup.remote_qp, mw, &bind_args);
     EXPECT_THAT(result, AnyOf(0, EPERM));
     if (result == 0) {
-      ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                           verbs_util::WaitForCompletion(setup.qp->send_cq));
+      ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(
+                                                  setup.remote_qp->send_cq));
       if (completion.status == IBV_WC_SUCCESS) {
         EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
       }
     }
 
   } else {
-    EXPECT_THAT(verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
-                                            kType2RKey, mr),
-                IsOkAndHolds(IBV_WC_MW_BIND_ERR));
+    EXPECT_THAT(
+        verbs_util::BindType2MwSync(setup.remote_qp, mw, setup.buffer.span(),
+                                    kType2RKey, setup.mr),
+        IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
 }
 
 TEST_P(PdBindTest, MrOnOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.other_pd, setup.buffer);
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ibv_pd* alternate_pd = ibv_.AllocPd(setup.context);
+  ASSERT_THAT(alternate_pd, NotNull());
+  ibv_mr* mr = ibv_.RegMr(alternate_pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
-  ibv_mw* mw = ibv_.AllocMw(setup.qp_pd, GetParam());
+  ibv_mw* mw = ibv_.AllocMw(alternate_pd, GetParam());
   ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
@@ -178,11 +147,11 @@ TEST_P(PdBindTest, MrOnOtherPd) {
         /*wr_id=*/1, setup.buffer.span(), mr,
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
-    int result = ibv_bind_mw(setup.qp, mw, &bind_args);
+    int result = ibv_bind_mw(setup.remote_qp, mw, &bind_args);
     EXPECT_THAT(result, AnyOf(0, EPERM));
     if (result == 0) {
-      ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                           verbs_util::WaitForCompletion(setup.qp->send_cq));
+      ASSERT_OK_AND_ASSIGN(ibv_wc completion, verbs_util::WaitForCompletion(
+                                                  setup.remote_qp->send_cq));
       if (completion.status == IBV_WC_SUCCESS) {
         EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
       }
@@ -190,31 +159,35 @@ TEST_P(PdBindTest, MrOnOtherPd) {
   } else {
     ASSERT_OK_AND_ASSIGN(
         ibv_wc_status status,
-        verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
+        verbs_util::BindType2MwSync(setup.remote_qp, mw, setup.buffer.span(),
                                     kType2RKey, mr));
     EXPECT_EQ(status, IBV_WC_MW_BIND_ERR);
   }
 }
 
 TEST_P(PdBindTest, MrMwOnOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.other_pd, setup.buffer);
-  ibv_mw* mw = ibv_.AllocMw(setup.other_pd, GetParam());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ibv_pd* alternate_pd = ibv_.AllocPd(setup.context);
+  ASSERT_THAT(alternate_pd, NotNull());
+  ibv_mr* mr = ibv_.RegMr(alternate_pd, setup.buffer);
+  ASSERT_THAT(mr, NotNull());
+  ibv_mw* mw = ibv_.AllocMw(alternate_pd, GetParam());
+  ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
-    EXPECT_THAT(
-        verbs_util::BindType1MwSync(setup.qp, mw, setup.buffer.span(), mr),
-        IsOkAndHolds(IBV_WC_MW_BIND_ERR));
+    EXPECT_THAT(verbs_util::BindType1MwSync(setup.remote_qp, mw,
+                                            setup.buffer.span(), mr),
+                IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   } else {
-    EXPECT_THAT(verbs_util::BindType2MwSync(setup.qp, mw, setup.buffer.span(),
-                                            kType2RKey, mr),
+    EXPECT_THAT(verbs_util::BindType2MwSync(
+                    setup.remote_qp, mw, setup.buffer.span(), kType2RKey, mr),
                 IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(PdBindTestCases, PdBindTest,
+INSTANTIATE_TEST_SUITE_P(PdBindTestCase, PdBindTest,
                          ::testing::Values(IBV_MW_TYPE_1, IBV_MW_TYPE_2));
 
-class PdRcLoopbackMrTest : public BasicFixture {
+class PdRcLoopbackMrTest : public RdmaVerbsFixture {
  protected:
   static constexpr uint32_t kClientMemoryPages = 1;
   static constexpr uint64_t kCompareAdd = 1;
@@ -261,7 +234,7 @@ class PdRcLoopbackMrTest : public BasicFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
     return setup;
   }
 };
@@ -315,10 +288,6 @@ TEST_F(PdRcLoopbackMrTest, SendMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -336,10 +305,6 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -357,10 +322,6 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -378,10 +339,6 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -399,10 +356,6 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -422,10 +375,6 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -445,10 +394,6 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -468,10 +413,6 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -490,7 +431,7 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
-class PdUdLoopbackTest : public BasicFixture {
+class PdUdLoopbackTest : public RdmaVerbsFixture {
  public:
   void SetUp() override {
     if (!Introspection().SupportsUdQp()) {
@@ -543,7 +484,7 @@ class PdUdLoopbackTest : public BasicFixture {
     if (!setup.local_qp) {
       return absl::InternalError("Failed to create local qp.");
     }
-    absl::Status status = ibv_.SetUpUdQp(setup.local_qp, setup.port_gid, kQKey);
+    absl::Status status = ibv_.SetUpUdQp(setup.local_qp, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up local ud qp.");
     }
@@ -553,7 +494,7 @@ class PdUdLoopbackTest : public BasicFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    status = ibv_.SetUpUdQp(setup.remote_qp, setup.port_gid, kQKey);
+    status = ibv_.SetUpUdQp(setup.remote_qp, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up remote ud qp.");
     }
@@ -562,9 +503,6 @@ class PdUdLoopbackTest : public BasicFixture {
 };
 
 TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_ah* ah = ibv_.CreateAh(setup.other_pd, setup.port_gid.gid);
   ASSERT_THAT(ah, NotNull());
@@ -586,7 +524,7 @@ TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
   EXPECT_THAT(completion.status, AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_SUCCESS));
 }
 
-class PdType1MwTest : public BasicFixture {
+class PdType1MwTest : public LoopbackFixture {
  public:
   void SetUp() override {
     if (!Introspection().SupportsType1()) {
@@ -594,84 +532,53 @@ class PdType1MwTest : public BasicFixture {
     }
   }
 
+  absl::StatusOr<ibv_mw*> CreateMwWithAlternatePd(BasicSetup& setup) {
+    ibv_pd* alternate_pd = ibv_.AllocPd(setup.context);
+    if (alternate_pd == nullptr) {
+      return absl::InternalError("Fail to allocate pd.");
+    }
+    ibv_mr* mr = ibv_.RegMr(alternate_pd, setup.buffer);
+    if (mr == nullptr) {
+      return absl::InternalError("Fail to register mr.");
+    }
+    ibv_mw* mw = ibv_.AllocMw(alternate_pd, IBV_MW_TYPE_1);
+    if (mw == nullptr) {
+      return absl::InternalError("Failed to allocate mw.");
+    }
+    ibv_qp* local_qp = ibv_.CreateQp(alternate_pd, setup.cq);
+    if (local_qp == nullptr) {
+      return absl::InternalError("Cannot create qp.");
+    }
+    ibv_qp* remote_qp = ibv_.CreateQp(alternate_pd, setup.cq);
+    if (remote_qp == nullptr) {
+      return absl::InternalError("Cannot create qp.");
+    }
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp));
+    absl::StatusOr<ibv_wc_status> result =
+        verbs_util::BindType1MwSync(remote_qp, mw, setup.buffer.span(), mr);
+    if (!result.ok()) {
+      return result.status();
+    }
+    if (result.value() != IBV_WC_SUCCESS) {
+      return absl::InternalError(absl::StrCat("Failed to bind memory windows (",
+                                              result.value(), ")."));
+    }
+    return mw;
+  }
+
  protected:
   static constexpr size_t kClientMemoryPages = 1;
   static constexpr uint64_t kCompareAdd = 1;
   static constexpr uint64_t kSwap = 1;
-
-  struct BasicSetup {
-    RdmaMemBlock buffer;
-    ibv_context* context;
-    verbs_util::PortGid port_gid;
-    ibv_cq* cq;
-    ibv_pd* mw_pd;
-    ibv_mw* mw;
-    ibv_pd* qp_pd;
-    ibv_qp* local_qp;
-    ibv_qp* remote_qp;
-    ibv_mr* mr;
-  };
-
-  absl::StatusOr<BasicSetup> CreateBasicSetup() {
-    BasicSetup setup;
-    setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
-    ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
-    setup.cq = ibv_.CreateCq(setup.context);
-    if (!setup.cq) {
-      return absl::InternalError("Failed to create cq.");
-    }
-    // Create and Bind mw on pd mw_pd.
-    setup.mw_pd = ibv_.AllocPd(setup.context);
-    if (!setup.mw_pd) {
-      return absl::InternalError("Failed to allocate the mw's pd");
-    }
-    setup.mw = ibv_.AllocMw(setup.mw_pd, IBV_MW_TYPE_1);
-    if (!setup.mw) {
-      return absl::InternalError("Failed to allocate mw.");
-    }
-    ibv_mr* mr = ibv_.RegMr(setup.mw_pd, setup.buffer);
-    if (!mr) {
-      return absl::InternalError("Failed to register bind mr.");
-    }
-    ibv_qp* bind_qp = ibv_.CreateQp(setup.mw_pd, setup.cq);
-    if (!bind_qp) {
-      return absl::InternalError("Failed to create qp for bind.");
-    }
-    ibv_.SetUpSelfConnectedRcQp(bind_qp, setup.port_gid);
-    ASSIGN_OR_RETURN(ibv_wc_status status,
-                     verbs_util::BindType1MwSync(bind_qp, setup.mw,
-                                                 setup.buffer.span(), mr));
-    if (status != IBV_WC_SUCCESS) {
-      return absl::InternalError("Failed to bind qp.");
-    }
-    // Create a QP on qp_pd and bring it up. Also create an MR on the same Pd.
-    setup.qp_pd = ibv_.AllocPd(setup.context);
-    if (!setup.qp_pd) {
-      return absl::InternalError("Failed to allocate qp's pd.");
-    }
-    setup.local_qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
-    if (!setup.local_qp) {
-      return absl::InternalError("Failed to local create local qp.");
-    }
-    setup.remote_qp = ibv_.CreateQp(setup.qp_pd, setup.cq);
-    if (!setup.remote_qp) {
-      return absl::InternalError("Failed to local create local qp.");
-    }
-    ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp, setup.port_gid);
-    setup.mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
-    if (!setup.mr) {
-      return absl::InternalError("Failed to create mr.");
-    }
-    return setup;
-  }
 };
 
 TEST_F(PdType1MwTest, ReadMwOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
+
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey);
+      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), mw->rkey);
   verbs_util::PostSend(setup.local_qp, read);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
@@ -679,10 +586,12 @@ TEST_F(PdType1MwTest, ReadMwOtherPd) {
 }
 
 TEST_F(PdType1MwTest, WriteMwOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
+
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey);
+      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), mw->rkey);
   verbs_util::PostSend(setup.local_qp, write);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
@@ -690,11 +599,12 @@ TEST_F(PdType1MwTest, WriteMwOtherPd) {
 }
 
 TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   sge.length = 8;
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey,
+      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), mw->rkey,
       kCompareAdd);
   verbs_util::PostSend(setup.local_qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
@@ -703,11 +613,13 @@ TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
 }
 
 TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
+  ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
+
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   sge.length = 8;
   ibv_send_wr comp_swap = verbs_util::CreateCompSwapWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mw->rkey,
+      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), mw->rkey,
       kCompareAdd, kSwap);
   verbs_util::PostSend(setup.local_qp, comp_swap);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
@@ -715,7 +627,7 @@ TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
-class PdSrqTest : public BasicFixture {
+class PdSrqTest : public RdmaVerbsFixture {
  protected:
   static constexpr size_t kBufferMemoryPages = 1;
 
@@ -754,10 +666,6 @@ TEST_F(PdSrqTest, CreateSrq) {
 
 // When Pd of receive MR matches SRQ but not the receive QP.
 TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
-
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_pd* pd1 = ibv_.AllocPd(setup.context);
   ASSERT_THAT(pd1, NotNull());
@@ -765,9 +673,11 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
   ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
   ASSERT_THAT(srq, NotNull());
-  ibv_qp* qp = ibv_.CreateQp(pd2, setup.cq, srq);
-  ASSERT_THAT(qp, NotNull());
-  ibv_.SetUpSelfConnectedRcQp(qp, setup.port_gid);
+  ibv_qp* local_qp = ibv_.CreateQp(pd2, setup.cq);
+  ASSERT_THAT(local_qp, NotNull());
+  ibv_qp* remote_qp = ibv_.CreateQp(pd2, setup.cq, srq);
+  ASSERT_THAT(remote_qp, NotNull());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp));
   ibv_mr* mr_recv = ibv_.RegMr(pd1, setup.buffer);
   ASSERT_THAT(mr_recv, NotNull());
   ibv_mr* mr_send = ibv_.RegMr(pd2, setup.buffer);
@@ -780,7 +690,7 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
   ibv_sge ssge = verbs_util::CreateSge(setup.buffer.span(), mr_send);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
-  verbs_util::PostSend(qp, send);
+  verbs_util::PostSend(local_qp, send);
 
   for (int i = 0; i < 2; ++i) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
@@ -791,9 +701,6 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
 
 // When Pd of receive MR matches the QP but not the SRQ.
 TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP() << "NIC does not handle PD errors.";
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_cq* send_cq = ibv_.CreateCq(setup.context);
   ibv_cq* recv_cq = ibv_.CreateCq(setup.context);
@@ -807,7 +714,7 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
   ASSERT_THAT(recv_qp, NotNull());
   ibv_qp* send_qp = ibv_.CreateQp(pd2, send_cq);
   ASSERT_THAT(send_qp, NotNull());
-  ibv_.SetUpLoopbackRcQps(send_qp, recv_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(send_qp, recv_qp));
   ibv_mr* mr = ibv_.RegMr(pd2, setup.buffer);
   ASSERT_THAT(mr, NotNull());
 

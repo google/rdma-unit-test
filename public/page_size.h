@@ -29,6 +29,12 @@ namespace rdma_unit_test {
     (defined(__riscv) && __riscv_xlen == 64)
 constexpr size_t kPageShift = 12;          // 4 KB
 constexpr size_t kHugepageShift = 21;      // 2 MB
+#elif defined(__powerpc64__)
+constexpr size_t kPageShift = 16;      // 64 KiB
+constexpr size_t kHugepageShift = 24;  // 16 MiB
+#elif defined(__aarch64__)
+constexpr size_t kPageShift = 12;      // 4 KiB
+constexpr size_t kHugepageShift = 21;  // 2 MiB
 #else
 #error "No page size defined for this architecture"
 #endif

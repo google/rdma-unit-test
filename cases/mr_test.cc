@@ -32,7 +32,7 @@
 #include "absl/synchronization/notification.h"
 
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -45,7 +45,7 @@ namespace rdma_unit_test {
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class MrTest : public BasicFixture {
+class MrTest : public RdmaVerbsFixture {
  public:
   static constexpr int kBufferMemoryPages = 4;
 
@@ -113,9 +113,9 @@ TEST_F(MrTest, ReregMrChangeAddress) {
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
   RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
-                         buffer.data(), buffer.size(), 0),
-            0);
+  ASSERT_EQ(
+      ibv_.ReregMr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr, &buffer, 0),
+      0);
   EXPECT_EQ(mr->addr, buffer.data());
   EXPECT_EQ(mr->length, buffer.size());
 }
@@ -130,7 +130,7 @@ TEST_F(MrTest, ReregMrChangePd) {
   ASSERT_THAT(mr, NotNull());
 
   ibv_pd* pd = ibv_.AllocPd(setup.context);
-  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_PD, pd, nullptr, 0, 0), 0);
+  ASSERT_EQ(ibv_.ReregMr(mr, IBV_REREG_MR_CHANGE_PD, pd, nullptr, 0), 0);
   EXPECT_EQ(mr->pd, pd);
 }
 
@@ -144,7 +144,7 @@ TEST_F(MrTest, ReregMrInvalidPermission) {
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
 
-  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr, 0,
+  ASSERT_EQ(ibv_.ReregMr(mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr,
                          IBV_ACCESS_REMOTE_WRITE),
             IBV_REREG_MR_ERR_CMD);
 }
@@ -158,19 +158,19 @@ TEST_F(MrTest, ReregMrInvalidBuffer) {
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
 
-  ASSERT_EQ(ibv_rereg_mr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
-                         setup.buffer.data(), 0, 0),
-            IBV_REREG_MR_ERR_INPUT);
+  RdmaMemBlock subblock = setup.buffer.subblock(0, 0);
+  ASSERT_EQ(
+      ibv_.ReregMr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr, &subblock, 0),
+      IBV_REREG_MR_ERR_INPUT);
 }
 
 // TODO(author1): Threaded rkey user (IBV_WC_REM_ACCESS_ERR)
 
-class MrLoopbackTest : public BasicFixture {
+class MrLoopbackTest : public RdmaVerbsFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
-  // The tests can issue up to 100 requests across 4 threads.
-  static constexpr int kQueueSize = 400;
-  static constexpr int kQKey = 400;
+  static constexpr int kQueueSize = 200;
+  static constexpr int kQKey = 200;
 
   struct Client {
     ibv_context* context = nullptr;
@@ -215,7 +215,7 @@ class MrLoopbackTest : public BasicFixture {
   absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair() {
     ASSIGN_OR_RETURN(Client local, CreateClient(/*buf_content=*/'a'));
     ASSIGN_OR_RETURN(Client remote, CreateClient(/*buf_content=*/'b'));
-    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_gid);
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
     return std::make_pair(local, remote);
   }
 
@@ -245,10 +245,12 @@ class MrLoopbackTest : public BasicFixture {
       constexpr int kTargetOutstanding = 100;
       int outstanding = 0;
       int total_results = 0;
-      while (!cancel_notification.HasBeenNotified() || outstanding > 0) {
+      bool done = false;
+      while (!done || outstanding > 0) {
         // Submit work.
-        if (!cancel_notification.HasBeenNotified()) {
+        if (!done) {
           if (outstanding + wqes.size() < kTargetOutstanding) {
+            done = cancel_notification.HasBeenNotified();
             ibv_send_wr* bad_wr = nullptr;
             EXPECT_EQ(ibv_post_send(local.qp, wqes.data(), &bad_wr), 0);
             outstanding += wqes.size();
@@ -306,7 +308,7 @@ TEST_F(MrLoopbackTest, ReregMrChangeAccess) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ASSERT_EQ(
-      ibv_rereg_mr(remote.mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr, 0,
+      ibv_.ReregMr(remote.mr, IBV_REREG_MR_CHANGE_ACCESS, nullptr, nullptr,
                    IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE),
       0);
 

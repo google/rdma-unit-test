@@ -69,8 +69,8 @@ class LoopbackUdQpTest : public LoopbackFixture {
     ASSIGN_OR_RETURN(Client remote, CreateClient(IBV_QPT_UD));
     std::fill_n(remote.buffer.data(), remote.buffer.size(),
                 kRemoteBufferContent);
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(local.qp, local.port_gid, kQKey));
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(remote.qp, remote.port_gid, kQKey));
+    RETURN_IF_ERROR(ibv_.SetUpUdQp(local.qp, kQKey));
+    RETURN_IF_ERROR(ibv_.SetUpUdQp(remote.qp, kQKey));
     return std::make_pair(local, remote);
   }
 };
@@ -220,9 +220,6 @@ TEST_F(LoopbackUdQpTest, SendInvalidAh) {
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
@@ -257,9 +254,6 @@ TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
@@ -350,13 +344,15 @@ TEST_F(LoopbackUdQpTest, PollMultipleCqe) {
     EXPECT_EQ(completion.opcode, IBV_WC_RECV);
     EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   }
-
-  // This is inherantly racy, just because recv posted doesn't mean send
-  // completion is there yet.
-  absl::SleepFor(absl::Milliseconds(20));
+  int count = 0;
   ibv_wc result[kNumCompletions + 1];
-  int count = ibv_poll_cq(local.cq, kNumCompletions + 1, result);
-  EXPECT_EQ(kNumCompletions, count)
+  // // This is inherantly racy, just because recv posted doesn't mean send
+  // completion is there yet.  Allow up to 1 second for completions to arrive.
+  absl::Time stop = absl::Now() + absl::Seconds(1);
+  while (count != kNumCompletions && absl::Now() < stop) {
+    count += ibv_poll_cq(local.cq, kNumCompletions + 1, &result[count]);
+  }
+  ASSERT_EQ(kNumCompletions, count)
       << "Missing completions see comment above about potential race.";
   // Spot check last completion.
   ibv_wc& completion = result[kNumCompletions - 1];
@@ -438,7 +434,7 @@ TEST_F(LoopbackUdQpTest, CompareSwap) {
   EXPECT_EQ(completion.wr_id, 1);
 }
 
-class AdvancedLoopbackTest : public BasicFixture {
+class AdvancedLoopbackTest : public RdmaVerbsFixture {
  public:
   struct BasicSetup {
     RdmaMemBlock buffer;
@@ -484,7 +480,7 @@ TEST_F(AdvancedLoopbackTest, RcSendUdRecvFails) {
   ASSERT_THAT(remote_qp, NotNull());
   ASSERT_OK(ibv_.SetUpRcQp(local_qp, setup.port_gid, setup.port_gid.gid,
                            remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetUpUdQp(remote_qp, setup.port_gid, kQKey));
+  ASSERT_OK(ibv_.SetUpUdQp(remote_qp, kQKey));
 
   ibv_sge rsge = verbs_util::CreateSge(
       setup.buffer.span().subspan(0, kPayloadLength + sizeof(ibv_grh)),
@@ -520,7 +516,7 @@ TEST_F(AdvancedLoopbackTest, UdSendToRcFails) {
                     verbs_util::kDefaultMaxWr, verbs_util::kDefaultMaxWr,
                     IBV_QPT_RC, /*sig_all=*/0);
   ASSERT_THAT(remote_qp, NotNull());
-  ASSERT_OK(ibv_.SetUpUdQp(local_qp, setup.port_gid, kQKey));
+  ASSERT_OK(ibv_.SetUpUdQp(local_qp, kQKey));
   ASSERT_OK(ibv_.SetUpRcQp(remote_qp, setup.port_gid, setup.port_gid.gid,
                            local_qp->qp_num));
   ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);

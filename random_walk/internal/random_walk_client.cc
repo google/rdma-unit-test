@@ -1052,7 +1052,7 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
     return absl::StatusCode::kInternal;
   }
   uint32_t qkey = absl::Uniform<uint32_t>(bitgen_);
-  auto status = ibv_.SetUpUdQp(qp, port_gid_, qkey);
+  auto status = ibv_.SetUpUdQp(qp, qkey);
   if (!status.ok()) {
     CHECK_EQ(0, ibv_.DestroyQp(qp));  // Crash ok
     LOG(DFATAL) << "Failed to bring up UD QP (" << status << ").";
@@ -1702,7 +1702,10 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
         return;
       }
       InvalidateOpsTracker::InvalidateWr invalidate = invalidate_opt.value();
-      resource_manager_.EraseRdmaMemory(invalidate.client_id, invalidate.rkey);
+      // RKey might already been invalidated, either by remote deallocation of
+      // MW or by a precedeed invalidation.
+      resource_manager_.TryEraseRdmaMemory(invalidate.client_id,
+                                           invalidate.rkey);
       break;
     }
     case IBV_WC_RECV: {

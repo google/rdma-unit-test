@@ -24,7 +24,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
@@ -40,7 +40,7 @@ using ::testing::Each;
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class SrqTest : public BasicFixture {
+class SrqTest : public RdmaVerbsFixture {
  protected:
   static constexpr int kBufferMemoryPages = 1;
   static constexpr char kSendContent = 'a';
@@ -105,8 +105,7 @@ class SrqTest : public BasicFixture {
     if (!setup.recv_qp) {
       return absl::InternalError("Failed to create recv qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp,
-                            ibv_.GetLocalPortGid(setup.context));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp));
     return setup;
   }
 };
@@ -206,9 +205,6 @@ TEST_F(SrqTest, ExceedsMaxWr) {
 }
 
 TEST_F(SrqTest, ModifyMaxWr) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   if (!Introspection().CheckCapability(IBV_DEVICE_SRQ_RESIZE)) {
     GTEST_SKIP() << "Device does not support SRQ resizing.";
   }
@@ -262,9 +258,6 @@ TEST_F(SrqTest, ExceedsDeviceCap) {
 }
 
 TEST_F(SrqTest, MaxSge) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   uint32_t max_sge = setup.srq_attr.attr.max_sge;
 
@@ -284,9 +277,6 @@ TEST_F(SrqTest, MaxSge) {
 }
 
 TEST_F(SrqTest, ExceedsMaxSge) {
-  if (Introspection().ShouldDeviateForCurrentTest()) {
-    GTEST_SKIP();
-  }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   uint32_t max_sge = setup.srq_attr.attr.max_sge;
 
@@ -373,8 +363,7 @@ class SrqMultiThreadTest : public SrqTest {
     if (!setup.recv_qp) {
       return absl::InternalError("Failed to create recv qp.");
     }
-    ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp,
-                            ibv_.GetLocalPortGid(setup.context));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp));
     return setup;
   }
 };

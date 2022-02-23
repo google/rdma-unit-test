@@ -1,0 +1,79 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto2";
+
+package rdma_unit_test;
+
+option java_multiple_files = true;
+
+message Config {
+  message OperationProfile {
+    // Represents the distribution of operation sizes for each queue pair in a
+    // test. A size at index i in the size_bytes list should have the proportion
+    // at index i in the proportions list. Note that this size disctribution
+    // only applies to Read, Write, and Send ops; atomic ops sizes must always
+    // stay fixed at 8 bytes.
+    message OpSizeProportion {
+      optional int32 size_bytes = 1;
+      optional float proportion = 2;
+    }
+
+    // Configuration information specific to RC qps.
+    message RcOperationProfile {
+      // Represents the distribution of operation types for each queue pair in a
+      // test. For example, write_proportion: .3, read_proportion: .7 would
+      // result in writes for 30% of operations on each queue pair and reads for
+      // 70%.
+      message OpTypeProportions {
+        optional float write_proportion = 1;
+        optional float read_proportion = 2;
+        optional float send_proportion = 3;
+        optional float fetch_add_proportion = 4;
+        optional float comp_swap_proportion = 5;
+      }
+
+      optional int32 num_qps = 1;
+      optional OpTypeProportions op_type_proportions = 2;
+    }
+
+    // Configuration information specific to UD qps.
+    message UdOperationProfile {
+      // Indicates that num_src_qps should each be connected to each of
+      // num_dst_qps.
+      message MultiplexedQps {
+        optional int32 num_src_qps = 1;
+        optional int32 num_dst_qps = 2;
+      }
+
+      oneof qps {
+        int32 num_one_to_one_qps = 1;
+        MultiplexedQps multiplexed_qps = 2;
+      }
+    }
+
+    repeated OpSizeProportion op_size_proportions = 1;
+
+    oneof mode_profile {
+      RcOperationProfile rc_op_profile = 2;
+      UdOperationProfile ud_op_profile = 3;
+    }
+
+    // If true, operations on this QP set can be reordered or dropped. If false,
+    // they will be untouched.
+    optional bool reorder_drop = 4;
+  }
+
+  repeated OperationProfile op_profiles = 1;
+}

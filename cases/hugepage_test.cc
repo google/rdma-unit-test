@@ -1,3 +1,17 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <mntent.h>
 #include <paths.h>
 #include <stdio.h>
@@ -15,7 +29,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/loopback_fixture.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -29,7 +43,7 @@ namespace {
 using ::testing::Each;
 using ::testing::NotNull;
 
-class HugePageTest : public BasicFixture {
+class HugePageTest : public LoopbackFixture {
  public:
   void SetUp() override {
     if (!HugepageEnabled()) {
@@ -41,114 +55,6 @@ class HugePageTest : public BasicFixture {
   }
 
  protected:
-  static constexpr int kBufferMemoryPages = 1;
-  static constexpr int kQueueSize = 200;
-
-  struct Client {
-    ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
-    ibv_pd* pd = nullptr;
-    ibv_cq* cq = nullptr;
-    ibv_qp* qp = nullptr;
-    // UD based tests need a RC QP in order to bind Type1 MW.
-    ibv_qp* control_qp = nullptr;
-    // AH pointing to the other client.
-    ibv_ah* other_ah = nullptr;
-    ibv_mr* mr = nullptr;
-    ibv_mw* type1_mw = nullptr;
-    ibv_mw* type2_mw = nullptr;
-    RdmaMemBlock buffer;
-    ibv_mr* atomic_mr = nullptr;
-    RdmaMemBlock atomic_buffer;
-  };
-
-  absl::StatusOr<Client> CreateClient(uint8_t buf_content = '-') {
-    Client client;
-    client.buffer = ibv_.AllocHugepageBuffer(kBufferMemoryPages);
-    memset(client.buffer.data(), buf_content, client.buffer.size());
-    ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
-    client.port_gid = ibv_.GetLocalPortGid(client.context);
-    client.pd = ibv_.AllocPd(client.context);
-    if (!client.pd) {
-      return absl::InternalError("Failed to allocate pd.");
-    }
-    client.cq = ibv_.CreateCq(client.context);
-    if (!client.cq) {
-      return absl::InternalError("Failed to create cq.");
-    }
-    client.qp =
-        ibv_.CreateQp(client.pd, client.cq, client.cq, nullptr, kQueueSize,
-                      kQueueSize, IBV_QPT_RC, /*sig_all=*/0);
-    if (!client.qp) {
-      return absl::InternalError("Failed to create qp.");
-    }
-    client.control_qp =
-        ibv_.CreateQp(client.pd, client.cq, client.cq, nullptr, kQueueSize,
-                      kQueueSize, IBV_QPT_RC, /*sig_all=*/0);
-    if (!client.control_qp) {
-      return absl::InternalError("Failed to create qp.");
-    }
-    ibv_.SetUpSelfConnectedRcQp(client.control_qp, client.port_gid);
-    // memory setup.
-    client.mr = ibv_.RegMr(client.pd, client.buffer);
-    if (!client.mr) {
-      return absl::InternalError("Failed to register mr.");
-    }
-    client.type1_mw = ibv_.AllocMw(client.pd, IBV_MW_TYPE_1);
-    if (!client.type1_mw) {
-      return absl::InternalError("Failed to allocate type1 mw.");
-    }
-    if (Introspection().SupportsType2()) {
-      client.type2_mw = ibv_.AllocMw(client.pd, IBV_MW_TYPE_2);
-      if (!client.type2_mw) {
-        return absl::InternalError("Failed to open device.");
-      }
-    }
-    return client;
-  }
-
-  absl::Status BindMws(Client& client, uint32_t type2_rkey) {
-    DCHECK(client.control_qp);
-    DCHECK(client.type1_mw);
-    DCHECK(client.mr);
-    DCHECK_EQ(client.control_qp->qp_type, IBV_QPT_RC);
-    DCHECK_EQ(verbs_util::GetQpState(client.control_qp), IBV_QPS_RTS);
-    DCHECK_EQ(verbs_util::GetQpState(client.qp), IBV_QPS_RTS);
-    ASSIGN_OR_RETURN(
-        ibv_wc_status status,
-        verbs_util::BindType1MwSync(client.control_qp, client.type1_mw,
-                                    client.buffer.span(), client.mr));
-    if (status != IBV_WC_SUCCESS) {
-      return absl::InternalError(
-          absl::StrCat("Failed to bind type 1 mw.(", status, ")."));
-    }
-    if (Introspection().SupportsType2()) {
-      ASSIGN_OR_RETURN(ibv_wc_status status_type2,
-                       verbs_util::BindType2MwSync(client.qp, client.type2_mw,
-                                                   client.buffer.span(),
-                                                   type2_rkey, client.mr));
-      if (status_type2 != IBV_WC_SUCCESS) {
-        return absl::InternalError(
-            absl::StrCat("Failed to bind type 2 mw.(", status_type2, ")."));
-      }
-    }
-    return absl::OkStatus();
-  }
-
-  absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair() {
-    ASSIGN_OR_RETURN(Client local, CreateClient(/*buf_content=*/'a'));
-    ASSIGN_OR_RETURN(Client remote, CreateClient(/*buf_content=*/'b'));
-    RETURN_IF_ERROR(SetUpInterconnection(local, remote));
-    RETURN_IF_ERROR(BindMws(local, /*type2_rkey=*/1024));
-    RETURN_IF_ERROR(BindMws(remote, /*type2_rkey=*/2028));
-    return std::make_pair(local, remote);
-  }
-
-  absl::Status SetUpInterconnection(Client& local, Client& remote) {
-    ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, remote.port_gid);
-    return absl::OkStatus();
-  }
-
   static bool HugepageEnabled() {
     struct mntent* mnt;
     FILE* f;
@@ -167,8 +73,10 @@ class HugePageTest : public BasicFixture {
 
 // Send a 1GB chunk from local to remote
 TEST_F(HugePageTest, SendLargeChunk) {
-  Client local, remote;
-  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ASSERT_OK_AND_ASSIGN(Client local, CreateClient());
+  ASSERT_OK_AND_ASSIGN(Client remote, CreateClient());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
+
   // prepare buffer
   RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(/*pages=*/512);
   memset(send_buf.data(), 'a', send_buf.size());
@@ -205,8 +113,9 @@ TEST_F(HugePageTest, SendLargeChunk) {
 
 // Send with mutiple SGEs
 TEST_F(HugePageTest, SendMultipleSge) {
-  Client local, remote;
-  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ASSERT_OK_AND_ASSIGN(Client local, CreateClient());
+  ASSERT_OK_AND_ASSIGN(Client remote, CreateClient());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
   // prepare buffer
   RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(/*pages=*/512);
   memset(send_buf.data(), 'a', send_buf.size());

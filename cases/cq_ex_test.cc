@@ -29,8 +29,8 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
 #include "cases/batch_op_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
@@ -43,7 +43,7 @@ namespace rdma_unit_test {
 using ::testing::IsNull;
 using ::testing::NotNull;
 
-class CqExTest : public BasicFixture {
+class CqExTest : public RdmaVerbsFixture {
  public:
   void SetUp() override {
     if (!Introspection().SupportsExtendedCqs()) {
@@ -263,7 +263,7 @@ TEST_F(CqExOpTest, BasicPollSendCq) {
   ASSERT_THAT(qp_pair.recv_qp, NotNull())
       << "Failed to create recv qp - " << errno;
   qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
   QueueWrite(setup, qp_pair);
 
   // Wait for completion and verify timestamp.
@@ -298,7 +298,7 @@ TEST_F(CqExOpTest, BasicPollRecvCq) {
   ASSERT_THAT(qp_pair.recv_qp, NotNull())
       << "Failed to create recv qp - " << errno;
   qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp, setup.port_gid);
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
   QueueRecv(setup, qp_pair);
   QueueSend(setup, qp_pair);
 
@@ -324,9 +324,10 @@ TEST_F(CqExOpTest, BatchPollSendCq) {
       .wc_flags = GetWcFlags()};
   ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
-      setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
-      kWritesPerQpPair, kQpPairCount);
+  ASSERT_OK_AND_ASSIGN(std::vector<QpPair> qp_pairs,
+                       CreateTestQpPairs(setup, ibv_cq_ex_to_cq(send_cq),
+                                         ibv_cq_ex_to_cq(recv_cq),
+                                         kWritesPerQpPair, kQpPairCount));
 
   for (auto& qp_pair : qp_pairs) {
     for (int i = 0; i < kWritesPerQpPair; ++i) {
@@ -346,9 +347,10 @@ TEST_F(CqExOpTest, BatchPollRecvCq) {
       .wc_flags = GetWcFlags()};
   ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
-  std::vector<QpPair> qp_pairs = CreateTestQpPairs(
-      setup, ibv_cq_ex_to_cq(send_cq), ibv_cq_ex_to_cq(recv_cq),
-      kSendsPerQpPair, kQpPairCount);
+  ASSERT_OK_AND_ASSIGN(std::vector<QpPair> qp_pairs,
+                       CreateTestQpPairs(setup, ibv_cq_ex_to_cq(send_cq),
+                                         ibv_cq_ex_to_cq(recv_cq),
+                                         kSendsPerQpPair, kQpPairCount));
 
   for (auto& qp_pair : qp_pairs) {
     for (int i = 0; i < kSendsPerQpPair; ++i) {
@@ -412,9 +414,10 @@ TEST_F(CqExOverflowTest, SendCqOverflow) {
                                  .wc_flags = GetWcFlags()};
   ibv_cq_ex* cq = ibv_.CreateCqEx(setup.context, cq_attr);
   const int total_writes = cq->cqe + 10;
-  std::vector<QpPair> qp_pairs =
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
       CreateTestQpPairs(setup, ibv_cq_ex_to_cq(cq), ibv_cq_ex_to_cq(cq),
-                        total_writes, /*count=*/1);
+                        total_writes, /*count=*/1));
   for (int i = 0; i < total_writes; ++i) {
     QueueWrite(setup, qp_pairs[0]);
   }
@@ -434,9 +437,10 @@ TEST_F(CqExOverflowTest, RecvCqOverflow) {
   ibv_cq_ex* send_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   const int total_sends = recv_cq->cqe + 10;
-  std::vector<QpPair> qp_pairs =
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<QpPair> qp_pairs,
       CreateTestQpPairs(setup, ibv_cq_ex_to_cq(send_cq),
-                        ibv_cq_ex_to_cq(recv_cq), total_sends, /*count=*/1);
+                        ibv_cq_ex_to_cq(recv_cq), total_sends, /*count=*/1));
   for (int i = 0; i < total_sends; ++i) {
     QueueRecv(setup, qp_pairs[0]);
   }

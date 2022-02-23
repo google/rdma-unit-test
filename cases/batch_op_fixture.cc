@@ -23,6 +23,7 @@
 
 #include "glog/logging.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/synchronization/barrier.h"
 #include "infiniband/verbs.h"
 #include "public/status_matchers.h"
@@ -39,7 +40,6 @@ absl::StatusOr<BatchOpFixture::BasicSetup> BatchOpFixture::CreateBasicSetup() {
   std::fill_n(setup.dst_memblock.data(), setup.dst_memblock.size(),
               kDstContent);
   ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-  setup.port_gid = ibv_.GetLocalPortGid(setup.context);
   setup.pd = ibv_.AllocPd(setup.context);
   if (!setup.pd) {
     return absl::InternalError("Failed to allocate pd.");
@@ -102,23 +102,30 @@ int BatchOpFixture::QueueWork(BasicSetup& setup, QpPair& qp,
   return ibv_post_send(qp.send_qp, &wqe, &bad_wr);
 }
 
-std::vector<BatchOpFixture::QpPair> BatchOpFixture::CreateTestQpPairs(
-    BasicSetup& setup, ibv_cq* send_cq, ibv_cq* recv_cq, size_t max_qp_wr,
-    int count) {
-  DCHECK_LE(max_qp_wr * count, setup.dst_memblock.size())
-      << "Not enough space on destination buffer for all QPs.";
+absl::StatusOr<std::vector<BatchOpFixture::QpPair>>
+BatchOpFixture::CreateTestQpPairs(BasicSetup& setup, ibv_cq* send_cq,
+                                  ibv_cq* recv_cq, size_t max_qp_wr,
+                                  int count) {
+  if (max_qp_wr * count > setup.dst_memblock.size()) {
+    return absl::InternalError(
+        "Not enough space on destination buffer for all QPs.");
+  }
   std::vector<QpPair> qp_pairs;
   for (int i = 0; i < count; ++i) {
     QpPair qp_pair;
     qp_pair.send_qp = ibv_.CreateQp(setup.pd, send_cq, recv_cq, nullptr,
                                     max_qp_wr, max_qp_wr, IBV_QPT_RC,
                                     /*sig_all=*/0);
-    DCHECK(qp_pair.send_qp) << "Failed to create send qp - " << errno;
+    if (!qp_pair.send_qp) {
+      return absl::InternalError("Failed to create send qp.");
+    }
     qp_pair.recv_qp = ibv_.CreateQp(setup.pd, send_cq, recv_cq, nullptr,
                                     max_qp_wr, max_qp_wr, IBV_QPT_RC,
                                     /*sig_all=*/0);
-    DCHECK(qp_pair.recv_qp) << "Failed to create recv qp - " << errno;
-    ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp, setup.port_gid);
+    if (!qp_pair.recv_qp) {
+      return absl::InternalError("Failed to create recv qp.");
+    }
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
     qp_pair.dst_buffer = setup.dst_memblock.subspan(i * max_qp_wr, max_qp_wr);
     qp_pairs.push_back(qp_pair);
   }

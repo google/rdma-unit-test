@@ -31,19 +31,18 @@
 
 namespace rdma_unit_test {
 
-// A light-weight test fixture for RDMA unit tests. Provides default-created
-// VerbsHelperSuite for smart verbs creations and transport-related QP
-// bring-ups.
+// The minimal fixture for all Google's RDMA tests. It provides:
+// 1.initialization of NIC introspection logic.
 class BasicFixture : public ::testing::Test {
  public:
-  BasicFixture() = default;
-  ~BasicFixture() override = default;
+  BasicFixture();
+  ~BasicFixture() override;
+
+  void SetUp() override;
 
  protected:
   static void SetUpTestSuite();
   static void TearDownTestSuite();
-
-  VerbsHelperSuite ibv_;
 };
 
 }  // namespace rdma_unit_test

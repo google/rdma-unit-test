@@ -1,3 +1,17 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Implementation of RDMA unit test framework.
 # Targets in this packages is designed to be direct dependencies of targets in ../public/ but not ../cases/.
 
@@ -13,7 +27,7 @@ cc_library(
     deps = [
         ":introspection_registrar",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@libibverbs",
     ],
     alwayslink = 1,
@@ -25,7 +39,7 @@ cc_library(
     deps = [
         ":introspection_registrar",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@libibverbs",
     ],
     alwayslink = 1,
@@ -47,60 +61,21 @@ cc_library(
     deps = [
         ":introspection_registrar",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@libibverbs",
     ],
     alwayslink = 1,
 )
 
 cc_library(
-    name = "roce_extension",
-    srcs = ["roce_extension.cc"],
-    hdrs = ["roce_extension.h"],
-    deps = [
-        ":verbs_extension_interface",
-        "//public:rdma_memblock",
-        "//public:verbs_util",
-        "@libibverbs",
-    ],
-)
-
-cc_library(
-    name = "roce_backend",
-    srcs = ["roce_backend.cc"],
-    hdrs = ["roce_backend.h"],
-    deps = [
-        ":verbs_backend",
-        "//public:flags",
-        "//public:verbs_util",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-        "@libibverbs",
-    ],
-)
-
-cc_library(
-    name = "verbs_extension_interface",
-    hdrs = ["verbs_extension_interface.h"],
+    name = "verbs_extension",
+    srcs = ["verbs_extension.cc"],
+    hdrs = ["verbs_extension.h"],
     deps = [
         "//public:rdma_memblock",
         "//public:verbs_util",
-        "@libibverbs",
-    ],
-)
-
-cc_library(
-    name = "verbs_backend",
-    srcs = ["verbs_backend.cc"],
-    hdrs = ["verbs_backend.h"],
-    deps = [
-        "//public:status_matchers",
-        "//public:verbs_util",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
         "@libibverbs",
     ],
 )
@@ -124,4 +99,17 @@ cc_library(
     name = "handle_garble",
     srcs = ["handle_garble.cc"],
     hdrs = ["handle_garble.h"],
+)
+
+cc_library(
+    name = "verbs_extension_cc",
+    srcs = ["verbs_extension.cc"],
+    hdrs = ["verbs_extension.h"],
+    deps = [
+        "//public:rdma_memblock",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@libibverbs",
+    ],
 )

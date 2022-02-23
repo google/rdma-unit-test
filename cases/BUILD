@@ -1,8 +1,21 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Description:
 #   Collection of typed test cases.
 #
 # linkstatic = 1 is to facilitate running on real hardware.
-
 package(
     default_testonly = True,
     default_visibility = ["//visibility:public"],
@@ -14,8 +27,8 @@ cc_test(
     srcs = ["access_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -34,8 +47,8 @@ cc_test(
     srcs = ["ah_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:flags",
         "//public:introspection",
@@ -71,7 +84,7 @@ cc_library(
     srcs = ["batch_op_fixture.cc"],
     hdrs = ["batch_op_fixture.h"],
     deps = [
-        ":basic_fixture",
+        ":rdma_verbs_fixture",
         "//public:rdma_memblock",
         "//public:status_matchers",
         "//public:verbs_util",
@@ -89,8 +102,8 @@ cc_test(
     srcs = ["buffer_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//public:introspection",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -110,8 +123,8 @@ cc_test(
     srcs = ["comp_channel_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -131,9 +144,9 @@ cc_test(
     srcs = ["cq_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":batch_op_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -157,9 +170,9 @@ cc_test(
     srcs = ["cq_ex_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":batch_op_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -180,8 +193,8 @@ cc_test(
     srcs = ["device_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -225,8 +238,8 @@ cc_test(
     srcs = ["hugepage_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":loopback_fixture",
         "//public:introspection",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -269,8 +282,8 @@ cc_test(
     srcs = ["mr_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -290,8 +303,8 @@ cc_test(
     srcs = ["mw_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":loopback_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -314,8 +327,9 @@ cc_test(
     srcs = ["pd_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":loopback_fixture",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -324,6 +338,7 @@ cc_test(
         "//public:verbs_util",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@libibverbs",
     ],
 )
@@ -333,8 +348,8 @@ cc_test(
     srcs = ["qp_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -355,8 +370,8 @@ cc_test(
     linkstatic = 1,
     shard_count = 3,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//public:introspection",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -381,8 +396,8 @@ cc_test(
     srcs = ["srq_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:page_size",
@@ -400,10 +415,11 @@ cc_test(
     name = "threaded_test",
     srcs = ["threaded_test.cc"],
     linkstatic = 1,
+    shard_count = 3,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
-        "//internal:verbs_extension_interface",
+        ":rdma_verbs_fixture",
+        "//internal:verbs_extension",
         "//public:flags",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -444,8 +460,8 @@ cc_test(
     srcs = ["stress_test.cc"],
     linkstatic = 1,
     deps = [
-        ":basic_fixture",
         ":gunit_main",
+        ":rdma_verbs_fixture",
         "//public:rdma_memblock",
         "//public:status_matchers",
         "//public:verbs_util",
@@ -483,11 +499,11 @@ cc_library(
         "ud_test.cc",
     ],
     deps = [
-        ":basic_fixture",
         ":batch_op_fixture",
         ":loopback_fixture",
+        ":rdma_verbs_fixture",
         "//internal:handle_garble",
-        "//internal:verbs_extension_interface",
+        "//internal:verbs_extension",
         "//public:flags",
         "//public:introspection",
         "//public:page_size",
@@ -518,10 +534,16 @@ cc_library(
     srcs = ["loopback_fixture.cc"],
     hdrs = ["loopback_fixture.h"],
     deps = [
-        ":basic_fixture",
+        ":rdma_verbs_fixture",
         "//public:status_matchers",
         "//public:verbs_util",
         "@com_google_absl//absl/status:statusor",
         "@libibverbs",
     ],
+)
+
+cc_library(
+    name = "rdma_verbs_fixture",
+    hdrs = ["rdma_verbs_fixture.h"],
+    deps = [":basic_fixture"],
 )

@@ -15,12 +15,28 @@
 #include "cases/basic_fixture.h"
 
 #include "glog/logging.h"
+#include "gtest/gtest.h"
+#include "absl/flags/flag.h"
 #include "infiniband/verbs.h"
 #include "public/flags.h"
 #include "public/introspection.h"
 #include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
+
+BasicFixture::BasicFixture() {
+}
+
+BasicFixture::~BasicFixture() {
+}
+
+void BasicFixture::SetUp() {
+  auto result = Introspection().KnownIssue();
+  if (result.has_value()) {
+    GTEST_SKIP() << "Skipping the test because of known issue: "
+                 << result.value();
+  }
+}
 
 void BasicFixture::SetUpTestSuite() {
   // Make initial call to construct the proper Introspection here so the

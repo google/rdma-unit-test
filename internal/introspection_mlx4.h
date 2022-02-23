@@ -17,7 +17,7 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
 
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/introspection.h"
@@ -42,45 +42,47 @@ class IntrospectionMlx4 : public NicIntrospection {
   bool SupportsReRegMr() const override { return true; }
 
  protected:
-  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
-    static const absl::flat_hash_set<DeviationEntry> deviations{
-        // Can dealloc PD with outstanding AHs.
-        {"AhTest", "DeallocPdWithOutstandingAh", ""},
-        // Deregistering unknown AH handles will cause client crashes.
-        {"AhTest", "DeregInvalidAh", ""},
-        // Zero byte read is an error.
-        {"BufferMrTest", "ReadZeroByte", ""},
-        {"BufferMrTest", "ReadZeroByteOutsideMr", ""},
-        {"BufferMrTest", "ReadZeroByteFromZeroByteMr", ""},
-        {"BufferMrTest", "ReadZeroByteOutsideZeroByteMr", ""},
-        {"BufferMrTest", "ReadZeroByteInvalidRKey", ""},
-        {"BufferMwTest", "ReadZeroByte", ""},
-        {"BufferMwTest", "ReadZeroByteOutsideMw", ""},
-        {"BufferMwTest", "ReadZeroByteFromZeroByteMw", ""},
-        {"BufferMwTest", "ReadZeroByteOutsideZeroByteMw", ""},
+  const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
+      const override {
+    static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
+        {{"AhTest", "DeallocPdWithOutstandingAh"},
+         "Allows Deallocating PD with Ah."},
+        {{"AhTest", "DeregInvalidAh"}, "Unknown AH handles crashes client."},
+        {{"BufferMrTest", "ReadZeroByte"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMrTest", "ReadZeroByteOutsideMr"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMrTest", "ReadZeroByteFromZeroByteMr"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMrTest", "ReadZeroByteOutsideZeroByteMr"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMrTest", "ReadZeroByteInvalidRKey"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMwTest", "ReadZeroByte"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMwTest", "ReadZeroByteOutsideMw"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMwTest", "ReadZeroByteFromZeroByteMw"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
+        {{"BufferMwTest", "ReadZeroByteOutsideZeroByteMw"},
+         "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
         // Zero byte write is successful.
-        {"BufferTest", "ZeroByteWriteInvalidRKey", ""},
-        // No check for invalid cq.
-        {"CompChannelTest", "RequestNotificationInvalidCq", ""},
-        // Hardware returns true when requesting notification on a CQ without a
-        // Completion Channel.
-        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
-        // Will hang.
-        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
-        // Will hang.
-        {"CompChannelTest", "AcknowledgeTooMany", ""},
-        // Creating too many Ahs will cause client crashes.
-        {"DeviceLimitTest", "MaxAh", ""},
-        // Does not correctly report max_mw. Report 0.
-        {"DeviceLimitTest", "MaxMw", ""},
-        // Can create much more (around 64k) than allowed.
-        {"DeviceLimitTest", "MaxQp", ""},
-        // Does not fail with bad recv length.
-        {"LoopbackRcQpTest", "BadRecvLength", ""},
-        // Supports multiple SGEs for atomics.
-        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
+        {{"BufferTest", "ZeroByteWriteInvalidRKey"}, ""},
+        {{"CompChannelTest", "RequestNotificationInvalidCq"},
+         "Invalid CQ handle is not checked."},
+        {{"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel"},
+         "NIC does not return immediate error when requesting notification on "
+         "CQ without Completion Channel."},
+        {{"CompChannelTest", "AcknowledgeWithoutOutstanding"},
+         "Ack-ing nonexistent completion will crash the client."},
+        {{"DeviceLimitTest", "MaxAh"}, "Client crashes on too many AHs."},
+        {{"DeviceLimitTest", "MaxMw"},
+         "max_mw is not correctly reported for the device."},
+        {{"DeviceLimitTest", "MaxQp"}, "Can create much more QPs than max_qp."},
+        // Provider still update remote buffer when LKey is invalid.
+        {{"LoopbackRcQpTest", "FetchAddInvalidLKey"}, ""},
         // Allows bind to invalid qp.
-        {"MwTest", "InvalidQp", ""},
+        {{"MwTest", "InvalidQp"}, ""},
     };
     return deviations;
   }

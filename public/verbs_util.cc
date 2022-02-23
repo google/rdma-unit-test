@@ -98,11 +98,11 @@ std::string GidToString(const ibv_gid& gid) {
 
 absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
   ibv_device** devices = nullptr;
-  auto free_list = absl::MakeCleanup([&devices]() {
+  absl::Cleanup free_list = [&devices]() {
     if (devices) {
       ibv_free_device_list(devices);
     }
-  });
+  };
   int num_devices = 0;
   devices = ibv_get_device_list(&num_devices);
   std::vector<std::string> device_names;
@@ -271,7 +271,7 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
   return bind;
 }
 
-ibv_send_wr CreateInvalidateWr(uint64_t wr_id, uint32_t rkey) {
+ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey) {
   ibv_send_wr invalidate;
   invalidate.wr_id = wr_id;
   invalidate.next = nullptr;
@@ -586,11 +586,11 @@ absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
 absl::StatusOr<ibv_context*> OpenUntrackedDevice(
     const std::string device_name) {
   ibv_device** devices = nullptr;
-  auto free_list = absl::MakeCleanup([&devices]() {
+  absl::Cleanup free_list = [&devices]() {
     if (devices) {
       ibv_free_device_list(devices);
     }
-  });
+  };
   int num_devices = 0;
   devices = ibv_get_device_list(&num_devices);
   if (num_devices <= 0 || !devices) {
@@ -629,6 +629,50 @@ absl::StatusOr<ibv_context*> OpenUntrackedDevice(
   }
 
   return context;
+}
+
+ibv_qp_attr CreateBasicQpAttrInit(uint8_t port) {
+  ibv_qp_attr mod_init = {};
+  mod_init.qp_state = IBV_QPS_INIT;
+  mod_init.pkey_index = 0;
+  mod_init.port_num = port;
+  constexpr int kRemoteAccessAll =
+      IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+      IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
+  mod_init.qp_access_flags = kRemoteAccessAll;
+  return mod_init;
+}
+
+ibv_qp_attr CreateBasicQpAttrRtr(const PortGid& local, ibv_gid remote_gid,
+                                 uint32_t remote_qpn) {
+  ibv_qp_attr mod_rtr = {};
+  mod_rtr.qp_state = IBV_QPS_RTR;
+  mod_rtr.path_mtu = verbs_util::ToVerbsMtu(absl::GetFlag(FLAGS_verbs_mtu));
+  mod_rtr.dest_qp_num = remote_qpn;
+  static unsigned int psn = 1225;
+  mod_rtr.rq_psn = psn;
+  // 1225;  // TODO(author1): Eventually randomize for reality.
+  mod_rtr.max_dest_rd_atomic = 10;
+  mod_rtr.min_rnr_timer = 26;  // 82us delay
+  mod_rtr.ah_attr.grh.dgid = remote_gid;
+  mod_rtr.ah_attr.grh.flow_label = 0;
+  mod_rtr.ah_attr.grh.sgid_index = local.gid_index;
+  mod_rtr.ah_attr.grh.hop_limit = 127;
+  mod_rtr.ah_attr.is_global = 1;
+  mod_rtr.ah_attr.sl = 5;
+  mod_rtr.ah_attr.port_num = local.port;
+  return mod_rtr;
+}
+
+ibv_qp_attr CreateBasicQpAttrRts() {
+  ibv_qp_attr mod_rts = {};
+  mod_rts.qp_state = IBV_QPS_RTS;
+  mod_rts.sq_psn = 1225;
+  mod_rts.timeout = 17;  // ~500 ms
+  mod_rts.retry_cnt = 5;
+  mod_rts.rnr_retry = 5;
+  mod_rts.max_rd_atomic = 5;
+  return mod_rts;
 }
 
 }  // namespace verbs_util

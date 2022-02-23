@@ -23,7 +23,7 @@
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_util.h"
 
@@ -32,7 +32,7 @@ namespace rdma_unit_test {
 // A test fixture for unit testing RDMA batch operations. Provides methods to
 // create pairs of interconnected RC QPs on loopback port and methods to perform
 // threaded send and receive operations.
-class BatchOpFixture : public BasicFixture {
+class BatchOpFixture : public RdmaVerbsFixture {
  protected:
   static constexpr int kBufferSize = 16 * 1024 * 1024;  // 16 MB
   static constexpr uint8_t kSrcContent = 1;
@@ -56,7 +56,6 @@ class BatchOpFixture : public BasicFixture {
     // of dst_memblock which corresponds to the QP.
     RdmaMemBlock dst_memblock;
     ibv_context* context;
-    verbs_util::PortGid port_gid;
     ibv_pd* pd;
     ibv_mr* src_mr;
     ibv_mr* dst_mr;
@@ -80,9 +79,11 @@ class BatchOpFixture : public BasicFixture {
   int QueueWork(BasicSetup& setup, QpPair& qp, WorkType work_type);
 
   // Create |count| qps.
-  std::vector<QpPair> CreateTestQpPairs(BasicSetup& setup, ibv_cq* send_cq,
-                                        ibv_cq* recv_cq, size_t max_qp_wr,
-                                        int count);
+  absl::StatusOr<std::vector<QpPair>> CreateTestQpPairs(BasicSetup& setup,
+                                                        ibv_cq* send_cq,
+                                                        ibv_cq* recv_cq,
+                                                        size_t max_qp_wr,
+                                                        int count);
 
   // Creates a separate thread for each QP pair. Each thread calls `work`
   // `times_per_pair` on its corresponding QP pair.

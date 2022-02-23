@@ -1,7 +1,21 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/introspection.h"
@@ -29,55 +43,55 @@ class IntrospectionMlx5 : public NicIntrospection {
   bool SupportsRcRemoteMwAtomic() const override { return false; }
 
  protected:
-  const absl::flat_hash_set<DeviationEntry>& GetDeviations() const override {
-    static const absl::flat_hash_set<DeviationEntry> deviations{
+  const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
+      const override {
+    static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
         // Deregistering unknown AH handles will cause client crashes.
-        {"AhTest", "DeregInvalidAh", ""},
+        {{"AhTest", "DeregInvalidAh"}, ""},
         // MW address not checked at bind.
-        {"BufferMwTest", "BindExceedFront", ""},
-        {"BufferMwTest", "BindExceedRear", ""},
-        // No check for invalid cq.
-        {"CompChannelTest", "RequestNotificationInvalidCq", ""},
+        {{"BufferMwTest", "BindExceedFront"}, ""},
+        {{"BufferMwTest", "BindExceedRear"}, ""},
+        {{"CompChannelTest", "RequestNotificationInvalidCq"},
+         "Invalid CQ handle is not checked."},
         // Hardware returns true when requesting notification on a CQ without a
         // Completion Channel.
-        {"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel", ""},
+        {{"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel"}, ""},
         // Will hang.
-        {"CompChannelTest", "AcknowledgeWithoutOutstanding", ""},
+        {{"CompChannelTest", "AcknowledgeWithoutOutstanding"}, ""},
         // Will hang.
-        {"CompChannelTest", "AcknowledgeTooMany", ""},
+        {{"CompChannelTest", "AcknowledgeTooMany"}, ""},
         // Allows invalid SGE size for atomics.
-        {"LoopbackRcQpTest", "FetchAddInvalidSize", ""},
-        {"LoopbackRcQpTest", "FetchAddSmallSge", ""},
-        {"LoopbackRcQpTest", "FetchAddLargeSge", ""},
-        {"LoopbackRcQpTest", "CompareSwapInvalidSize", ""},
-        // Bad recv length larger than region does not cause a failure.
-        {"LoopbackRcQpTest", "BadRecvLength", ""},
-        // Supports multiple SGEs for atomics.
-        {"LoopbackRcQpTest", "FetchAddSplitSgl", ""},
+        {{"LoopbackRcQpTest", "FetchAddInvalidSize"}, ""},
+        {{"LoopbackRcQpTest", "FetchAddSmallSge"}, ""},
+        {{"LoopbackRcQpTest", "FetchAddLargeSge"}, ""},
+        {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, ""},
         // Fails to send completion when qp in error state.
-        {"LoopbackRcQpTest", "ReqestOnFailedQp", ""},
+        {{"LoopbackRcQpTest", "ReqestOnFailedQp"}, ""},
         // No completions when remote in error state.
-        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateRecvWqeAfterTransition",
-         "NoCompletion"},
-        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateRecvWqeBeforeTransition",
-         "NoCompletion"},
-        {"LoopbackRcQpTest", "SendRemoteQpInErrorStateNoRecvWqe",
-         "NoCompletion"},
-        {"LoopbackRcQpTest", "ReadRemoteQpInErrorState", "NoCompletion"},
-        {"LoopbackRcQpTest", "WriteRemoteQpInErrorState", "NoCompletion"},
-        {"LoopbackRcQpTest", "FetchAddRemoteQpInErrorState", "NoCompletion"},
-        {"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState", "NoCompletion"},
-        // Permissions not checked at bind.
-        {"MwTest", "BindType1ReadWithNoLocalWrite", ""},
-        {"MwTest", "BindType1AtomicWithNoLocalWrite", ""},
-        // Allows bind to invalid qp.
-        {"MwTest", "InvalidQp", ""},
-        // Allows binding when MR is missing bind permissions.
-        {"MwBindTest", "MissingBind", ""},
-        // Allows binding when MR is missing bind permissions.
-        {"MwBindTest", "NoMrBindAccess", ""},
+        {{"LoopbackRcQpTest", "SendRemoteQpInErrorState"},
+         "Provider does not generate local completion when remote is in error "
+         "state."},
+        {{"LoopbackRcQpTest", "ReadRemoteQpInErrorState"},
+         "Provider does not generate local completion when remote is in error "
+         "state."},
+        {{"LoopbackRcQpTest", "WriteRemoteQpInErrorState"},
+         "Provider does not generate local completion when remote is in error "
+         "state."},
+        {{"LoopbackRcQpTest", "FetchAddRemoteQpInErrorState"},
+         "Provider does not generate local completion when remote is in error "
+         "state."},
+        {{"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState"},
+         "Provider does not generate local completion when remote is in error "
+         "state."},
+        {{"MwTest", "BindType1ReadWithNoLocalWrite"},
+         "Permission not checked at bind."},
+        {{"MwTest", "BindType1AtomicWithNoLocalWrite"},
+         "Permissions not checked at bind."},
+        {{"MwTest", "InvalidQp"}, "Allows bind to invalid qp."},
+        {{"MwBindTest", "MissingBind"}, "Permission not checked at bind."},
+        {{"MwBindTest", "NoMrBindAccess"}, "Permission not checked at bind."},
         // Allows creation over device cap.
-        {"QpTest", "ExceedsDeviceCap", ""},
+        {{"QpTest", "ExceedsDeviceCap"}, ""},
     };
     return deviations;
   }

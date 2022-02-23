@@ -17,10 +17,11 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 
+#include <optional>
 #include <string>
 #include <tuple>
 
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "public/verbs_util.h"
 
@@ -63,19 +64,20 @@ class NicIntrospection {
     return CheckCapability(IBV_DEVICE_MEM_WINDOW_TYPE_2B);
   }
 
+  // Returns true if the NIC supports zero length MR.
+  virtual bool SupportsZeroLengthMr() const { return true; }
+
   // Returns true if the NIC supports UD Queue Pairs.
   virtual bool SupportsUdQp() const { return true; }
 
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 
-  // Returns true if the NIC requires a deviation for the current test.
-  // Typically this is due to the test exploring (per the spec) undefined
-  // behaviors. It is up to each test how they handle deviations, but most skip
-  // execution.
-  // |identifier| is used to disambiguate among multiple deviations in a single
-  // test.
-  bool ShouldDeviateForCurrentTest(const std::string& identifier = "") const;
+  // Returns a optional string indicating whether the NIC has known issue
+  // (and should be skipped). The string contains details about the known issue.
+  // If the NIC does not have known issue (and the test should proceed
+  // normally), returns nullopt.
+  std::optional<std::string> KnownIssue() const;
 
   // Returns true if the NIC supports RC SendWithInvalidate.
   virtual bool SupportsRcSendWithInvalidate() const { return true; }
@@ -94,13 +96,14 @@ class NicIntrospection {
   const ibv_device_attr& device_attr() const { return attr_; }
 
  protected:
-  // <TestSuite, TestCase, DeviationIdentifier>
-  // See ShouldDeviateForCurrentTest for meaning of DeviationIdentifier.
-  typedef std::tuple<std::string, std::string, std::string> DeviationEntry;
+  // <TestSuite, TestCase>.
+  typedef std::tuple<std::string, std::string> TestcaseKey;
 
-  // Returns a set of <TestSuite,Name,Identifier> which should deviate.
-  virtual const absl::flat_hash_set<DeviationEntry>& GetDeviations() const {
-    static const absl::flat_hash_set<DeviationEntry> deviations;
+  // Returns a set of <TestSuite,Name> that we should skip because of known
+  // issues. Maps values are error message.
+  virtual const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
+      const {
+    static const absl::flat_hash_map<TestcaseKey, std::string> deviations;
     return deviations;
   }
 

@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
@@ -63,6 +64,16 @@ constexpr absl::Duration kDefaultCompletionTimeout = absl::Seconds(2);
 constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(2);
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
+// Masks corresponding to basic attributes for modifying QP (to different
+// states).
+constexpr int kQpAttrInitMask =
+    IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+constexpr int kQpAttrRtrMask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
+                               IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                               IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+constexpr int kQpAttrRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
+                               IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
+                               IBV_QP_MAX_QP_RD_ATOMIC;
 
 //////////////////////////////////////////////////////////////////////////////
 //                          Helper Functions
@@ -126,7 +137,7 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_ATOMIC);
 
-ibv_send_wr CreateInvalidateWr(uint64_t wr_id, uint32_t rkey);
+ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey);
 
 ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
 
@@ -219,6 +230,14 @@ absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
 // function, OpenUntrackedDevice(), is mainly used as an internal util function.
 // VerbsAllocator::OpenDevice() is preferred for most end user calls.
 absl::StatusOr<ibv_context*> OpenUntrackedDevice(const std::string device_name);
+
+// Create basic attributes for ibv_modify_qp.
+ibv_qp_attr CreateBasicQpAttrInit(uint8_t port);
+
+ibv_qp_attr CreateBasicQpAttrRtr(const PortGid& local, ibv_gid remote_gid,
+                                 uint32_t remote_qpn);
+
+ibv_qp_attr CreateBasicQpAttrRts();
 
 }  // namespace verbs_util
 }  // namespace rdma_unit_test

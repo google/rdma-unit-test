@@ -22,7 +22,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "cases/rdma_verbs_fixture.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -34,7 +34,7 @@ namespace rdma_unit_test {
 using ::testing::NotNull;
 using ::testing::Pair;
 
-class AccessTest : public BasicFixture,
+class AccessTest : public RdmaVerbsFixture,
                    public ::testing::WithParamInterface<ibv_mw_type> {
  public:
   void SetUp() override {
@@ -51,7 +51,6 @@ class AccessTest : public BasicFixture,
  protected:
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
     ibv_pd* pd;
     RdmaMemBlock src_buffer;
     RdmaMemBlock dst_buffer;
@@ -64,7 +63,6 @@ class AccessTest : public BasicFixture,
     setup.src_buffer = ibv_.AllocBuffer(/*pages=*/2);
     setup.dst_buffer = ibv_.AllocBuffer(/*pages=*/2);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allcoate pd.");
@@ -83,8 +81,13 @@ class AccessTest : public BasicFixture,
   void AttemptMrRead(BasicSetup setup, int src_mr_access, int dst_mr_access,
                      ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     EXPECT_THAT(verbs_util::ReadSync(src_qp, setup.src_buffer.span(), src_mr,
@@ -95,8 +98,13 @@ class AccessTest : public BasicFixture,
   void AttemptMwRead(BasicSetup setup, int src_mr_access, int dst_mr_access,
                      int dst_mw_access, ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     ASSERT_OK_AND_ASSIGN(
@@ -110,8 +118,13 @@ class AccessTest : public BasicFixture,
   void AttemptMrWrite(BasicSetup setup, int src_mr_access, int dst_mr_access,
                       ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     EXPECT_THAT(verbs_util::WriteSync(src_qp, setup.src_buffer.span(), src_mr,
@@ -122,8 +135,13 @@ class AccessTest : public BasicFixture,
   void AttemptMwWrite(BasicSetup setup, int src_mr_access, int dst_mr_access,
                       int dst_mw_access, ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     ASSERT_OK_AND_ASSIGN(
@@ -137,8 +155,13 @@ class AccessTest : public BasicFixture,
   void AttemptMrAtomic(BasicSetup setup, int src_mr_access, int dst_mr_access,
                        ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     EXPECT_THAT(
@@ -152,8 +175,13 @@ class AccessTest : public BasicFixture,
                        int dst_mw_access, ibv_wc_status expected) {
     if (!Introspection().SupportsRcRemoteMwAtomic()) return;
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     ASSERT_OK_AND_ASSIGN(
@@ -169,8 +197,13 @@ class AccessTest : public BasicFixture,
   void AttemptMrSend(BasicSetup setup, int src_mr_access, int dst_mr_access,
                      ibv_wc_status expected) {
     ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
     ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    auto [src_qp, dst_qp] = CreateNewConnectedQpPair(setup);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = nullptr;
+    ibv_qp* dst_qp = nullptr;
+    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
+                         CreateNewConnectedQpPair(setup));
     ASSERT_THAT(src_qp, NotNull());
     ASSERT_THAT(dst_qp, NotNull());
     EXPECT_THAT(
@@ -180,14 +213,18 @@ class AccessTest : public BasicFixture,
   }
 
  private:
-  std::pair<ibv_qp*, ibv_qp*> CreateNewConnectedQpPair(
+  absl::StatusOr<std::pair<ibv_qp*, ibv_qp*>> CreateNewConnectedQpPair(
       const BasicSetup& setup) {
     ibv_qp* src_qp = ibv_.CreateQp(setup.pd, setup.src_cq);
-    ibv_qp* dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
-    if (src_qp && dst_qp) {
-      ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.port_gid);
+    if (!src_qp) {
+      return absl::InternalError("Cannot create src qp");
     }
-    return {src_qp, dst_qp};
+    ibv_qp* dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
+    if (!dst_qp) {
+      return absl::InternalError("Cannot create dst qp");
+    }
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(src_qp, dst_qp));
+    return std::make_pair(src_qp, dst_qp);
   }
 
   absl::StatusOr<ibv_mw*> CreateAndBindMw(ibv_qp* dst_qp,
