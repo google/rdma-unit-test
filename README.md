@@ -24,7 +24,7 @@ to fix overly-specified tests are encouraged.
 
 ## Installation
 
-**rdma-unit-test** has been built/tested on **CentOS 8.3.2011** using a Mellonox
+**rdma-unit-test** has been built/tested on **CentOS 8.3.2011** using a Mellanox
 ConnectX-4 Dual port 25Gbe adapter.  Installation requirements may vary
 depending upon the distro used. CentOS installation uses the standard Server configuration with the following
 options;
@@ -111,6 +111,6 @@ To select a difference device name or port use the **--device_name** flag.
 
 This package has been tested on the following adapters;
 
-* Mellonox ConnectX-3
-* Mellonox ConnectX-4              (may require **--verbs_mtu=1024**)
+* Mellanox ConnectX-3
+* Mellanox ConnectX-4              (may require **--verbs_mtu=1024**)
 * SoftRoce (*limited support*, requires **--no_ipvp6_for_gid --verbs_mtu=1024**)
