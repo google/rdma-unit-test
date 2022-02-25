@@ -38,6 +38,7 @@
 #include "random_walk/internal/bind_ops_tracker.h"
 #include "random_walk/internal/client_update_service.grpc.pb.h"
 #include "random_walk/internal/client_update_service.pb.h"
+#include "random_walk/internal/completion_profile.h"
 #include "random_walk/internal/ibv_resource_manager.h"
 #include "random_walk/internal/inbound_update_interface.h"
 #include "random_walk/internal/invalidate_ops_tracker.h"
@@ -108,6 +109,15 @@ class RandomWalkClient : public InboundUpdateInterface {
   // Run the client for a fixed amount of random walk steps.
   void Run(size_t steps);
 
+  // Print via LOG(INFO) the the running log of the client, which includes:
+  // 1. Recent action logs: records the most recent |kLogSize| events (commands
+  // and completion) witnessed by the client. See RandomWalkLogger for more
+  // details.
+  void PrintLogs() const;
+  // Prints via LOG(INFO) the running statistics of the client, such as number
+  // of (each type of) commands issued.
+  void PrintStats() const;
+
  private:
   using CqInfo = IbvResourceManager::CqInfo;
   using PdInfo = IbvResourceManager::PdInfo;
@@ -135,7 +145,9 @@ class RandomWalkClient : public InboundUpdateInterface {
     size_t dealloc_type_1_mw = 0;
     size_t dealloc_type_2_mw = 0;
     size_t bind_type_1_mw = 0;
+    size_t bind_type_1_mw_success = 0;
     size_t bind_type_2_mw = 0;
+    size_t bind_type_2_mw_success = 0;
     size_t create_rc_qp_pair = 0;
     size_t create_ud_qp = 0;
     size_t modify_qp_error = 0;
@@ -143,12 +155,19 @@ class RandomWalkClient : public InboundUpdateInterface {
     size_t create_ah = 0;
     size_t destroy_ah = 0;
     size_t send = 0;
+    size_t send_success = 0;
     size_t send_with_inv = 0;
+    size_t send_with_inv_success = 0;
     size_t recv = 0;
+    size_t recv_success = 0;
     size_t read = 0;
+    size_t read_success = 0;
     size_t write = 0;
+    size_t write_success = 0;
     size_t fetch_add = 0;
+    size_t fetch_add_success = 0;
     size_t comp_swap = 0;
+    size_t comp_swap_success = 0;
     size_t completions = 0;
     std::array<size_t, 22> completion_statuses = {
         0};  // There are a total of 22 completion
@@ -168,15 +187,6 @@ class RandomWalkClient : public InboundUpdateInterface {
   // The same as RandomWalk, but instead of carrying out random Action, carry
   // out a specific Action.
   absl::Status DoAction(Action action);
-
-  // Print via LOG(INFO) the the running log of the client, which includes:
-  // 1. Recent action logs: records the most recent |kLogSize| events (commands
-  // and completion) witnessed by the client. See RandomWalkLogger for more
-  // details.
-  void PrintLogs() const;
-  // Prints via LOG(INFO) the running statistics of the client, such as number
-  // of (each type of) commands issued.
-  void PrintStats() const;
 
   // Helper function to create a RC QP.
   ibv_qp* CreateLocalRcQp(ClientId peer_id, ibv_pd* pd);
@@ -278,6 +288,7 @@ class RandomWalkClient : public InboundUpdateInterface {
   // For storing and retrieving ops.
   BindOpsTracker bind_ops_;
   InvalidateOpsTracker invalidate_ops_;
+  CompletionProfile profiler_;
 
   absl::flat_hash_map<ClientId, ibv_gid> client_gids_;
 

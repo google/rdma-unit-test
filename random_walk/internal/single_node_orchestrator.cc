@@ -61,6 +61,9 @@ void SingleNodeOrchestrator::RunClients(absl::Duration duration) {
   for (auto& client : client_threads) {
     client.join();
   }
+  for (const auto& client : clients_) {
+    client->PrintStats();
+  }
 }
 
 void SingleNodeOrchestrator::RunClients(size_t steps) {
@@ -70,6 +73,9 @@ void SingleNodeOrchestrator::RunClients(size_t steps) {
   }
   for (auto& client : client_threads) {
     client.join();
+  }
+  for (const auto& client : clients_) {
+    client->PrintStats();
   }
 }
 

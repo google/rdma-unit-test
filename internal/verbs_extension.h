@@ -48,7 +48,7 @@ class VerbsExtension {
 
   // Creates a address handle. Calls ibv_create_ah on default.
   virtual ibv_ah* CreateAh(ibv_pd* pd, verbs_util::PortGid local,
-                           ibv_gid remote_gid);
+                           ibv_gid remote_gid, uint8_t traffic_class = 0);
 
   // Create a queue pair. Calls ibv_create_qp on default.
   virtual ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);

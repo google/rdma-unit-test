@@ -115,7 +115,6 @@ void RandomWalkClient::Run(absl::Duration duration) {
     absl::Status result = RandomWalk();
     if (!result.ok()) {
       LOG(INFO) << result;
-      PrintLogs();
       LOG(DFATAL) << "Random walk fails at step " << step_count << ".";
       break;
     }
@@ -123,7 +122,6 @@ void RandomWalkClient::Run(absl::Duration duration) {
   }
   LOG(INFO) << "Random walk completes " << step_count << " steps in "
             << duration << ".";
-  PrintStats();
 }
 
 void RandomWalkClient::Run(size_t steps) {
@@ -135,14 +133,12 @@ void RandomWalkClient::Run(size_t steps) {
     absl::Status result = RandomWalk();
     if (!result.ok()) {
       LOG(INFO) << result;
-      PrintLogs();
-      PrintStats();
       LOG(DFATAL) << "Random walk fails at step " << step_count << ".";
       break;
     }
     ++step_count;
   }
-  PrintStats();
+  LOG(INFO) << "Random walk completes " << step_count << "steps.";
 }
 
 void RandomWalkClient::BootstrapRandomWalk() {
@@ -276,6 +272,7 @@ absl::Status RandomWalkClient::DoAction(Action action) {
 void RandomWalkClient::PrintLogs() const { log_.PrintLogs(); }
 
 void RandomWalkClient::PrintStats() const {
+  LOG(INFO) << "Dumping stats for client " << id_;
   LOG(INFO) << "Statistics:";
   LOG(INFO) << "commands = " << stats_.commands;
   LOG(INFO) << "create_cq = " << stats_.create_cq;
@@ -294,58 +291,38 @@ void RandomWalkClient::PrintStats() const {
   LOG(INFO) << "destroy_qp = " << stats_.destroy_qp;
   LOG(INFO) << "create_ah = " << stats_.create_ah;
   LOG(INFO) << "destroy_ah = " << stats_.destroy_ah;
-  LOG(INFO) << "send = " << stats_.send;
-  LOG(INFO) << "recv = " << stats_.recv;
-  LOG(INFO) << "read = " << stats_.read;
-  LOG(INFO) << "write = " << stats_.write;
-  LOG(INFO) << "fetch_add = " << stats_.fetch_add;
-  LOG(INFO) << "comp_swap = " << stats_.comp_swap;
+  LOG(INFO) << "bind_type_1_mw = " << stats_.bind_type_1_mw_success << "/"
+            << stats_.bind_type_1_mw;
+  LOG(INFO) << "bind_type_2_mw = " << stats_.bind_type_2_mw_success << "/"
+            << stats_.bind_type_2_mw;
+  LOG(INFO) << "send = " << stats_.send_success << "/" << stats_.send;
+  LOG(INFO) << "send_with_inv = " << stats_.send_with_inv_success << "/"
+            << stats_.send_with_inv;
+  LOG(INFO) << "recv = " << stats_.recv_success << "/" << stats_.recv;
+  LOG(INFO) << "read = " << stats_.read_success << "/" << stats_.read;
+  LOG(INFO) << "write = " << stats_.write_success << "/" << stats_.write;
+  LOG(INFO) << "fetch_add = " << stats_.fetch_add_success << "/"
+            << stats_.fetch_add;
+  LOG(INFO) << "comp_swap = " << stats_.comp_swap_success << "/"
+            << stats_.comp_swap;
   LOG(INFO) << "completion_statuses: ";
   LOG(INFO) << "total completions = " << stats_.completions;
-  LOG(INFO) << "IBV_WC_SUCCESS = "
-            << stats_.completion_statuses[IBV_WC_SUCCESS];
-  LOG(INFO) << "IBV_WC_LOC_LEN_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_LEN_ERR];
-  LOG(INFO) << "IBV_WC_LOC_QP_OP_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_QP_OP_ERR];
-  LOG(INFO) << "IBV_WC_LOC_EEC_OP_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_EEC_OP_ERR];
-  LOG(INFO) << "IBV_WC_LOC_PROT_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_PROT_ERR];
-  LOG(INFO) << "IBV_WC_WR_FLUSH_ERR = "
-            << stats_.completion_statuses[IBV_WC_WR_FLUSH_ERR];
-  LOG(INFO) << "IBV_WC_MW_BIND_ERR = "
-            << stats_.completion_statuses[IBV_WC_MW_BIND_ERR];
-  LOG(INFO) << "IBV_WC_BAD_RESP_ERR = "
-            << stats_.completion_statuses[IBV_WC_BAD_RESP_ERR];
-  LOG(INFO) << "IBV_WC_LOC_ACCESS_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_ACCESS_ERR];
-  LOG(INFO) << "IBV_WC_REM_INV_REQ_ERR = "
-            << stats_.completion_statuses[IBV_WC_REM_INV_REQ_ERR];
-  LOG(INFO) << "IBV_WC_REM_ACCESS_ERR = "
-            << stats_.completion_statuses[IBV_WC_REM_ACCESS_ERR];
-  LOG(INFO) << "IBV_WC_REM_OP_ERR = "
-            << stats_.completion_statuses[IBV_WC_REM_OP_ERR];
-  LOG(INFO) << "IBV_WC_RETRY_EXC_ERR = "
-            << stats_.completion_statuses[IBV_WC_RETRY_EXC_ERR];
-  LOG(INFO) << "IBV_WC_RNR_RETRY_EXC_ERR = "
-            << stats_.completion_statuses[IBV_WC_RNR_RETRY_EXC_ERR];
-  LOG(INFO) << "IBV_WC_LOC_RDD_VIOL_ERR = "
-            << stats_.completion_statuses[IBV_WC_LOC_RDD_VIOL_ERR];
-  LOG(INFO) << "IBV_WC_REM_INV_RD_REQ_ERR = "
-            << stats_.completion_statuses[IBV_WC_REM_INV_RD_REQ_ERR];
-  LOG(INFO) << "IBV_WC_REM_ABORT_ERR = "
-            << stats_.completion_statuses[IBV_WC_REM_ABORT_ERR];
-  LOG(INFO) << "IBV_WC_INV_EECN_ERR = "
-            << stats_.completion_statuses[IBV_WC_INV_EECN_ERR];
-  LOG(INFO) << "IBV_WC_INV_EEC_STATE_ERR = "
-            << stats_.completion_statuses[IBV_WC_INV_EEC_STATE_ERR];
-  LOG(INFO) << "IBV_WC_FATAL_ERR = "
-            << stats_.completion_statuses[IBV_WC_FATAL_ERR];
-  LOG(INFO) << "IBV_WC_RESP_TIMEOUT_ERR = "
-            << stats_.completion_statuses[IBV_WC_RESP_TIMEOUT_ERR];
-  LOG(INFO) << "IBV_WC_GENERAL_ERR = "
-            << stats_.completion_statuses[IBV_WC_GENERAL_ERR];
+  for (ibv_wc_status status :
+       {IBV_WC_SUCCESS,           IBV_WC_LOC_LEN_ERR,
+        IBV_WC_LOC_QP_OP_ERR,     IBV_WC_LOC_EEC_OP_ERR,
+        IBV_WC_LOC_PROT_ERR,      IBV_WC_WR_FLUSH_ERR,
+        IBV_WC_MW_BIND_ERR,       IBV_WC_BAD_RESP_ERR,
+        IBV_WC_LOC_ACCESS_ERR,    IBV_WC_REM_INV_REQ_ERR,
+        IBV_WC_REM_ACCESS_ERR,    IBV_WC_REM_OP_ERR,
+        IBV_WC_RETRY_EXC_ERR,     IBV_WC_RNR_RETRY_EXC_ERR,
+        IBV_WC_LOC_RDD_VIOL_ERR,  IBV_WC_REM_INV_RD_REQ_ERR,
+        IBV_WC_REM_ABORT_ERR,     IBV_WC_INV_EECN_ERR,
+        IBV_WC_INV_EEC_STATE_ERR, IBV_WC_FATAL_ERR,
+        IBV_WC_RESP_TIMEOUT_ERR,  IBV_WC_GENERAL_ERR}) {
+    LOG(INFO) << ibv_wc_status_str(status) << " = "
+              << stats_.completion_statuses[status];
+  }
+  LOG(INFO) << profiler_.DumpStats();
 }
 
 // ---------------------------- Private -----------------------------------//
@@ -915,6 +892,7 @@ absl::StatusCode RandomWalkClient::TryBindType1Mw() {
       verbs_util::CreateType1MwBind(next_wr_id_++, buffer, mr);
 
   int result = ibv_bind_mw(qp, mw, &bind_wr);
+  profiler_.RegisterAction(bind_wr.wr_id, Action::BIND_TYPE_1_MW);
   log_.PushBindMw(bind_wr, mw);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -962,12 +940,12 @@ absl::StatusCode RandomWalkClient::TryBindType2Mw() {
   ibv_qp* qp = qp_sample.value();
   DCHECK(qp);
   absl::Span<uint8_t> buffer = sampler_.RandomMwSpan(mr);
-
   uint32_t rkey = absl::Uniform<uint32_t>(bitgen_);
   ibv_send_wr bind_wr =
       verbs_util::CreateType2BindWr(next_wr_id_++, mw, buffer, rkey, mr);
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &bind_wr, &bad_wr);
+  profiler_.RegisterAction(bind_wr.wr_id, Action::BIND_TYPE_2_MW);
   log_.PushBindMw(bind_wr);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1218,6 +1196,7 @@ absl::StatusCode RandomWalkClient::TrySend() {
   }
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &send, &bad_wr);
+  profiler_.RegisterAction(send.wr_id, Action::SEND);
   log_.PushSend(send);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1266,6 +1245,7 @@ absl::StatusCode RandomWalkClient::TrySendWithInv() {
   send_inv.invalidate_rkey = remote_mw.rkey;
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &send_inv, &bad_wr);
+  profiler_.RegisterAction(send_inv.wr_id, Action::SEND_WITH_INV);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
@@ -1314,6 +1294,7 @@ absl::StatusCode RandomWalkClient::TryRecv() {
       verbs_util::CreateRecvWr(next_wr_id_++, sges.data(), sges.size());
   ibv_recv_wr* bad_wr = nullptr;
   int result = ibv_post_recv(qp, &recv, &bad_wr);
+  profiler_.RegisterAction(recv.wr_id, Action::RECV);
   log_.PushRecv(recv);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1330,17 +1311,13 @@ absl::StatusCode RandomWalkClient::TryRead() {
     return absl::StatusCode::kFailedPrecondition;
   }
   RdmaMemory memory = memory_opt.value();
-  auto mr_sample = resource_manager_.GetRandomMr();
-  if (!mr_sample.has_value()) {
-    return absl::StatusCode::kFailedPrecondition;
-  }
-  ibv_mr* mr = mr_sample.value();
-  DCHECK(mr);
   ibv_qp* qp = nullptr;
   if (memory.qp_num.has_value()) {
+    // Type 2 MW.
     qp =
         resource_manager_.GetLocalRcQp(memory.client_id, memory.qp_num.value());
   } else {
+    // Type 1 MW.
     auto qp_sample = resource_manager_.GetRandomQpForRdma(memory.client_id,
                                                           memory.pd_handle);
     qp = qp_sample.has_value() ? qp_sample.value() : nullptr;
@@ -1348,6 +1325,12 @@ absl::StatusCode RandomWalkClient::TryRead() {
   if (!qp) {
     return absl::StatusCode::kFailedPrecondition;
   }
+  auto mr_sample = resource_manager_.GetRandomMr(qp->pd);
+  if (!mr_sample.has_value()) {
+    return absl::StatusCode::kFailedPrecondition;
+  }
+  ibv_mr* mr = mr_sample.value();
+  DCHECK(mr);
   RcQpInfo qp_info = resource_manager_.GetRcQpInfo(qp);
   std::vector<absl::Span<uint8_t>> local_buffers;
   uint8_t* remote_addr;
@@ -1363,6 +1346,7 @@ absl::StatusCode RandomWalkClient::TryRead() {
       next_wr_id_++, sges.data(), sges.size(), remote_addr, memory.rkey);
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &read, &bad_wr);
+  profiler_.RegisterAction(read.wr_id, Action::READ);
   log_.PushRead(read);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1379,12 +1363,6 @@ absl::StatusCode RandomWalkClient::TryWrite() {
     return absl::StatusCode::kFailedPrecondition;
   }
   RdmaMemory memory = memory_opt.value();
-  auto mr_sample = resource_manager_.GetRandomMr();
-  if (!mr_sample.has_value()) {
-    return absl::StatusCode::kFailedPrecondition;
-  }
-  ibv_mr* mr = mr_sample.value();
-  DCHECK(mr);
   ibv_qp* qp = nullptr;
   if (memory.qp_num.has_value()) {
     qp =
@@ -1397,6 +1375,12 @@ absl::StatusCode RandomWalkClient::TryWrite() {
   if (!qp) {
     return absl::StatusCode::kFailedPrecondition;
   }
+  auto mr_sample = resource_manager_.GetRandomMr(qp->pd);
+  if (!mr_sample.has_value()) {
+    return absl::StatusCode::kFailedPrecondition;
+  }
+  ibv_mr* mr = mr_sample.value();
+  DCHECK(mr);
   RcQpInfo qp_info = resource_manager_.GetRcQpInfo(qp);
   std::vector<absl::Span<uint8_t>> local_buffers;
   uint8_t* remote_addr;
@@ -1412,6 +1396,7 @@ absl::StatusCode RandomWalkClient::TryWrite() {
       next_wr_id_++, sges.data(), sges.size(), remote_addr, memory.rkey);
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &write, &bad_wr);
+  profiler_.RegisterAction(write.wr_id, Action::WRITE);
   log_.PushWrite(write);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1428,17 +1413,6 @@ absl::StatusCode RandomWalkClient::TryFetchAdd() {
     return absl::StatusCode::kFailedPrecondition;
   }
   RdmaMemory memory = memory_opt.value();
-  auto mr_sample = resource_manager_.GetRandomMr();
-  if (!mr_sample.has_value()) {
-    return absl::StatusCode::kFailedPrecondition;
-  }
-  ibv_mr* mr = mr_sample.value();
-  DCHECK(mr);
-  uint8_t* local_addr = sampler_.RandomAtomicAddr(
-      reinterpret_cast<uint8_t*>(mr->addr), mr->length);
-  uint8_t* remote_addr = sampler_.RandomAtomicAddr(
-      reinterpret_cast<uint8_t*>(memory.addr), memory.length);
-  uint64_t add = absl::Uniform<uint64_t>(bitgen_);
   ibv_qp* qp = nullptr;
   if (memory.qp_num.has_value()) {
     qp =
@@ -1451,12 +1425,24 @@ absl::StatusCode RandomWalkClient::TryFetchAdd() {
   if (!qp) {
     return absl::StatusCode::kFailedPrecondition;
   }
+  auto mr_sample = resource_manager_.GetRandomMr(qp->pd);
+  if (!mr_sample.has_value()) {
+    return absl::StatusCode::kFailedPrecondition;
+  }
+  ibv_mr* mr = mr_sample.value();
+  DCHECK(mr);
+  uint8_t* local_addr = sampler_.RandomAtomicAddr(
+      reinterpret_cast<uint8_t*>(mr->addr), mr->length);
+  uint8_t* remote_addr = sampler_.RandomAtomicAddr(
+      reinterpret_cast<uint8_t*>(memory.addr), memory.length);
+  uint64_t add = absl::Uniform<uint64_t>(bitgen_);
 
   ibv_sge sge = verbs_util::CreateAtomicSge(local_addr, mr);
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       next_wr_id_++, &sge, /*num_sge=*/1, remote_addr, memory.rkey, add);
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &fetch_add, &bad_wr);
+  profiler_.RegisterAction(fetch_add.wr_id, Action::FETCH_ADD);
   log_.PushFetchAdd(fetch_add);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1473,18 +1459,6 @@ absl::StatusCode RandomWalkClient::TryCompSwap() {
     return absl::StatusCode::kFailedPrecondition;
   }
   RdmaMemory memory = memory_opt.value();
-  auto mr_sample = resource_manager_.GetRandomMr();
-  if (!mr_sample.has_value()) {
-    return absl::StatusCode::kFailedPrecondition;
-  }
-  ibv_mr* mr = mr_sample.value();
-  DCHECK(mr);
-  uint8_t* local_addr = sampler_.RandomAtomicAddr(
-      reinterpret_cast<uint8_t*>(mr->addr), mr->length);
-  uint8_t* remote_addr = sampler_.RandomAtomicAddr(
-      reinterpret_cast<uint8_t*>(memory.addr), memory.length);
-  uint64_t add = absl::Uniform<uint64_t>(bitgen_);
-  uint64_t swap = absl::Uniform<uint64_t>(bitgen_);
   ibv_qp* qp = nullptr;
   if (memory.qp_num.has_value()) {
     qp =
@@ -1497,12 +1471,25 @@ absl::StatusCode RandomWalkClient::TryCompSwap() {
   if (!qp) {
     return absl::StatusCode::kFailedPrecondition;
   }
+  auto mr_sample = resource_manager_.GetRandomMr(qp->pd);
+  if (!mr_sample.has_value()) {
+    return absl::StatusCode::kFailedPrecondition;
+  }
+  ibv_mr* mr = mr_sample.value();
+  DCHECK(mr);
+  uint8_t* local_addr = sampler_.RandomAtomicAddr(
+      reinterpret_cast<uint8_t*>(mr->addr), mr->length);
+  uint8_t* remote_addr = sampler_.RandomAtomicAddr(
+      reinterpret_cast<uint8_t*>(memory.addr), memory.length);
+  uint64_t add = absl::Uniform<uint64_t>(bitgen_);
+  uint64_t swap = absl::Uniform<uint64_t>(bitgen_);
 
   ibv_sge sge = verbs_util::CreateAtomicSge(local_addr, mr);
   ibv_send_wr comp_swap = verbs_util::CreateCompSwapWr(
       next_wr_id_++, &sge, /*num_sge=*/1, remote_addr, memory.rkey, add, swap);
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &comp_swap, &bad_wr);
+  profiler_.RegisterAction(comp_swap.wr_id, Action::COMP_SWAP);
   log_.PushCompSwap(comp_swap);
   if (result) {
     LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
@@ -1654,9 +1641,7 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
   CHECK_LT(completion.status, stats_.completion_statuses.size());  // Crash ok
   ++stats_.completions;
   ++stats_.completion_statuses[completion.status];
-  if (completion.status != IBV_WC_SUCCESS) {
-    return;
-  }
+  profiler_.RegisterCompletion(completion);
 
   switch (completion.opcode) {
     case IBV_WC_BIND_MW: {
@@ -1667,6 +1652,7 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
       ClientUpdate update;
       AddRKey* add_rkey = update.mutable_add_rkey();
       if (mw->type == IBV_MW_TYPE_1) {
+        ++stats_.bind_type_1_mw_success;
         resource_manager_.InsertBoundType1Mw(mw, bind_info);
 
         add_rkey->set_addr(bind_info.addr);
@@ -1675,6 +1661,7 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
         add_rkey->set_owner_id(id_);
         add_rkey->set_pd_handle(mw->pd->handle);
       } else {
+        ++stats_.bind_type_2_mw_success;
         DCHECK(bind_args.rkey.has_value());
         uint32_t rkey = bind_args.rkey.value();
         mw->rkey = rkey;
@@ -1699,8 +1686,10 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
       auto invalidate_opt =
           invalidate_ops_.TryExtractInvalidate(completion.wr_id);
       if (!invalidate_opt.has_value()) {
+        ++stats_.send_success;
         return;
       }
+      ++stats_.send_with_inv;
       InvalidateOpsTracker::InvalidateWr invalidate = invalidate_opt.value();
       // RKey might already been invalidated, either by remote deallocation of
       // MW or by a precedeed invalidation.
@@ -1709,6 +1698,7 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
       break;
     }
     case IBV_WC_RECV: {
+      ++stats_.recv_success;
       if (completion.wc_flags & IBV_WC_WITH_INV) {
         uint32_t rkey = completion.invalidated_rkey;
         auto mw_info_opt = resource_manager_.TryGetType2BindInfo(rkey);
@@ -1730,7 +1720,24 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
       }
       break;
     }
+    case IBV_WC_RDMA_READ: {
+      ++stats_.read_success;
+      break;
+    }
+    case IBV_WC_RDMA_WRITE: {
+      ++stats_.write_success;
+      break;
+    }
+    case IBV_WC_FETCH_ADD: {
+      ++stats_.fetch_add_success;
+      break;
+    }
+    case IBV_WC_COMP_SWAP: {
+      ++stats_.comp_swap_success;
+      break;
+    }
     default: {
+      LOG(INFO) << "Completion with unknown opcode " << completion.opcode;
     }
   }
 }

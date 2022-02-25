@@ -79,6 +79,8 @@ constexpr int kQpAttrRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
 //                          Helper Functions
 //////////////////////////////////////////////////////////////////////////////
 
+int GetIpAddressType(const ibv_gid& gid);
+
 // Converts an uint64_t mtu to a ibv_mtu object.
 ibv_mtu ToVerbsMtu(uint64_t mtu);
 
@@ -93,7 +95,8 @@ absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
     ibv_context* context);
 
 // Create an ibv_ah_attr from a local address and a remote gid.
-ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid);
+ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid,
+                         uint8_t traffic_class = 0);
 
 // Create a defaulted ibv_srq_attr.
 ibv_srq_attr DefaultSrqAttr();

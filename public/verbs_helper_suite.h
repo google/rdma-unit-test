@@ -79,7 +79,7 @@ class VerbsHelperSuite {
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__,
       bool huge_page = false);
   absl::StatusOr<ibv_context*> OpenDevice(bool no_ipv6_for_gid = false);
-  ibv_ah* CreateAh(ibv_pd* pd, ibv_gid remote_gid);
+  ibv_ah* CreateAh(ibv_pd* pd, ibv_gid remote_gid, uint8_t traffic_class = 0);
   int DestroyAh(ibv_ah* ah);
   ibv_pd* AllocPd(ibv_context* context);
   int DeallocPd(ibv_pd* pd);

@@ -41,6 +41,8 @@ class IntrospectionMlx4 : public NicIntrospection {
 
   bool SupportsReRegMr() const override { return true; }
 
+  bool SupportsTrafficClass() const override { return true; }
+
  protected:
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {

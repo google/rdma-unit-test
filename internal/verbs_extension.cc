@@ -33,8 +33,8 @@ int VerbsExtension::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
 }
 
 ibv_ah* VerbsExtension::CreateAh(ibv_pd* pd, verbs_util::PortGid local,
-                                 ibv_gid remote_gid) {
-  ibv_ah_attr attr = verbs_util::CreateAhAttr(local, remote_gid);
+                                 ibv_gid remote_gid, uint8_t traffic_class) {
+  ibv_ah_attr attr = verbs_util::CreateAhAttr(local, remote_gid, traffic_class);
   return ibv_create_ah(pd, &attr);
 }
 

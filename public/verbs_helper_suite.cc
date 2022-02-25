@@ -219,9 +219,10 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
   return context;
 }
 
-ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid) {
+ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid,
+                                   uint8_t traffic_class) {
   verbs_util::PortGid local = GetLocalPortGid(pd->context);
-  ibv_ah* ah = extension()->CreateAh(pd, local, remote_gid);
+  ibv_ah* ah = extension()->CreateAh(pd, local, remote_gid, traffic_class);
   if (ah) {
     cleanup_->AddCleanup(ah);
   }

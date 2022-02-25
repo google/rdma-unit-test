@@ -28,6 +28,7 @@ cc_library(
         ":bind_ops_tracker",
         ":client_update_service_cc_proto",
         ":client_update_service_grpc_proto",
+        ":completion_profile",
         ":ibv_resource_manager",
         ":inbound_update_interface",
         ":invalidate_ops_tracker",
@@ -272,6 +273,18 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "completion_profile",
+    srcs = ["completion_profile.cc"],
+    hdrs = ["completion_profile.h"],
+    deps = [
+        ":types",
+        "//public:map_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@libibverbs",
     ],
 )
 

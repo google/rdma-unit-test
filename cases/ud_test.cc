@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <sched.h>
+#include <sys/socket.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -134,6 +135,59 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+}
+
+/* According to ROCE v2 Annex A17.9.2, when setting traffic class,
+   it should be correctly reflected in GRH, and should be the same on both
+   ends. */
+TEST_F(LoopbackUdQpTest, SendTrafficClass) {
+  if (!Introspection().SupportsTrafficClass()) {
+    GTEST_SKIP() << "Nic does not support setting tclass.";
+  }
+  constexpr int kPayloadLength = 1000;
+  Client local, remote;
+  uint8_t traffic_class = 0xff;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = kPayloadLength + sizeof(ibv_grh);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid, traffic_class);
+  ASSERT_THAT(ah, NotNull());
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc send_completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  ASSERT_OK_AND_ASSIGN(ibv_wc recv_completion,
+                       verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(send_completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(recv_completion.status, IBV_WC_SUCCESS);
+  // Get GRH header
+  auto recv_payload = remote.buffer.span().subspan(0, sizeof(ibv_grh));
+  int ip_family = verbs_util::GetIpAddressType(local.port_gid.gid);
+  EXPECT_NE(ip_family, -1);
+  if (ip_family == AF_INET) {
+    // According to IPV4 header format and ROCEV2 Annex A17.4.5.2
+    // Last 2 bits might be used for ECN
+    EXPECT_EQ(static_cast<uint8_t>(recv_payload[21]) & 0xfc,
+              traffic_class & 0xfc);
+  } else {
+    // According to IPV6 header format and ROCEV2 Annex A17.4.5.2
+    // Last 2 bits might be used for ECN
+    uint8_t actual_traffic_class =
+        (static_cast<uint8_t>(recv_payload[0]) << 4) +
+        (static_cast<uint8_t>(recv_payload[1]) >> 4);
+    EXPECT_EQ(actual_traffic_class & 0xfc, traffic_class & 0xfc);
+  }
 }
 
 TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {

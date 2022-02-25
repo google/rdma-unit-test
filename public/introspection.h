@@ -70,6 +70,9 @@ class NicIntrospection {
   // Returns true if the NIC supports UD Queue Pairs.
   virtual bool SupportsUdQp() const { return true; }
 
+  // Returns true if the NIC supports setting traffic class in AH.
+  virtual bool SupportsTrafficClass() const { return false; }
+
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 

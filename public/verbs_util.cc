@@ -51,6 +51,8 @@ static constexpr std::array<std::pair<ibv_mtu, uint32_t>, 6> ibv_mtu_map = {{
     {IBV_MTU_4096, 4096},
 }};
 
+}  // namespace
+
 // Determines whether the gid is a valid ipv4 or ipv6 ip address.
 // Returns AF_INET if ipv4.
 // Returns AF_INET6 if ipv6.
@@ -68,8 +70,6 @@ int GetIpAddressType(const ibv_gid& gid) {
   }
   return AF_INET;
 }
-
-}  // namespace
 
 ibv_mtu ToVerbsMtu(uint64_t mtu) {
   for (auto [mtu_enum, value] : ibv_mtu_map) {
@@ -147,7 +147,7 @@ absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
       if (query_result != 0) {
         return absl::InternalError("Failed to query gid.");
       }
-      auto ip_type = GetIpAddressType(gid);
+      auto ip_type = verbs_util::GetIpAddressType(gid);
       if (ip_type == -1) {
         continue;
       }
@@ -174,7 +174,8 @@ absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
   return result;
 }
 
-ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid) {
+ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid,
+                         uint8_t traffic_class) {
   ibv_ah_attr attr;
   attr.sl = 0;
   attr.is_global = 1;
@@ -183,7 +184,7 @@ ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid) {
   attr.grh.flow_label = 0;
   attr.grh.sgid_index = port_gid.gid_index;
   attr.grh.hop_limit = 10;
-  attr.grh.traffic_class = 0;
+  attr.grh.traffic_class = traffic_class;
   return attr;
 }
 
