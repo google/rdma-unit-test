@@ -47,6 +47,7 @@ cc_library(
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/status",
@@ -57,6 +58,7 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@libibverbs",
+        "@magic_enum",
     ],
 )
 
@@ -72,6 +74,7 @@ cc_library(
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/types:optional",
         "@libibverbs",
     ],
@@ -156,10 +159,7 @@ cc_library(
     name = "types",
     srcs = ["types.cc"],
     hdrs = ["types.h"],
-    deps = [
-        "@com_glog_glog//:glog",
-        "@libibverbs",
-    ],
+    deps = ["@magic_enum"],
 )
 
 cc_library(
@@ -285,6 +285,7 @@ cc_library(
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
         "@libibverbs",
+        "@magic_enum",
     ],
 )
 

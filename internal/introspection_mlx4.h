@@ -17,6 +17,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX4_H_
 
+#include <string>
+
 #include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
@@ -32,8 +34,8 @@ class IntrospectionMlx4 : public NicIntrospection {
   // Register MLX4 NIC with the Introspection Registrar.
   static void Register() {
     IntrospectionRegistrar::GetInstance().Register(
-        "mlx4", [](const ibv_device_attr& attr) {
-          return new IntrospectionMlx4(attr);
+        "mlx4", [](const std::string& name, const ibv_device_attr& attr) {
+          return new IntrospectionMlx4(name, attr);
         });
   }
 
@@ -89,11 +91,30 @@ class IntrospectionMlx4 : public NicIntrospection {
     return deviations;
   }
 
+  const absl::flat_hash_map<HardwareCounter, std::string>& GetHardwareCounters()
+      const override {
+    static const absl::flat_hash_map<HardwareCounter, std::string> counters{
+        {HardwareCounter::kBadRespErr, "sq_num_bre"},
+        {HardwareCounter::kLocLenErr, "sq_num_lle"},
+        {HardwareCounter::kLocProtErr, "sq_num_lpe"},
+        {HardwareCounter::kLocQpOpErr, "sq_num_lqpoe"},
+        {HardwareCounter::kMwBindErr, "sq_num_mwbe"},
+        {HardwareCounter::kOutOfSeqNaks, "sq_num_oos"},
+        {HardwareCounter::kRemAccessErr, "sq_num_rae"},
+        {HardwareCounter::kRemInvReqErr, "sq_num_rire"},
+        {HardwareCounter::kRnrNak, "sq_num_rnr"},
+        {HardwareCounter::kRemOpErr, "sq_num_roe"},
+        {HardwareCounter::kRnrRetryExcErr, "sq_num_rree"},
+        {HardwareCounter::kTrptRetryExcErr, "sq_num_tree"},
+        {HardwareCounter::kWrCmpltErr, "sq_num_wrfe"}};
+    return counters;
+  }
+
  private:
   IntrospectionMlx4() = delete;
   ~IntrospectionMlx4() = default;
-  explicit IntrospectionMlx4(const ibv_device_attr& attr)
-      : NicIntrospection(attr) {
+  IntrospectionMlx4(const std::string& name, const ibv_device_attr& attr)
+      : NicIntrospection(name, attr) {
     // ibv_query_device may report the incorrect capabilities for some cards.
     // Override result when checking for Type2 support.
     attr_.device_cap_flags &= ~IBV_DEVICE_MEM_WINDOW_TYPE_2B;

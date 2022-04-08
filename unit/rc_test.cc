@@ -34,12 +34,12 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/loopback_fixture.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/loopback_fixture.h"
 
 namespace rdma_unit_test {
 namespace {
@@ -58,7 +58,7 @@ class LoopbackRcQpTest : public LoopbackFixture {
   static constexpr char kRemoteBufferContent = 'b';
 
   void SetUp() override {
-    BasicFixture::SetUp();
+    LoopbackFixture::SetUp();
     if (!Introspection().SupportsRcQp()) {
       GTEST_SKIP() << "Nic does not support RC QP";
     }
@@ -496,9 +496,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
-    GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
+  if (!Introspection().SupportsRcSendWithInvalidate()) {
+    GTEST_SKIP() << "Needs SendWithInvalidate.";
   }
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -524,16 +523,13 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.status, IBV_WC_MW_BIND_ERR);
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
-  EXPECT_EQ(completion.wc_flags, 0);
 }
 
 // Send with Invalidate targeting another QPs MW.
@@ -1156,6 +1152,55 @@ TEST_F(LoopbackRcQpTest, WriteInlineData) {
   EXPECT_THAT(absl::MakeSpan(remote.buffer.data() + kWriteSize,
                              remote.buffer.data() + remote.buffer.size()),
               Each(kRemoteBufferContent));
+}
+
+TEST_F(LoopbackRcQpTest, WriteZeroByteWithImmData) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  const uint32_t kImm = 0xBADDCAFE;
+
+  // Create a dummy buffer which shouldn't be touched.
+  const unsigned int kDummyBufSize = 100;
+  RdmaMemBlock dummy_buf =
+      ibv_.AllocAlignedBuffer(/*pages=*/1).subblock(0, kDummyBufSize);
+  ASSERT_EQ(kDummyBufSize, dummy_buf.size());
+  memset(dummy_buf.data(), 'd', dummy_buf.size());
+  ibv_mr* dummy_mr = ibv_.RegMr(remote.pd, dummy_buf);
+
+  // WRITE_WITH_IMM requires a RR. Use the dummy buf for sg_list.
+  ibv_sge rsge = verbs_util::CreateSge(dummy_buf.span(), dummy_mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  // Post zero sge write to remote.buffer.
+  ibv_send_wr write = verbs_util::CreateWriteWr(
+      /*wr_id=*/1, nullptr, /*num_sge=*/0, remote.buffer.data(),
+      remote.mr->rkey);
+  write.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  write.imm_data = kImm;
+  verbs_util::PostSend(local.qp, write);
+
+  // Verify WRITE completion.
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_WRITE);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+
+  // Verify RECV completion.
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.opcode, IBV_WC_RECV_RDMA_WITH_IMM);
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_NE(completion.wc_flags & IBV_WC_WITH_IMM, 0);
+  EXPECT_EQ(completion.imm_data, kImm);
+
+  // Verify that data written to the correct buffer.
+  EXPECT_THAT(remote.buffer.span(), Each(kRemoteBufferContent));
+  EXPECT_THAT(dummy_buf.span(), Each('d'));
 }
 
 TEST_F(LoopbackRcQpTest, WriteImmData) {
@@ -2216,6 +2261,110 @@ TEST_F(LoopbackRcQpTest, QueryQpInitialState) {
   EXPECT_EQ(attr.qp_state, IBV_QPS_RTS);
 }
 
+// A set of testcases for when the remote qp is not in RTS state.
+struct RemoteQpStateTestParameter {
+  std::string name;
+  ibv_wr_opcode opcode;
+  ibv_qp_state remote_state;
+};
+
+class RemoteRcQpStateTest
+    : public LoopbackRcQpTest,
+      public testing::WithParamInterface<RemoteQpStateTestParameter> {
+ protected:
+  absl::Status BringUpClientQp(Client& client, ibv_qp_state target_qp_state,
+                               ibv_gid remote_gid, uint32_t remote_qpn) {
+    if (target_qp_state == IBV_QPS_RESET) {
+      return absl::OkStatus();
+    }
+    RETURN_IF_ERROR(ibv_.SetQpInit(client.qp, client.port_gid.port));
+    if (target_qp_state == IBV_QPS_INIT) {
+      return absl::OkStatus();
+    }
+    RETURN_IF_ERROR(
+        ibv_.SetQpRtr(client.qp, client.port_gid, remote_gid, remote_qpn));
+    if (target_qp_state == IBV_QPS_RTR) {
+      return absl::OkStatus();
+    }
+    RETURN_IF_ERROR(ibv_.SetQpRts(client.qp));
+    if (target_qp_state == IBV_QPS_RTS) {
+      return absl::OkStatus();
+    }
+    return absl::InvalidArgumentError(
+        absl::StrCat("Does not support QP in ", target_qp_state, "state."));
+  }
+};
+
+TEST_P(RemoteRcQpStateTest, RemoteRcQpStateTests) {
+  RemoteQpStateTestParameter param = GetParam();
+  ASSERT_OK_AND_ASSIGN(Client local, CreateClient(IBV_QPT_RC));
+  ASSERT_OK_AND_ASSIGN(Client remote, CreateClient(IBV_QPT_RC));
+  ASSERT_OK(BringUpClientQp(local, IBV_QPS_RTS, remote.port_gid.gid,
+                            remote.qp->qp_num));
+  ASSERT_OK(BringUpClientQp(remote, param.remote_state, local.port_gid.gid,
+                            local.qp->qp_num));
+  EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode),
+              IsOkAndHolds(param.remote_state == IBV_QPS_RTR ||
+                                   param.remote_state == IBV_QPS_RTS
+                               ? IBV_WC_SUCCESS
+                               : IBV_WC_RETRY_EXC_ERR));
+}
+
+std::vector<RemoteQpStateTestParameter> GenerateRemoteQpStateParameters(
+    std::vector<ibv_wr_opcode> op_types, std::vector<ibv_qp_state> qp_states) {
+  std::vector<RemoteQpStateTestParameter> params;
+  for (const auto& op_type : op_types) {
+    for (const auto& qp_state : qp_states) {
+      auto OpToString = [](ibv_wr_opcode opcode) {
+        switch (opcode) {
+          case IBV_WR_RDMA_READ:
+            return "Read";
+          case IBV_WR_RDMA_WRITE:
+            return "Write";
+          case IBV_WR_ATOMIC_FETCH_AND_ADD:
+            return "FetchAndAdd";
+          case IBV_WR_ATOMIC_CMP_AND_SWP:
+            return "CompareAndSwap";
+          default:
+            return "Unknown";
+        }
+      };
+      auto QpStateToString = [](ibv_qp_state qp_state) {
+        switch (qp_state) {
+          case IBV_QPS_RESET:
+            return "Reset";
+          case IBV_QPS_INIT:
+            return "Init";
+          case IBV_QPS_RTR:
+            return "Rtr";
+          case IBV_QPS_RTS:
+            return "Rts";
+          default:
+            return "Unknown";
+        }
+      };
+      RemoteQpStateTestParameter param{
+          .name = absl::StrCat("RemoteQp", QpStateToString(qp_state),
+                               OpToString(op_type), "Test"),
+          .opcode = op_type,
+          .remote_state = qp_state,
+      };
+      params.push_back(param);
+    }
+  }
+  return params;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RemoteRcQpStateTest, RemoteRcQpStateTest,
+    testing::ValuesIn(GenerateRemoteQpStateParameters(
+        {IBV_WR_RDMA_READ, IBV_WR_RDMA_WRITE, IBV_WR_ATOMIC_FETCH_AND_ADD,
+         IBV_WR_ATOMIC_CMP_AND_SWP},
+        {IBV_QPS_RESET, IBV_QPS_INIT, IBV_QPS_RTR})),
+    [](const testing::TestParamInfo<RemoteRcQpStateTest::ParamType>& info) {
+      return info.param.name;
+    });
+
 TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -2268,23 +2417,6 @@ TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
     int count = ibv_poll_cq(local.cq, batch_size, completions.data());
     outstanding -= count;
   }
-}
-
-TEST_F(LoopbackRcQpTest, PostToRecvQueueInErrorState) {
-  Client local, remote;
-  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
-  ASSERT_OK(ibv_.SetQpError(remote.qp));
-
-  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
-  ibv_recv_wr recv =
-      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
-  verbs_util::PostRecv(remote.qp, recv);
-
-  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_WR_FLUSH_ERR);
-  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
-  EXPECT_EQ(recv.wr_id, completion.wr_id);
 }
 
 // This test issues 2 reads. The first read has an invalid lkey that will send

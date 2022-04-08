@@ -106,7 +106,9 @@ class Client {
   // not delivered to the software). This function prints out which un-completed
   // op has landed data or not.
   void CheckAllDataLanded() {
-    for (auto& qp : qps_) qp->CheckDataLanded();
+    for (auto& qp : qps_) {
+      qp.second->CheckDataLanded();
+    }
   }
 
   QpState* GetQpState(uint32_t qp_id) const;
@@ -294,7 +296,7 @@ class Client {
   ibv_comp_channel* recv_cc_ = nullptr;
   ibv_cq* send_cq_ = nullptr;
   ibv_cq* recv_cq_ = nullptr;
-  std::vector<std::unique_ptr<QpState>> qps_;
+  absl::flat_hash_map<uint32_t, std::unique_ptr<QpState>> qps_;
   const int client_id_ = 0;
   const int max_outstanding_ops_per_qp_;
   const int buffer_per_qp_;

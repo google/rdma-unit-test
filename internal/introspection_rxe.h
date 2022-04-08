@@ -17,6 +17,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_RXE_H_
 
+#include <string>
+
 #include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
@@ -30,8 +32,9 @@ class IntrospectionRxe : public NicIntrospection {
   // Register SoftROCE NIC with the Introspection Registrar.
   static void Register() {
     IntrospectionRegistrar::GetInstance().Register(
-        "rxe",
-        [](const ibv_device_attr& attr) { return new IntrospectionRxe(attr); });
+        "rxe", [](const std::string& name, const ibv_device_attr& attr) {
+          return new IntrospectionRxe(name, attr);
+        });
   }
 
   bool SupportsIpV6() const override { return false; }
@@ -83,8 +86,8 @@ class IntrospectionRxe : public NicIntrospection {
  private:
   IntrospectionRxe() = delete;
   ~IntrospectionRxe() = default;
-  explicit IntrospectionRxe(const ibv_device_attr& attr)
-      : NicIntrospection(attr) {}
+  IntrospectionRxe(const std::string& name, const ibv_device_attr& attr)
+      : NicIntrospection(name, attr) {}
 };
 
 }  // namespace rdma_unit_test

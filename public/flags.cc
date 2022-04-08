@@ -20,12 +20,13 @@
 #include "absl/flags/flag.h"
 #include "absl/strings/string_view.h"
 
-ABSL_FLAG(uint64_t, verbs_mtu, 4096,
-          "The MTU value used in modify_qp. Valid values: 256, 512, 1024, "
-          "2048, 4096[default]");
-ABSL_FLAG(bool, no_ipv6_for_gid, false,
+ABSL_FLAG(bool, ipv4_only, false,
           "Force use of IPv4. IPv6 ports will be ignored.");
 ABSL_FLAG(std::string, device_name, "",
           "RDMA device name as returned by ibv_devices(). If --device_name is "
           "empty, chooses the device at index zero as returned by "
           "ibv_get_device_list().");
+ABSL_FLAG(uint64_t, completion_wait_multiplier, 1,
+          "The multiplier applies to completion timeouts. Setting this flag "
+          "higher than 1 will increase all timeout thresholds proportionally. "
+          "Increase if tests are timing out due to slow RDMA devices.");

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "glog/logging.h"
+#include "absl/strings/match.h"
 
 namespace rdma_unit_test {
 
@@ -30,7 +31,7 @@ IntrospectionRegistrar& IntrospectionRegistrar::GetInstance() {
 IntrospectionRegistrar::Factory IntrospectionRegistrar::GetFactory(
     std::string_view device) {
   for (auto [name, factory] : devices_) {
-    if (device.compare(0, name.size(), name) == 0) {
+    if (absl::StartsWith(device, name)) {
       return factory;
     }
   }

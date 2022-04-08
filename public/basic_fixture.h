@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_CASES_BASIC_FIXTURE_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_CASES_BASIC_FIXTURE_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_BASIC_FIXTURE_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_BASIC_FIXTURE_H_
 
 #include <memory>
 
@@ -47,4 +47,4 @@ class BasicFixture : public ::testing::Test {
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_CASES_BASIC_FIXTURE_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_BASIC_FIXTURE_H_

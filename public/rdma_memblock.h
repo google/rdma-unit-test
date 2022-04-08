@@ -56,7 +56,7 @@ class RdmaMemBlock {
   int GetFd() const { return memblock_->fd; }
 
   // Returns the offset into the base fd for this buffer.
-  size_t GetOffset() { return offset_; }
+  size_t GetOffset() const { return offset_; }
 
   // Returns the pointer to the start of the buffer.
   uint8_t* data() const { return span_.data(); }

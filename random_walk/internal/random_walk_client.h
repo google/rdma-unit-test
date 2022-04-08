@@ -25,6 +25,7 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/flags/declare.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
@@ -48,6 +49,8 @@
 #include "random_walk/internal/types.h"
 #include "random_walk/internal/update_dispatcher_interface.h"
 
+ABSL_DECLARE_FLAG(bool, allow_outstanding_ops);
+
 namespace rdma_unit_test {
 namespace random_walk {
 
@@ -62,7 +65,10 @@ class RandomWalkClient : public InboundUpdateInterface {
   static constexpr size_t kLogSize = 200;
   // Controls the probability that a messaging command (send/recv)
   // will be done at a pair of UD QPs (vs RC QPs).
-  static constexpr double kMessagingUdProbability = 0.3;
+  // Currently RC send/recv is disabled for lack of flow control.
+  // Note: UD send won't cause get RNR and cause entering error state.
+  // TODO(b/223810731): Implement simple flow control.
+  static constexpr double kMessagingUdProbability = 1.0;
   // Controls the probability that a send op will carry immediate data.
   static constexpr double kSendImmProbability = 0.2;
   // The capacity of the queues storing oustanding inbound/outbound updates.
@@ -126,6 +132,7 @@ class RandomWalkClient : public InboundUpdateInterface {
   using Type2MwBindInfo = IbvResourceManager::Type2MwBindInfo;
   using RdmaMemory = IbvResourceManager::RdmaMemory;
   using AhInfo = IbvResourceManager::AhInfo;
+  using QpInfo = IbvResourceManager::QpInfo;
   using RcQpInfo = IbvResourceManager::RcQpInfo;
   using UdQpInfo = IbvResourceManager::UdQpInfo;
   using RemoteUdQpInfo = IbvResourceManager::RemoteUdQpInfo;
@@ -189,7 +196,7 @@ class RandomWalkClient : public InboundUpdateInterface {
   absl::Status DoAction(Action action);
 
   // Helper function to create a RC QP.
-  ibv_qp* CreateLocalRcQp(ClientId peer_id, ibv_pd* pd);
+  ibv_qp* CreateLocalRcQp(ibv_pd* pd);
 
   // Finish the process for creating an interconnected qp pair. This will take
   // in a remote gid and qpn, where the remote (responder) qp is assumed
@@ -197,7 +204,8 @@ class RandomWalkClient : public InboundUpdateInterface {
   // state to RTS state.
   absl::Status ModifyRcQpResetToRts(ibv_qp* local_qp, ibv_gid remote_gid,
                                     uint32_t remote_qpn,
-                                    ClientId remote_client_id);
+                                    ClientId remote_client_id,
+                                    uint32_t remote_pd_handle);
 
   // Perform actions with specific input. These are usually done when trying to
   // destroy specific resources to clear out refcounts for destroying PDs, MRs
@@ -275,13 +283,16 @@ class RandomWalkClient : public InboundUpdateInterface {
 
   const ClientId id_;
 
+  // Configs.
+  const bool allow_outstanding_ops_;
+
   // - The memory_ field represents the "ground" memory buffer for the client.
   // - Memory Regions/Windows are allocated from it.
   RdmaMemBlock memory_;
   // - Other static resource for clients.
   ibv_context* context_;
   verbs_util::PortGid port_gid_;
-  uint64_t next_wr_id_ = 0;
+  uint32_t next_raw_wr_id_ = 0;
 
   // Resource manager for MW, MR, and QP.
   IbvResourceManager resource_manager_;
@@ -299,7 +310,7 @@ class RandomWalkClient : public InboundUpdateInterface {
 
   // Related to sampling (actions and its parameters) in the random walker.
   const ActionWeights action_weights_;
-  const MinimumObjects minimum_objects_;
+  const IbvObjectBound caps_;
   RandomWalkSampler sampler_;
   ActionSampler action_sampler_;
 

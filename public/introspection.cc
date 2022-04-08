@@ -14,8 +14,11 @@
 
 #include "public/introspection.h"
 
+#include <cstdint>
+#include <fstream>
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -24,8 +27,12 @@
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include <magic_enum.hpp>
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/flags.h"
@@ -33,6 +40,14 @@
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
+
+NicIntrospection::CounterSnapshot NicIntrospection::GetCounterSnapshot() const {
+  CounterSnapshot snapshot;
+  for (const auto& [type, name] : GetHardwareCounters()) {
+    snapshot[type] = GetCounterValue(type).value();
+  }
+  return snapshot;
+}
 
 std::optional<std::string> NicIntrospection::KnownIssue() const {
   const testing::TestInfo* const test_info =
@@ -48,6 +63,47 @@ std::optional<std::string> NicIntrospection::KnownIssue() const {
     return std::nullopt;
   }
   return iter->second;
+}
+
+bool NicIntrospection::HasCounter(HardwareCounter counter) const {
+  return GetHardwareCounters().contains(counter);
+}
+
+absl::StatusOr<uint64_t> NicIntrospection::GetCounterValue(
+    HardwareCounter counter) const {
+  auto& counters = GetHardwareCounters();
+  auto iter = counters.find(counter);
+  if (iter == counters.end()) {
+    return absl::NotFoundError(
+        absl::StrCat("Cannot found counter ", magic_enum::enum_name(counter)));
+  }
+  std::string path =
+      absl::StrCat("/sys/class/infiniband/", Introspection().device_name(),
+                   "/hw_counters/", iter->second);
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return absl::InternalError(absl::StrCat("Cannot open file ", path));
+  }
+  std::string line;
+  if (!std::getline(file, line)) {
+    return absl::InternalError(absl::StrCat("Cannot get line ", line));
+  }
+  uint64_t value;
+  if (absl::SimpleAtoi(line, &value)) {
+    return value;
+  }
+  return absl::InternalError(
+      absl::StrCat("Cannot extract integer from line: ", line));
+}
+
+std::string NicIntrospection::DumpHardwareCounters() const {
+  std::stringstream ss;
+  for (const auto& [type, name] : GetHardwareCounters()) {
+    ss << absl::StrCat(magic_enum::enum_name(type), "(", name,
+                       "): ", GetCounterValue(type).value())
+       << std::endl;
+  }
+  return ss.str();
 }
 
 const NicIntrospection& Introspection() {
@@ -68,12 +124,12 @@ const NicIntrospection& Introspection() {
     if (!factory) {
       LOG(FATAL) << "Unknown NIC type:" << device_name;  // Crash ok
     }
-    NicIntrospection* device_info = factory(attr);
+    NicIntrospection* device_info = factory(device_name, attr);
 
     // Verify that the no ipv6 flag matches the device's capabilities
-    if (!device_info->SupportsIpV6() && !absl::GetFlag(FLAGS_no_ipv6_for_gid)) {
+    if (!device_info->SupportsIpV6() && !absl::GetFlag(FLAGS_ipv4_only)) {
       LOG(FATAL) << device_name  // Crash ok
-                 << " does not support ipv6.  Use --no_ipv6_for_gid";
+                 << " does not support ipv6.  Use --ipv4_only";
     }
     return device_info;
   }();

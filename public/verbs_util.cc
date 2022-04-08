@@ -30,7 +30,9 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
@@ -39,19 +41,39 @@
 #include "public/flags.h"
 #include "public/status_matchers.h"
 
+ABSL_FLAG(ibv_mtu, verbs_mtu, IBV_MTU_4096,
+          "The MTU value used in modify_qp. Valid values: 256, 512, 1024, "
+          "2048, 4096[default]");
+
+bool AbslParseFlag(absl::string_view text, ibv_mtu* out, std::string* error) {
+  if (text == "256") {
+    *out = IBV_MTU_256;
+  } else if (text == "512") {
+    *out = IBV_MTU_512;
+  } else if (text == "1024") {
+    *out = IBV_MTU_1024;
+  } else if (text == "2048") {
+    *out = IBV_MTU_2048;
+  } else if (text == "4096") {
+    *out = IBV_MTU_4096;
+  } else {
+    *error = absl::StrCat("Unknown MTU value : ", text);
+    return false;
+  }
+  return true;
+}
+
+std::string AbslUnparseFlag(ibv_mtu mtu) {
+  return std::to_string(rdma_unit_test::verbs_util::VerbsMtuToInt(mtu));
+}
+
 namespace rdma_unit_test {
 namespace verbs_util {
-namespace {
 
-static constexpr std::array<std::pair<ibv_mtu, uint32_t>, 6> ibv_mtu_map = {{
-    {IBV_MTU_256, 256},
-    {IBV_MTU_512, 512},
-    {IBV_MTU_1024, 1024},
-    {IBV_MTU_2048, 2048},
-    {IBV_MTU_4096, 4096},
-}};
-
-}  // namespace
+int VerbsMtuToInt(ibv_mtu mtu) {
+  // The enum ibv_mtu use value 1 to 5 for IBV_MTU_256 to IBV_MTU_4096.
+  return 128 << mtu;
+}
 
 // Determines whether the gid is a valid ipv4 or ipv6 ip address.
 // Returns AF_INET if ipv4.
@@ -69,23 +91,6 @@ int GetIpAddressType(const ibv_gid& gid) {
     return AF_INET6;
   }
   return AF_INET;
-}
-
-ibv_mtu ToVerbsMtu(uint64_t mtu) {
-  for (auto [mtu_enum, value] : ibv_mtu_map) {
-    if (mtu == value) return mtu_enum;
-  }
-  LOG(INFO) << "MTU value " << mtu
-            << " not supported. Using default value of 1024.";
-  return IBV_MTU_1024;
-}
-
-uint64_t VerbsMtuToValue(ibv_mtu mtu) {
-  for (auto [mtu_enum, value] : ibv_mtu_map) {
-    if (mtu == mtu_enum) return value;
-  }
-  LOG(FATAL) << "illegal mtu size " << static_cast<uint64_t>(mtu);  // Crash ok
-  return IBV_MTU_1024;
 }
 
 std::string GidToString(const ibv_gid& gid) {
@@ -120,9 +125,9 @@ absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
 absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
     ibv_context* context) {
   std::vector<PortGid> result;
-  bool no_ipv6_for_gid = absl::GetFlag(FLAGS_no_ipv6_for_gid);
+  bool ipv4_only = absl::GetFlag(FLAGS_ipv4_only);
   LOG(INFO) << "Enumerating Ports for " << context
-            << "no_ipv6: " << no_ipv6_for_gid;
+            << " ipv4_only: " << ipv4_only;
   ibv_device_attr dev_attr = {};
   int query_result = ibv_query_device(context, &dev_attr);
   if (query_result != 0) {
@@ -151,17 +156,17 @@ absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
       if (ip_type == -1) {
         continue;
       }
-      if (no_ipv6_for_gid && (ip_type == AF_INET6)) {
+      if (ipv4_only && (ip_type == AF_INET6)) {
         continue;
       }
 
       // Check the MTU size of the port against the max mtu attribute if the
-      // value is other than 0. 0 means it is unset.
+      // value is other than 0. 0 means it is unset. Here the comparison > works
+      // because values in the enum struct ibv_mtu is listed in ascending order.
       if (port_attr.active_mtu && result.empty() &&
-          (absl::GetFlag(FLAGS_verbs_mtu) >
-           VerbsMtuToValue(port_attr.active_mtu))) {
+          (absl::GetFlag(FLAGS_verbs_mtu) > port_attr.active_mtu)) {
         LOG(FATAL) << "--verbs_mtu exceeds active port limit of "  // Crash ok
-                   << VerbsMtuToValue(port_attr.active_mtu);
+                   << VerbsMtuToInt(port_attr.active_mtu);
       }
       VLOG(2) << "Adding: " << GidToString(gid);
       PortGid match;
@@ -295,6 +300,18 @@ ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge) {
   return send;
 }
 
+ibv_send_wr CreateSendWithInvalidateWr(uint64_t wr_id, uint32_t rkey) {
+  ibv_send_wr inv;
+  inv.wr_id = wr_id;
+  inv.next = nullptr;
+  inv.sg_list = nullptr;
+  inv.num_sge = 0;
+  inv.opcode = IBV_WR_SEND_WITH_INV;
+  inv.invalidate_rkey = rkey;
+  inv.send_flags = IBV_SEND_SIGNALED;
+  return inv;
+}
+
 ibv_recv_wr CreateRecvWr(uint64_t wr_id, ibv_sge* sge, int num_sge) {
   ibv_recv_wr recv;
   recv.wr_id = wr_id;
@@ -390,9 +407,23 @@ void PostSrqRecv(ibv_srq* srq, const ibv_recv_wr& wr) {
   ASSERT_EQ(0, result);
 }
 
+absl::Duration GetSlowDownTimeout(absl::Duration timeout, uint64_t multiplier) {
+  if (!multiplier) {
+    LOG(ERROR) << "completion_wait_multiplier should be a positive value";
+    multiplier = 1;
+  } else if (multiplier > 1) {
+    LOG(INFO) << "Excepted timeout: " << timeout
+              << ", multiplier: " << multiplier;
+  }
+  return timeout * multiplier;
+}
+
 absl::StatusOr<ibv_wc> WaitForCompletion(ibv_cq* cq, absl::Duration timeout) {
   ibv_wc result;
-  absl::Time stop = absl::Now() + timeout;
+  absl::Time stop =
+      absl::Now() +
+      GetSlowDownTimeout(timeout,
+                         absl::GetFlag(FLAGS_completion_wait_multiplier));
   int count = ibv_poll_cq(cq, 1, &result);
   while (count == 0 && absl::Now() < stop) {
     absl::SleepFor(absl::Milliseconds(10));
@@ -408,7 +439,10 @@ absl::Status WaitForPollingExtendedCompletion(ibv_cq_ex* cq,
                                               absl::Duration timeout) {
   ibv_poll_cq_attr poll_attr = {};
   int result = ibv_start_poll(cq, &poll_attr);
-  absl::Time stop = absl::Now() + timeout;
+  absl::Time stop =
+      absl::Now() +
+      GetSlowDownTimeout(timeout,
+                         absl::GetFlag(FLAGS_completion_wait_multiplier));
   while (result == ENOENT && absl::Now() < stop) {
     absl::SleepFor(absl::Milliseconds(10));
     result = ibv_start_poll(cq, &poll_attr);
@@ -425,7 +459,10 @@ absl::Status WaitForPollingExtendedCompletion(ibv_cq_ex* cq,
 absl::Status WaitForNextExtendedCompletion(ibv_cq_ex* cq,
                                            absl::Duration timeout) {
   int result = ibv_next_poll(cq);
-  absl::Time stop = absl::Now() + timeout;
+  absl::Time stop =
+      absl::Now() +
+      GetSlowDownTimeout(timeout,
+                         absl::GetFlag(FLAGS_completion_wait_multiplier));
   while (result == ENOENT && absl::Now() < stop) {
     absl::SleepFor(absl::Milliseconds(10));
     result = ibv_next_poll(cq);
@@ -562,6 +599,18 @@ absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
   return completion.status;
 }
 
+absl::StatusOr<ibv_wc_status> LocalInvalidateSync(ibv_qp* qp, uint32_t rkey) {
+  ibv_send_wr invalidate = CreateLocalInvalidateWr(/*wr_id=*/1, rkey);
+  PostSend(qp, invalidate);
+  ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
+  if (completion.status == IBV_WC_SUCCESS) {
+    EXPECT_EQ(completion.opcode, IBV_WC_LOCAL_INV);
+  }
+  return completion.status;
+}
+
 absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
     ibv_qp* src_qp, ibv_qp* dst_qp, absl::Span<uint8_t> src_buffer,
     ibv_mr* src_mr, absl::Span<uint8_t> dst_buffer, ibv_mr* dst_mr) {
@@ -648,7 +697,7 @@ ibv_qp_attr CreateBasicQpAttrRtr(const PortGid& local, ibv_gid remote_gid,
                                  uint32_t remote_qpn) {
   ibv_qp_attr mod_rtr = {};
   mod_rtr.qp_state = IBV_QPS_RTR;
-  mod_rtr.path_mtu = verbs_util::ToVerbsMtu(absl::GetFlag(FLAGS_verbs_mtu));
+  mod_rtr.path_mtu = absl::GetFlag(FLAGS_verbs_mtu);
   mod_rtr.dest_qp_num = remote_qpn;
   static unsigned int psn = 1225;
   mod_rtr.rq_psn = psn;

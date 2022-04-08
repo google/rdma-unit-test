@@ -36,25 +36,36 @@ message ActionWeights {
   optional float bind_type_2_mw = 8 [default = 5];
   optional float create_rc_qp_pair = 15 [default = 2];
   optional float create_ud_qp = 22 [default = 1];
-  optional float modify_qp_error = 16 [default = 2];
+  optional float modify_qp_error = 16 [default = 0];
   optional float destroy_qp = 17 [default = 2];
   optional float create_ah = 23 [default = 5];
   optional float destroy_ah = 24 [default = 5];
-  optional float send = 9 [default = 10];
-  optional float send_with_inv = 25 [default = 2];
-  optional float recv = 10 [default = 10];
+  optional float send = 9 [default = 5];
+  optional float send_with_inv = 25 [default = 0];
+  optional float recv = 10 [default = 5];
   optional float read = 11 [default = 10];
   optional float write = 12 [default = 10];
   optional float fetch_add = 13 [default = 10];
   optional float comp_swap = 14 [default = 10];
 }
 
-// The minimum number of each object that are maintained during the random walk.
-message MinimumObjects {
-  // Next id: 6
-  optional uint32 cq = 5 [default = 1];
-  optional uint32 pd = 4 [default = 1];
-  optional uint32 mr = 1 [default = 1];
-  optional uint32 type_1_mw = 2 [default = 1];
-  optional uint32 type_2_mw = 3 [default = 1];
+// The caps on each type of ibverbs object per client.
+message IbvObjectBound {
+  // Next id: 13
+  // max_rc_qp is a "soft" caps, i.e. when the total number of RC QPs on a
+  // client exceeds this number, the client cannot initiate creating RC
+  // QP communication channel (local remote RC QP pair), but can still create RC
+  // QP when responding to other clients' request to establish RC QP pairs.
+  optional uint32 max_rc_qp = 11 [default = 10];
+  optional uint32 max_ud_qp = 12 [default = 8];
+  optional uint32 max_cq = 10 [default = 5];
+  optional uint32 max_pd = 9 [default = 5];
+  optional uint32 max_mr = 8 [default = 10];
+  optional uint32 max_type_1_mw = 7 [default = 30];
+  optional uint32 max_type_2_mw = 6 [default = 30];
+  optional uint32 min_cq = 5 [default = 2];
+  optional uint32 min_pd = 4 [default = 2];
+  optional uint32 min_mr = 1 [default = 2];
+  optional uint32 min_type_1_mw = 2 [default = 1];
+  optional uint32 min_type_2_mw = 3 [default = 1];
 }

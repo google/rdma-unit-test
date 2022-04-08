@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "random_walk/internal/completion_profile.h"
 
 #include <cstdint>
@@ -6,6 +22,7 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
+#include <magic_enum.hpp>
 #include "infiniband/verbs.h"
 #include "public/map_util.h"
 #include "random_walk/internal/types.h"
@@ -13,28 +30,25 @@
 namespace rdma_unit_test {
 namespace random_walk {
 
-void CompletionProfile::RegisterAction(uint64_t wr_id, Action action) {
-  actions_[wr_id] = action;
-}
-
 void CompletionProfile::RegisterCompletion(const ibv_wc& completion) {
-  auto iter = actions_.find(completion.wr_id);
-  DCHECK(iter != actions_.end());
-  profiles_[iter->second][completion.status]++;
-  actions_.erase(iter);
+  ++profiles_[DecodeAction(completion.wr_id)][completion.status];
 }
 
 std::string CompletionProfile::DumpStats() const {
   std::stringstream sstream;
   sstream << "Dumping completion profile:" << std::endl;
+  sstream << "---------------------------------------------------" << std::endl;
   for (const auto& [action, profile] : profiles_) {
-    sstream << "Action : " << ActionToString(action) << std::endl;
+    sstream << "Action : " << magic_enum::enum_name(action) << std::endl;
     for (const auto& [status, count] : profile) {
       if (count > 0) {
         sstream << "  " << ibv_wc_status_str(status) << " : " << count
                 << std::endl;
       }
     }
+    sstream << "---------------------------------------------------"
+            << std::endl;
+    sstream << std::endl;
   }
 
   return sstream.str();

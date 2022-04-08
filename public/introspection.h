@@ -17,11 +17,13 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_INTROSPECTION_H_
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <tuple>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "public/verbs_util.h"
 
@@ -31,9 +33,43 @@ namespace rdma_unit_test {
 // destructable object which is created from an opened context.
 class NicIntrospection {
  public:
+  // Abstract hardware counter which might be supported by some providers.
+  enum HardwareCounter {
+    kRdmaRxRead,       // Number of inbound RDMA read ops.
+    kRdmaRxWrite,      // Number of inbound RDMA write ops.
+    kRdmaRxSend,       // Number of inbound RDMA send ops.
+    kRdmaRxAtomic,     // Number of inbound RDMA atomic ops.
+    kRdmaTxRead,       // Number of outband RDMA read ops.
+    kRdmaTxWrite,      // Number of outband RDMA write ops.
+    kRdmaTxSend,       // Number of outband RDMA send ops.
+    kRdmaTxAtomic,     // Number of outband RDMA atomics ops.
+    kRdmaBind,         // Number of RDMA bind ops.
+    kRdmaInvalidate,   // Number of RDMA invalidate ops.
+    kBadRespErr,       // Number of bad response errors.
+    kLocLenErr,        // Number of local length errors.
+    kLocProtErr,       // Number of local protection errors.
+    kLocQpOpErr,       // Number of local QP operation errors.
+    kMwBindErr,        // Number of local MW bind errors.
+    kOutOfSeqNaks,     // Number of out of sequence NAKs received.
+    kRemAbrtErr,       // Number of remote abort error.
+    kRemAccessErr,     // Number of remote access error.
+    kRemInvReqErr,     // Number of remote invalid request error.
+    kRnrNak,           // Number of RNR NAKs received.
+    kRemOpErr,         // Number of remote operation error.
+    kRnrRetryExcErr,   // Number of RNR retry counter exceeded error.
+    kRemSync,          // TODO(author2): No information.
+    kTrptRetryExcErr,  // Number of transport retry counter exceeded error.
+    kWrCmpltErr,       // Number of all CQE with an error.
+  };
+
+  // Snapshot of all hardware counters. Represented by a map to counter type
+  // to its value.
+  using CounterSnapshot = absl::flat_hash_map<HardwareCounter, uint64_t>;
+
   NicIntrospection() = delete;
   // Must use this constructor in order to use any of the other methods.
-  explicit NicIntrospection(const ibv_device_attr& attr) : attr_(attr) {}
+  NicIntrospection(const std::string& name, const ibv_device_attr& attr)
+      : name_(name), attr_(attr) {}
   virtual ~NicIntrospection() = default;
 
   // Returns if the device supports target.
@@ -95,6 +131,29 @@ class NicIntrospection {
   // memory.
   virtual bool RequiresSharedMemory() const { return false; }
 
+  // IBTA spec specified when a send WR posted to a SQ, the QP should return
+  // immediate error. However, to avoid fastpath examination, many provider
+  // will still allow the post to succeed. This boolean indicates whether
+  // the provider will silently drop the WR or keep the WR in the SQ to be
+  // processsed when the QP is in RTS.
+  virtual bool SilentlyDropSendWrWhenResetInitRtr() const { return true; }
+
+  // Returns if the providers provides a hardware counter (in sysfs).
+  bool HasCounter(HardwareCounter counter) const;
+
+  // Tries to extract a hardware counter value. Returns the value if succeeded.
+  // Otherwise, returns a status indicating the reason of failure.
+  absl::StatusOr<uint64_t> GetCounterValue(HardwareCounter counter) const;
+
+  // Returns a snapshot to all provided hardware counters.
+  CounterSnapshot GetCounterSnapshot() const;
+
+  // Dumps all hardware counter values into a string.
+  std::string DumpHardwareCounters() const;
+
+  // Returns the name of the ibverbs device.
+  const std::string device_name() const { return name_; }
+
   // Returns the device attributes.
   const ibv_device_attr& device_attr() const { return attr_; }
 
@@ -110,6 +169,16 @@ class NicIntrospection {
     return deviations;
   }
 
+  // Returns a set of <HardwareCounter, std::string> which indicates the
+  // set of hardware counters the provider supports and their corresponding
+  // names.
+  virtual const absl::flat_hash_map<HardwareCounter, std::string>&
+  GetHardwareCounters() const {
+    static const absl::flat_hash_map<HardwareCounter, std::string> counters;
+    return counters;
+  }
+
+  const std::string name_;
   ibv_device_attr attr_;
 };
 

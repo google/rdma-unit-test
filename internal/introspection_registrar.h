@@ -18,7 +18,7 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_REGISTRAR_H_
 
 #include <functional>
-#include <string_view>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -32,7 +32,8 @@ class NicIntrospection;
 
 class IntrospectionRegistrar {
  public:
-  using Factory = std::function<NicIntrospection*(const ibv_device_attr& attr)>;
+  using Factory = std::function<NicIntrospection*(
+      const std::string& device_name, const ibv_device_attr& attr)>;
 
   static IntrospectionRegistrar& GetInstance();
   Factory GetFactory(std::string_view device);

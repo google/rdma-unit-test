@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/poll.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -80,6 +81,134 @@ ABSL_FLAG(
     "event driven completions in case the CQM misses notifications.");
 
 namespace rdma_unit_test {
+namespace {
+
+void PrintAsyncEvent(struct ibv_context* ctx, struct ibv_async_event* event) {
+  switch (event->event_type) {
+    /* QP events */
+    case IBV_EVENT_QP_FATAL:
+      LOG(INFO) << "QP fatal event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_QP_REQ_ERR:
+      LOG(INFO) << "QP Requestor error for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_QP_ACCESS_ERR:
+      LOG(INFO) << "QP access error event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_COMM_EST:
+      LOG(INFO) << "QP communication established event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_SQ_DRAINED:
+      LOG(INFO) << "QP Send Queue drained event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_PATH_MIG:
+      LOG(INFO) << "QP Path migration loaded event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_PATH_MIG_ERR:
+      LOG(INFO) << "QP Path migration error event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+    case IBV_EVENT_QP_LAST_WQE_REACHED:
+      LOG(INFO) << "QP last WQE reached event for QP with handle "
+                << event->element.qp->qp_num;
+      break;
+
+    /* CQ events */
+    case IBV_EVENT_CQ_ERR:
+      LOG(INFO) << "CQ error for CQ with handle " << event->element.cq;
+      break;
+
+    /* SRQ events */
+    case IBV_EVENT_SRQ_ERR:
+      LOG(INFO) << "SRQ error for SRQ with handle " << event->element.srq;
+      break;
+    case IBV_EVENT_SRQ_LIMIT_REACHED:
+      LOG(INFO) << "SRQ limit reached event for SRQ with handle "
+                << event->element.srq;
+      break;
+
+    /* Port events */
+    case IBV_EVENT_PORT_ACTIVE:
+      LOG(INFO) << "Port active event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_PORT_ERR:
+      LOG(INFO) << "Port error event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_LID_CHANGE:
+      LOG(INFO) << "LID change event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_PKEY_CHANGE:
+      LOG(INFO) << "P_Key table change event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_GID_CHANGE:
+      LOG(INFO) << "GID table change event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_SM_CHANGE:
+      LOG(INFO) << "SM change event for port number "
+                << event->element.port_num;
+      break;
+    case IBV_EVENT_CLIENT_REREGISTER:
+      LOG(INFO) << "Client reregister event for port number "
+                << event->element.port_num;
+      break;
+
+    /* RDMA device events */
+    case IBV_EVENT_DEVICE_FATAL:
+      LOG(INFO) << "Fatal error event for device "
+                << ibv_get_device_name(ctx->device);
+      break;
+
+    default:
+      LOG(INFO) << "Unknown event " << event->event_type;
+  }
+}
+
+void HandleAsyncEvent(struct ibv_context* ctx) {
+  pollfd poll_fd{};
+  poll_fd.fd = ctx->async_fd;
+  poll_fd.events = POLLIN;
+  int millisec_timeout = 0;
+  int ret = TEMP_FAILURE_RETRY(poll(&poll_fd, 1, millisec_timeout));
+  if (ret == 0) {
+    LOG(INFO) << "No Async event";
+    return;
+  }
+
+  if (ret < 0) {
+    LOG(ERROR) << "poll failed with errno " << errno;
+  }
+
+  ibv_async_event event{};
+  ret = ibv_get_async_event(ctx, &event);
+  if (ret) {
+    LOG(INFO) << "Async event doesn't exist";
+    return;
+  }
+
+  PrintAsyncEvent(ctx, &event);
+  ibv_ack_async_event(&event);
+}
+
+void SetQpKeys(QpState* const qp_state, const ibv_mr* const src_mr,
+               const ibv_mr* const dest_mr) {
+  qp_state->set_src_lkey(src_mr->lkey);
+  qp_state->set_src_rkey(src_mr->rkey);
+  qp_state->set_dest_lkey(dest_mr->lkey);
+  qp_state->set_dest_rkey(dest_mr->rkey);
+}
+
+}  // namespace
 
 Client::Client(int client_id, ibv_context* context, ibv_pd* pd,
                verbs_util::PortGid port_gid, const Config config)
@@ -177,7 +306,7 @@ Client::~Client() {
 QpState* Client::GetQpState(uint32_t qp_id) const {
   DCHECK_LT(qp_id, qps_.size())
       << "Qp " << qp_id << " has not been created yet";
-  return qps_[qp_id].get();
+  return qps_.at(qp_id).get();
 }
 
 absl::Status Client::CreateQps(size_t count, bool is_rc, int sq_size,
@@ -205,29 +334,29 @@ absl::Status Client::CreateQps(size_t count, bool is_rc, int sq_size,
     absl::Span<uint8_t> qp_src_buf = GetQpSrcBuffer(qp_id).span();
     absl::Span<uint8_t> qp_dest_buf = GetQpDestBuffer(qp_id).span();
     if (is_rc) {
-      qps_.push_back(std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc,
-                                                 qp_src_buf, qp_dest_buf));
+      auto qp_state = std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc,
+                                                  qp_src_buf, qp_dest_buf);
+      SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
+      qps_[qp_id] = std::move(qp_state);
     } else {  // is UD
-      qps_.push_back(std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc,
-                                                 qp_src_buf, qp_dest_buf));
+      auto qp_state = std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc,
+                                                  qp_src_buf, qp_dest_buf);
+      SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
+      qps_[qp_id] = std::move(qp_state);
     }
-    qps_.back()->set_src_lkey(src_mr_[0]->lkey);
-    qps_.back()->set_src_rkey(src_mr_[0]->rkey);
-    qps_.back()->set_dest_lkey(dest_mr_[0]->lkey);
-    qps_.back()->set_dest_rkey(dest_mr_[0]->rkey);
   }
   VLOG(2) << "Client" << client_id()
-          << ", created Qp: " << qps_.back()->ToString();
+          << ", created Qp: " << qps_.at(qps_.size() - 1)->ToString();
   return absl::OkStatus();
 }
 
 absl::Status Client::DeleteQp(uint32_t qp_id) {
-  ibv_qp* qp = qps_[qp_id]->qp();
+  auto qp = qps_.at(qp_id)->qp();
   if (0 != ibv_.DestroyQp(qp)) {
     return absl::InternalError(absl::StrCat(
         "Client ", client_id(), " failed to destroy qp id ", qp_id));
   }
-  qps_[qp_id] = nullptr;
+  qps_.erase(qp_id);
   return absl::OkStatus();
 }
 
@@ -461,7 +590,7 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
 
   // 'map: [qp_id -> num_ops_completed]' to account for previously finished ops.
   absl::flat_hash_map<int, int> previously_completed_ops;
-  for (const auto& qp : qps_) {
+  for (auto const& [qp_id, qp] : qps_) {
     previously_completed_ops[qp->qp_id()] = qp->TotalOpsCompleted();
   }
 
@@ -709,7 +838,7 @@ void Client::InitializeUdSrcBuffer(uint8_t* src_addr, uint32_t length,
 
 int Client::ValidateOrDeferCompletions() {
   int num_validated = 0;
-  for (auto& qp_state : qps_) {
+  for (const auto& [qp_id, qp_state] : qps_) {
     auto op_uptr_it = qp_state->unchecked_initiated_ops().begin();
     while (op_uptr_it != qp_state->unchecked_initiated_ops().end()) {
       auto& op_uptr = *op_uptr_it;
@@ -819,7 +948,7 @@ absl::Status Client::ValidateDstBufferOrder(uint8_t* dst_addr, uint32_t length,
 
 void Client::DumpPendingOps() {
   LOG(INFO) << "Pending ops for client " << client_id() << ":";
-  for (auto& qp : qps_) {
+  for (const auto& [qp_id, qp] : qps_) {
     LOG(INFO) << "QP id: " << qp->qp_id() << ", #Posted: "
               << qp->outstanding_ops_count() + qp->TotalOpsCompleted()
               << ", #Completed: " << qp->TotalOpsCompleted()
@@ -863,6 +992,12 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
   for (int i = 0; i < returned; ++i) {
     if (StoreCompletion(&completions[i])) {
       ++num_completed;
+    } else {
+      // If completion fails, check if we have async events and ack them to move
+      // forward.
+      // TODO(bjwu) Ideally we should handle AE in a separate thread
+      // concurrently.
+      HandleAsyncEvent(context_);
     }
   }
   VLOG_EVERY_N(2, 1000) << "Received " << num_completed << " completions.";

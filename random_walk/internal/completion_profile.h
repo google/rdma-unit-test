@@ -1,3 +1,17 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_COMPLETION_PROFILE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_COMPLETION_PROFILE_H_
 
@@ -6,6 +20,7 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
+#include "infiniband/verbs.h"
 #include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {
@@ -22,11 +37,6 @@ class CompletionProfile {
   CompletionProfile& operator=(CompletionProfile&& other) = default;
   ~CompletionProfile() = default;
 
-  // Registers a wr_id and its corresponding [Action]. This step is required
-  // because for ibverbs completions (ibv_wc), its opcode is not guaranteed
-  // to be valid unless the completion status is IBV_WC_SUCCESS.
-  void RegisterAction(uint64_t wr_id, Action action);
-
   // Registers a completion entry.
   void RegisterCompletion(const ibv_wc& completion);
 
@@ -40,9 +50,6 @@ class CompletionProfile {
 
   // Stores the action profile (see type ActionProfile) for each action.
   absl::flat_hash_map<Action, ActionProfile> profiles_;
-
-  // Stores the corresponding action of each wr_id.
-  absl::flat_hash_map<uint64_t, Action> actions_;
 };
 
 }  // namespace random_walk

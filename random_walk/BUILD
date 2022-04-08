@@ -26,13 +26,14 @@ cc_test(
     linkstatic = 1,
     shard_count = 2,
     deps = [
-        "//cases:gunit_main",
         "//public:introspection",
         "//random_walk/internal:multi_node_orchestrator",
         "//random_walk/internal:random_walk_config_cc_proto",
         "//random_walk/internal:single_node_orchestrator",
+        "//unit:gunit_main",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/time",
+        "@com_google_protobuf//:protobuf",
         "@libibverbs",
     ],
 )
@@ -50,6 +51,7 @@ cc_library(
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
+        "@com_google_protobuf//:protobuf",
     ],
     alwayslink = 1,
 )

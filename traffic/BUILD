@@ -73,7 +73,7 @@ cc_library(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
-        "@com_google_protobuf//:protobuf",
+        "@com_google_protobuf//:protobuf_lite",
     ],
 )
 
@@ -169,7 +169,7 @@ cc_library(
         ":operation_generator",
         ":qp_state",
         ":transport_validation",
-        "//cases:basic_fixture",
+        "//public:basic_fixture",
         "//public:introspection",
         "//public:status_matchers",
         "//public:verbs_helper_suite",
@@ -198,11 +198,35 @@ cc_test(
     deps = [
         ":config_cc_proto",
         ":rdma_stress_fixture",
-        "//cases:gunit_main",
         "//public:status_matchers",
+        "//unit:gunit_main",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status:statusor",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "rdma_stability_test",
+    srcs = ["rdma_stability_test.cc"],
+    args = [
+        "--test_provider=bump",
+    ],
+    linkstatic = 1,
+    shard_count = 2,
+    deps = [
+        ":config_cc_proto",
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@libibverbs",
     ],
 )
@@ -220,8 +244,8 @@ cc_test(
         ":op_profiles",
         ":op_types",
         ":rdma_stress_fixture",
-        "//cases:gunit_main",
         "//public:status_matchers",
+        "//unit:gunit_main",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status:statusor",

@@ -25,13 +25,13 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
-#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
 
@@ -517,27 +517,43 @@ TEST_F(QpStateTest, PostSendReset) {
   // This deviates from IBTA spec, see comment above the test.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
   // Modify the QP to RTS before we poll for completion.
+  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
   ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
   ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
                           setup.remote_qp->qp_num));
   ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+    return;
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
 }
 
 TEST_F(QpStateTest, PostRecvReset) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RESET);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
-  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
+  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   EXPECT_THAT(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
-  // Modify the QP to RTS before we poll for completion.
-  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.local_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
-  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  // Modify local_qp to RTS state and post a send request.
+  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                           setup.remote_qp->qp_num));
+  ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  verbs_util::PostSend(setup.local_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.cq));
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
   EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
@@ -552,12 +568,22 @@ TEST_F(QpStateTest, PostSendInit) {
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
+  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
   // Modify the QP to RTS before we poll for completion.
   ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
                           setup.remote_qp->qp_num));
   ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+    return;
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
 }
 
 // We are allowed to post to recv queue in INIT or RTR state, but the WR will
@@ -567,14 +593,20 @@ TEST_F(QpStateTest, PostRecvInit) {
   ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_INIT);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
-  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
+  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   ASSERT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
-  // Modify the QP to RTS state before we poll for completion.
-  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.local_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
-  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                           setup.remote_qp->qp_num));
+  ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  verbs_util::PostSend(setup.local_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.cq));
+  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
   EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
 }
 
@@ -591,9 +623,19 @@ TEST_F(QpStateTest, PostSendRtr) {
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
+  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
   ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+  if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+    return;
+  }
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
 }
 
 TEST_F(QpStateTest, PostRecvRtr) {
@@ -603,12 +645,33 @@ TEST_F(QpStateTest, PostRecvRtr) {
                           setup.local_qp->qp_num));
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTR);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
-  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/1, &sge, /*num_sge=*/1);
+  ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   EXPECT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
   ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
-  EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
+  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
+                           setup.remote_qp->qp_num));
+  ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  verbs_util::PostSend(setup.local_qp, send);
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.cq));
+    if (completion.wr_id == 1) {
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.wr_id, 1);
+      EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
+      EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+      EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+    } else {
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.wr_id, 0);
+      EXPECT_EQ(completion.qp_num, setup.remote_qp->qp_num);
+      EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+      EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
+    }
+  }
 }
 
 TEST_F(QpStateTest, PostSendErr) {

@@ -24,7 +24,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "cases/rdma_verbs_fixture.h"
 #include "internal/verbs_extension.h"
 #include "public/flags.h"
 #include "public/introspection.h"
@@ -32,6 +31,7 @@
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
 

@@ -69,6 +69,15 @@ http_archive(
     urls = ["https://github.com/bazelbuild/rules_python/archive/4b84ad270387a7c439ebdccfd530e2339601ef27.tar.gz"],
 )
 
+
+# Magic_enum
+http_archive(
+    name = "magic_enum",
+    strip_prefix = "magic_enum-3d1f6a5a2a3fbcba077e00ad0ccc2dd9fefc2ca7",
+    sha256 = "fba702de80a13be39667a2cabc4353885d82754c167dca727577e928107f9b8e",
+    urls = ["https://github.com/Neargye/magic_enum/archive/3d1f6a5a2a3fbcba077e00ad0ccc2dd9fefc2ca7.zip"],
+)
+
 # libibverbs
 new_local_repository(
     name = "libibverbs",

@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -27,15 +28,16 @@
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
-#include "cases/loopback_fixture.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/loopback_fixture.h"
 
 namespace rdma_unit_test {
 namespace {
@@ -43,11 +45,13 @@ namespace {
 using ::testing::Each;
 using ::testing::NotNull;
 
+const int kNumHugepages = 512;
+
 class HugePageTest : public LoopbackFixture {
  public:
   void SetUp() override {
     if (!HugepageEnabled()) {
-      GTEST_SKIP() << "hugetlbfs is not mounted";
+      GTEST_SKIP() << "Hugepages not available";
     }
     if (!Introspection().SupportsRcQp()) {
       GTEST_SKIP() << "Nic does not support RC QP";
@@ -56,18 +60,15 @@ class HugePageTest : public LoopbackFixture {
 
  protected:
   static bool HugepageEnabled() {
-    struct mntent* mnt;
-    FILE* f;
-    f = setmntent(_PATH_MOUNTED, "r");
-    bool hugetlbfs_mounted = false;
-    while ((mnt = getmntent(f))) {
-      if (!strcmp(mnt->mnt_type, "hugetlbfs")) {
-        hugetlbfs_mounted = true;
-        break;
-      }
+    std::ifstream procfs("/proc/sys/vm/nr_hugepages");
+    if (procfs.fail()) {
+      return false;
     }
-    endmntent(f);
-    return hugetlbfs_mounted;
+    std::string line;
+    std::getline(procfs, line, '\0');
+    int nr_hugepages;
+    CHECK(absl::SimpleAtoi(line, &nr_hugepages));
+    return nr_hugepages >= kNumHugepages;
   }
 };
 
@@ -78,9 +79,9 @@ TEST_F(HugePageTest, SendLargeChunk) {
   ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
 
   // prepare buffer
-  RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(/*pages=*/512);
+  RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(kNumHugepages);
   memset(send_buf.data(), 'a', send_buf.size());
-  RdmaMemBlock recv_buf = ibv_.AllocHugepageBuffer(/*pages=*/512);
+  RdmaMemBlock recv_buf = ibv_.AllocHugepageBuffer(kNumHugepages);
   memset(recv_buf.data(), 'b', recv_buf.size());
   ibv_mr* send_mr = ibv_.RegMr(local.pd, send_buf);
   ibv_mr* recv_mr = ibv_.RegMr(remote.pd, recv_buf);

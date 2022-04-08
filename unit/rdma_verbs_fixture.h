@@ -12,21 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_RDMA_UNIT_TEST_CASES_RDMA_VERBS_FIXTURE_H_
-#define THIRD_PARTY_RDMA_UNIT_TEST_CASES_RDMA_VERBS_FIXTURE_H_
+#ifndef THIRD_PARTY_RDMA_UNIT_TEST_UNIT_RDMA_VERBS_FIXTURE_H_
+#define THIRD_PARTY_RDMA_UNIT_TEST_UNIT_RDMA_VERBS_FIXTURE_H_
 
-#include "cases/basic_fixture.h"
+#include "public/basic_fixture.h"
 
 namespace rdma_unit_test {
 
-// Test fixture for all unit test: Provides helper functions from member ibv_
-// to ensure all ibverbs resource automatically tears down at the end of each
+// Test fixture for all unit test:
+// 1. Provides helper functions from member ibv_ to ensure all ibverbs resource
+// automatically is auto torn down at the end of each test.
+// 2. Provides options to dump hardware counters at the start and end of each
 // test.
 class RdmaVerbsFixture : public BasicFixture {
  protected:
+  void SetUp() override;
+  void TearDown() override;
+
   VerbsHelperSuite ibv_;
 };
 
 }  // namespace rdma_unit_test
 
-#endif  // THIRD_PARTY_RDMA_UNIT_TEST_CASES_RDMA_VERBS_FIXTURE_H_
+#endif  // THIRD_PARTY_RDMA_UNIT_TEST_UNIT_RDMA_VERBS_FIXTURE_H_

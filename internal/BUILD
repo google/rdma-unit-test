@@ -51,6 +51,7 @@ cc_library(
     hdrs = ["introspection_registrar.h"],
     deps = [
         "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings",
         "@libibverbs",
     ],
 )
@@ -99,17 +100,4 @@ cc_library(
     name = "handle_garble",
     srcs = ["handle_garble.cc"],
     hdrs = ["handle_garble.h"],
-)
-
-cc_library(
-    name = "verbs_extension_cc",
-    srcs = ["verbs_extension.cc"],
-    hdrs = ["verbs_extension.h"],
-    deps = [
-        "//public:rdma_memblock",
-        "//public:verbs_util",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/status",
-        "@libibverbs",
-    ],
 )

@@ -22,8 +22,8 @@
 
 #include "absl/flags/declare.h"
 
-ABSL_DECLARE_FLAG(uint64_t, verbs_mtu);
-ABSL_DECLARE_FLAG(bool, no_ipv6_for_gid);
+ABSL_DECLARE_FLAG(bool, ipv4_only);
 ABSL_DECLARE_FLAG(std::string, device_name);
+ABSL_DECLARE_FLAG(uint64_t, completion_wait_multiplier);
 
 #endif  // THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_FLAGS_H_

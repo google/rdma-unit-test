@@ -19,11 +19,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/flags/flag.h"
 #include "absl/types/optional.h"
 #include "infiniband/verbs.h"
 #include "random_walk/internal/sampling.h"
@@ -38,12 +40,14 @@ namespace random_walk {
 // objects subject to different constraints.
 class IbvResourceManager {
  public:
+  // Metadata for CQ.
   struct CqInfo {
     // References to the CQ.
     absl::flat_hash_set<ibv_qp*> send_qps;
     absl::flat_hash_set<ibv_qp*> recv_qps;
   };
 
+  // Metadata for PD.
   struct PdInfo {
     // Reference to the PD.
     absl::flat_hash_set<ibv_qp*> rc_qps;
@@ -53,24 +57,23 @@ class IbvResourceManager {
     absl::flat_hash_set<ibv_ah*> ahs;
   };
 
+  // Metadata for a bound type 1 MW.
   using Type1MwBindInfo = ibv_mw_bind_info;
 
+  // Metadata for a bound type 2 MW.
   struct Type2MwBindInfo {
     ibv_mw* mw;
     ibv_mw_bind_info bind_info;
     uint32_t qp_num;
   };
 
-  // A helper struct encapsulating information that uniquely identifies a
-  // RdmaMemory.
+  // Key for the Metadata for a remote RKey memory.
   struct RdmaMemoryKey {
     ClientId client_id;
     uint32_t rkey;
   };
 
-  // Information about a RDMAMemory. A RDMAMemory is a section of remote
-  // memories identified by a rkey on which RDMA and atomics can be performed.
-  // It can be a memory region or a type 1 or 2 memory window.
+  // Metadata for a remote memory with an RKey.
   struct RdmaMemory {
     ClientId client_id;
     uint32_t rkey;
@@ -93,20 +96,20 @@ class IbvResourceManager {
     bool operator==(const RdmaMemoryKey& key) const;
   };
 
+  // Metadata for a remote RC QP.
   struct RemoteRcQpInfo {
     ClientId client_id;
     uint32_t qp_num;
     uint32_t pd_handle;
-    bool ready;
   };
 
-  // A helper struct encapsulating information that uniquely identifies a
-  // remote UD QP.
+  // Key for the metadata of remote UD QPs.
   struct RemoteUdQpKey {
     ClientId client_id;
     uint32_t qp_num;
   };
 
+  // Metadata for a remote UD QP.
   struct RemoteUdQpInfo {
     ClientId client_id;
     uint32_t qp_num;
@@ -126,23 +129,31 @@ class IbvResourceManager {
     bool operator==(const RemoteUdQpKey& key) const;
   };
 
-  struct RcQpInfo {
+  // Metadata for a local QP, RC or UD.
+  struct QpInfo {
     ibv_qp* qp;
     ibv_qp_cap cap;
-    RemoteRcQpInfo remote_qp;
+    // In flight ops, keep tracked of by its wr_id.
+    absl::flat_hash_set<uint64_t> inflight_ops;
+  };
+
+  // Metadata specific for a RC QP.
+  struct RcQpInfo : public QpInfo {
+    std::optional<RemoteRcQpInfo> remote_qp = std::nullopt;
     absl::flat_hash_set<ibv_mw*> type_2_mws;
   };
 
-  struct UdQpInfo {
-    ibv_qp* qp;
-    ibv_qp_cap cap;
+  // Metadata specific for a UD QP.
+  struct UdQpInfo : public QpInfo {
     uint32_t qkey;
   };
 
+  // Metadata for an MR.
   struct MrInfo {
     absl::flat_hash_set<ibv_mw*> bound_mws;
   };
 
+  // Metadata for an AH.
   struct AhInfo {
     ClientId client_id;
   };
@@ -184,14 +195,6 @@ class IbvResourceManager {
   // Returns a uniformly random PD with zero reference, i.e. without any MR, MW
   // or QP on it.
   absl::optional<ibv_pd*> GetRandomPdNoReference() const;
-  // Returns a uniformly random PD that has at least one MR, type 1 MW (bound or
-  // unbound) and RC QP. Noted that it does not guarantee the PD has a unbound
-  // type 1 MW.
-  absl::optional<ibv_pd*> GetRandomPdForType1Bind() const;
-  // Returns a uniformly random PD that has at least one MR, type 2 MW (bound or
-  // unbound) and RC QP. Noted that it does not guarantee the PD has a unbound
-  // type 2 MW.
-  absl::optional<ibv_pd*> GetRandomPdForType2Bind() const;
   // Erases a PD from the sampling pool.
   void ErasePd(ibv_pd* pd);
   // Returns the total number of PDs in the pool.
@@ -277,36 +280,41 @@ class IbvResourceManager {
   void TryEraseRdmaMemory(ClientId client_id, uint32_t rkey);
 
   // Inserts a RC QP into the sampling pool.
-  void InsertRcQp(ibv_qp* qp, ClientId client_id, const ibv_qp_cap& cap);
+  void InsertRcQp(ibv_qp* qp, const ibv_qp_cap& cap);
   // Insert a UD QP into the sampling pool.
   void InsertUdQp(ibv_qp* qp, uint32_t qkey, ibv_qp_cap cap);
-  // Returns a pointer to a RcQpInfo for a QP.
-  RcQpInfo* GetMutableRcQpInfo(ibv_qp* qp);
-  // Returns a pointer to a QpInfo for a QP specified by its qp_num.
-  RcQpInfo* GetMutableRcQpInfo(uint32_t qp_num);
-  // Returns a RcQpInfo for a QP.
+  // Returns a RcQpInfo.
   RcQpInfo GetRcQpInfo(ibv_qp* qp) const;
-  // Returns a RcQpInfo for a QP specified by its qp_num.
   RcQpInfo GetRcQpInfo(uint32_t qp_num) const;
-  // Return a UdQpInfo for a UD QP.
+  // Returns a UdQpInfo.
   UdQpInfo GetUdQpInfo(ibv_qp* qp) const;
+  // Returns a QpInfo.
+  QpInfo GetQpInfo(ibv_qp* qp) const;
+  // Returns a pointer to a RcQpInfo.
+  RcQpInfo* GetMutableRcQpInfo(ibv_qp* qp);
+  RcQpInfo* GetMutableRcQpInfo(uint32_t qp_num);
+  // Returns a pointer to a UdQPInfo.
+  UdQpInfo* GetMutableUdQpInfo(ibv_qp* qp);
+  UdQpInfo* GetMutableUdQpInfo(uint32_t qp_num);
+  // Returns a pointier to a QpInfo.
+  QpInfo* GetMutableQpInfo(ibv_qp* qp);
+  QpInfo* GetMutableQpInfo(uint32_t qp_num);
   // Returns a random QP to modify to error. The QP must be:
   // 1. In RTS state.
   // 2. If the QP is RC, the corresponding remote QP must be once brought to
   //    RTS.
-  absl::optional<ibv_qp*> GetRandomQpForModifyError() const;
+  // 3. If allow_outstanding_ops is false, qp have no outstanding ops.
+  absl::optional<ibv_qp*> GetRandomQpForModifyError(
+      bool allow_outstanding_ops) const;
   // Returns a random QP to carry out a bind op. The QP must be:
   // 1. RC QP.
   // 2. must be RTS.
-  // 3. The PD must match the pd provided.
-  absl::optional<ibv_qp*> GetRandomQpForBind(ibv_pd* pd) const;
+  absl::optional<ibv_qp*> GetRandomQpForBind() const;
   // Returns a random QP to carry out messaging. The QP must be:
   // 1. In RTS state.
   // 2. If the QP is RC, the corresponding remote QP must be once brought to
   //    RTS.
-  // 3. The PD must match the pd provided.
-  absl::optional<ibv_qp*> GetRandomQpForMessaging(ibv_pd* pd,
-                                                  ibv_qp_type qp_type) const;
+  absl::optional<ibv_qp*> GetRandomQpForMessaging(ibv_qp_type qp_type) const;
   // Returns a random Qp to carry out RDMA and atomics. The QP must be:
   // 1. RC QP.
   // 2. The corresponding remote QP must be once brought to RTS.
@@ -314,16 +322,20 @@ class IbvResourceManager {
   // 4. The PD handle of the remote QP must match with the provided pd_handle.
   absl::optional<ibv_qp*> GetRandomQpForRdma(ClientId client_id,
                                              uint32_t pd_handle) const;
-  // Gets a random QP in ERROR state.
-  absl::optional<ibv_qp*> GetRandomErrorQp() const;
-  // Gets a random QP in ERROR state with no Type 2 MW bound to it.
-  absl::optional<ibv_qp*> GetRandomErrorQpNoReference() const;
+  // Gets a random QP:
+  // 1. In ERROR state.
+  // 2. With no Type 2 MW bound to it.
+  // 3. If allow_outstanding_ops is false, qp have no outstanding ops.
+  absl::optional<ibv_qp*> GetRandomQpForDestroy(
+      bool allow_outstanding_ops) const;
   // Returns the local RC QP connected to a specific remote QP, specified by the
   // remote cient_id and qp_num. Used specifically for Rdma/Atomics on type 2
   // MWs.
   ibv_qp* GetLocalRcQp(ClientId client_id, uint32_t remote_qpn) const;
   // Erases a QP from the sampling pool.
   void EraseQp(uint32_t qp_num, ibv_qp_type qp_type);
+  // Returns the total number of QPs of specific type.
+  uint32_t QpCount(ibv_qp_type qp_type) const;
 
   // Insert a remote UD QP into the sampling pool.
   void InsertRemoteUdQp(ClientId client_id, uint32_t qp_num, uint32_t qkey);
@@ -353,7 +365,7 @@ class IbvResourceManager {
       type_2_mws_bound_;  // Key is rkey of the MW.
   absl::flat_hash_set<ibv_mw*> type_2_mws_unbound_;
   absl::flat_hash_map<uint32_t, RcQpInfo> rc_qps_;  // Key is qp number.
-  absl::flat_hash_map<uint32_t, UdQpInfo> ud_qps_;
+  absl::flat_hash_map<uint32_t, UdQpInfo> ud_qps_;  // Key is qp number.
   absl::flat_hash_set<RdmaMemory> rdma_memories_;
   absl::flat_hash_set<RemoteUdQpInfo> remote_ud_qps_;
   absl::flat_hash_map<ibv_ah*, AhInfo> ahs_;

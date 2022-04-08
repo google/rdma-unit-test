@@ -15,6 +15,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_MLX5_H_
 
+#include <string>
+
 #include "absl/container/flat_hash_map.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
@@ -33,8 +35,8 @@ class IntrospectionMlx5 : public NicIntrospection {
   // Register MLX5 NIC with the Introspection Registrar.
   static void Register() {
     IntrospectionRegistrar::GetInstance().Register(
-        "mlx5", [](const ibv_device_attr& attr) {
-          return new IntrospectionMlx5(attr);
+        "mlx5", [](const std::string& name, const ibv_device_attr& attr) {
+          return new IntrospectionMlx5(name, attr);
         });
   }
 
@@ -99,8 +101,9 @@ class IntrospectionMlx5 : public NicIntrospection {
  private:
   IntrospectionMlx5() = delete;
   ~IntrospectionMlx5() = default;
-  explicit IntrospectionMlx5(const ibv_device_attr& attr)
-      : NicIntrospection(attr) {
+  explicit IntrospectionMlx5(const std::string& name,
+                             const ibv_device_attr& attr)
+      : NicIntrospection(name, attr) {
     // ibv_queury_device incorrectly reports max_qp_wr as 32768.
     // Unable to create RC qp above 8192, and UD qp above 16384
     attr_.max_qp_wr = 8192;

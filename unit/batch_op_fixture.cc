@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "cases/batch_op_fixture.h"
+#include "unit/batch_op_fixture.h"
 
 #include <algorithm>
 #include <cstdint>

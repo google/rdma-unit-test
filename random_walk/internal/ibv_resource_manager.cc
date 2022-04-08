@@ -122,28 +122,6 @@ absl::optional<ibv_pd*> IbvResourceManager::GetRandomPdNoReference() const {
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_pd*> IbvResourceManager::GetRandomPdForType1Bind() const {
-  StreamSampler<ibv_pd*> stream_sampler;
-  for (const auto& [pd, pd_info] : pds_) {
-    if (!pd_info.mrs.empty() && !pd_info.type_1_mws.empty() &&
-        !pd_info.rc_qps.empty()) {
-      stream_sampler.UpdateSample(pd);
-    }
-  }
-  return stream_sampler.ExtractSample();
-}
-
-absl::optional<ibv_pd*> IbvResourceManager::GetRandomPdForType2Bind() const {
-  StreamSampler<ibv_pd*> stream_sampler;
-  for (const auto& [pd, pd_info] : pds_) {
-    if (!pd_info.mrs.empty() && !pd_info.type_2_mws.empty() &&
-        !pd_info.rc_qps.empty()) {
-      stream_sampler.UpdateSample(pd);
-    }
-  }
-  return stream_sampler.ExtractSample();
-}
-
 void IbvResourceManager::ErasePd(ibv_pd* pd) {
   map_util::CheckPresentAndErase(pds_, pd);
 }
@@ -369,25 +347,19 @@ void IbvResourceManager::TryEraseRdmaMemory(ClientId client_id, uint32_t rkey) {
   rdma_memories_.erase({client_id, rkey});
 }
 
-void IbvResourceManager::InsertRcQp(ibv_qp* qp, ClientId client_id,
-                                    const ibv_qp_cap& cap) {
-  RcQpInfo qp_info{.qp = qp, .cap = cap, .remote_qp{.client_id = client_id}};
-  map_util::InsertOrDie(rc_qps_, qp->qp_num, qp_info);
+void IbvResourceManager::InsertRcQp(ibv_qp* qp, const ibv_qp_cap& cap) {
+  RcQpInfo rc_qp_info;
+  rc_qp_info.qp = qp;
+  rc_qp_info.cap = cap;
+  map_util::InsertOrDie(rc_qps_, qp->qp_num, rc_qp_info);
 }
 
 void IbvResourceManager::InsertUdQp(ibv_qp* qp, uint32_t qkey, ibv_qp_cap cap) {
-  UdQpInfo qp_info{.qp = qp, .cap = cap, .qkey = qkey};
-  map_util::InsertOrDie(ud_qps_, qp->qp_num, qp_info);
-}
-
-IbvResourceManager::RcQpInfo* IbvResourceManager::GetMutableRcQpInfo(
-    ibv_qp* qp) {
-  return GetMutableRcQpInfo(qp->qp_num);
-}
-
-IbvResourceManager::RcQpInfo* IbvResourceManager::GetMutableRcQpInfo(
-    uint32_t qp_num) {
-  return map_util::FindOrNull(rc_qps_, qp_num);
+  UdQpInfo ud_qp_info;
+  ud_qp_info.qp = qp;
+  ud_qp_info.cap = cap;
+  ud_qp_info.qkey = qkey;
+  map_util::InsertOrDie(ud_qps_, qp->qp_num, ud_qp_info);
 }
 
 IbvResourceManager::RcQpInfo IbvResourceManager::GetRcQpInfo(ibv_qp* qp) const {
@@ -403,28 +375,88 @@ IbvResourceManager::UdQpInfo IbvResourceManager::GetUdQpInfo(ibv_qp* qp) const {
   return map_util::FindOrDie(ud_qps_, qp->qp_num);
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForModifyError() const {
+IbvResourceManager::QpInfo IbvResourceManager::GetQpInfo(ibv_qp* qp) const {
+  switch (qp->qp_type) {
+    case (IBV_QPT_RC): {
+      return map_util::FindOrDie(rc_qps_, qp->qp_num);
+    }
+    case (IBV_QPT_UD): {
+      return map_util::FindOrDie(ud_qps_, qp->qp_num);
+    }
+    default: {
+      LOG(FATAL) << "Unknown QP type " << qp->qp_type;  // Crash ok
+    }
+  }
+}
+
+IbvResourceManager::RcQpInfo* IbvResourceManager::GetMutableRcQpInfo(
+    ibv_qp* qp) {
+  return GetMutableRcQpInfo(qp->qp_num);
+}
+
+IbvResourceManager::RcQpInfo* IbvResourceManager::GetMutableRcQpInfo(
+    uint32_t qp_num) {
+  return map_util::FindOrNull(rc_qps_, qp_num);
+}
+
+IbvResourceManager::UdQpInfo* IbvResourceManager::GetMutableUdQpInfo(
+    ibv_qp* qp) {
+  return GetMutableUdQpInfo(qp->qp_num);
+}
+
+IbvResourceManager::UdQpInfo* IbvResourceManager::GetMutableUdQpInfo(
+    uint32_t qp_num) {
+  return map_util::FindOrNull(ud_qps_, qp_num);
+}
+
+IbvResourceManager::QpInfo* IbvResourceManager::GetMutableQpInfo(ibv_qp* qp) {
+  switch (qp->qp_type) {
+    case (IBV_QPT_RC): {
+      return map_util::FindOrNull(rc_qps_, qp->qp_num);
+    }
+    case (IBV_QPT_UD): {
+      return map_util::FindOrNull(ud_qps_, qp->qp_num);
+    }
+    default: {
+      LOG(DFATAL) << "Unknown QP type " << qp->qp_type;
+      return nullptr;
+    }
+  }
+}
+
+IbvResourceManager::QpInfo* IbvResourceManager::GetMutableQpInfo(
+    uint32_t qp_num) {
+  QpInfo* qp_info = map_util::FindOrNull(rc_qps_, qp_num);
+  if (qp_info == nullptr) {
+    qp_info = map_util::FindOrNull(ud_qps_, qp_num);
+  }
+  return qp_info;
+}
+
+absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForModifyError(
+    bool allow_outstanding_ops) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
     if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
-        qp_info.remote_qp.ready) {
+        qp_info.remote_qp.has_value() &&
+        (allow_outstanding_ops || qp_info.inflight_ops.empty())) {
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
   for (const auto& [qp_num, qp_info] : ud_qps_) {
-    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS) {
+    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
+        (allow_outstanding_ops || qp_info.inflight_ops.empty())) {
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind(
-    ibv_pd* pd) const {
+absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind() const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
     if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
-        qp_info.remote_qp.ready && qp_info.qp->pd == pd) {
+        qp_info.remote_qp.has_value()) {
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
@@ -432,20 +464,28 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind(
 }
 
 absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForMessaging(
-    ibv_pd* pd, ibv_qp_type qp_type) const {
+    ibv_qp_type qp_type) const {
   StreamSampler<ibv_qp*> stream_sampler;
-  if (qp_type == IBV_QPT_RC) {
-    for (const auto& [qp_num, qp_info] : rc_qps_) {
-      if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
-          qp_info.remote_qp.ready && qp_info.qp->pd == pd) {
-        stream_sampler.UpdateSample(qp_info.qp);
+  switch (qp_type) {
+    case (IBV_QPT_RC): {
+      for (const auto& [qp_num, qp_info] : rc_qps_) {
+        if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
+            qp_info.remote_qp.has_value()) {
+          stream_sampler.UpdateSample(qp_info.qp);
+        }
       }
+      break;
     }
-  } else {
-    for (const auto& [qp_num, qp_info] : ud_qps_) {
-      if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS) {
-        stream_sampler.UpdateSample(qp_info.qp);
+    case (IBV_QPT_UD): {
+      for (const auto& [qp_num, qp_info] : ud_qps_) {
+        if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS) {
+          stream_sampler.UpdateSample(qp_info.qp);
+        }
       }
+      break;
+    }
+    default: {
+      LOG(DFATAL) << "Unknown QP type " << qp_type;
     }
   }
   return stream_sampler.ExtractSample();
@@ -455,42 +495,30 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForRdma(
     ClientId client_id, uint32_t pd_handle) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
-    if (qp_info.qp->qp_type == IBV_QPT_RC &&
-        verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
-        qp_info.remote_qp.ready && qp_info.remote_qp.client_id == client_id &&
-        qp_info.remote_qp.pd_handle == pd_handle) {
+    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
+        qp_info.remote_qp.has_value() &&
+        qp_info.remote_qp->client_id == client_id &&
+        qp_info.remote_qp->pd_handle == pd_handle) {
+      DCHECK_EQ(qp_info.qp->qp_type, IBV_QPT_RC);
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomErrorQp() const {
-  StreamSampler<ibv_qp*> stream_sampler;
-  for (const auto& [qp_num, qp_info] : rc_qps_) {
-    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_ERR) {
-      stream_sampler.UpdateSample(qp_info.qp);
-    }
-  }
-  for (const auto& [qp_num, qp_info] : ud_qps_) {
-    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_ERR) {
-      stream_sampler.UpdateSample(qp_info.qp);
-    }
-  }
-  return stream_sampler.ExtractSample();
-}
-
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomErrorQpNoReference()
-    const {
+absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForDestroy(
+    bool allow_outstanding_ops) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
     if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_ERR &&
-        qp_info.type_2_mws.empty()) {
+        qp_info.type_2_mws.empty() &&
+        (allow_outstanding_ops || qp_info.inflight_ops.empty())) {
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
   for (const auto& [qp_num, qp_info] : ud_qps_) {
-    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_ERR) {
+    if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_ERR &&
+        (allow_outstanding_ops || qp_info.inflight_ops.empty())) {
       stream_sampler.UpdateSample(qp_info.qp);
     }
   }
@@ -500,9 +528,9 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomErrorQpNoReference()
 ibv_qp* IbvResourceManager::GetLocalRcQp(ClientId client_id,
                                          uint32_t remote_qpn) const {
   for (const auto& [qpn, qp_info] : rc_qps_) {
-    if (qp_info.remote_qp.client_id == client_id &&
-        qp_info.remote_qp.qp_num == remote_qpn) {
-      DCHECK(qp_info.remote_qp.ready);
+    if (qp_info.remote_qp.has_value() &&
+        qp_info.remote_qp->client_id == client_id &&
+        qp_info.remote_qp->qp_num == remote_qpn) {
       return qp_info.qp;
     }
   }
@@ -510,10 +538,33 @@ ibv_qp* IbvResourceManager::GetLocalRcQp(ClientId client_id,
 }
 
 void IbvResourceManager::EraseQp(uint32_t qp_num, ibv_qp_type qp_type) {
-  if (qp_type == IBV_QPT_RC) {
-    map_util::CheckPresentAndErase(rc_qps_, qp_num);
-  } else {
-    map_util::CheckPresentAndErase(ud_qps_, qp_num);
+  switch (qp_type) {
+    case (IBV_QPT_RC): {
+      map_util::CheckPresentAndErase(rc_qps_, qp_num);
+      break;
+    }
+    case (IBV_QPT_UD): {
+      map_util::CheckPresentAndErase(ud_qps_, qp_num);
+      break;
+    }
+    default: {
+      LOG(DFATAL) << "Unknown QP type: " << qp_type;
+    }
+  }
+}
+
+uint32_t IbvResourceManager::QpCount(ibv_qp_type qp_type) const {
+  switch (qp_type) {
+    case (IBV_QPT_RC): {
+      return rc_qps_.size();
+    }
+    case (IBV_QPT_UD): {
+      return ud_qps_.size();
+    }
+    default: {
+      LOG(DFATAL) << "Unknown QP type :" << qp_type;
+      return 0;
+    }
   }
 }
 

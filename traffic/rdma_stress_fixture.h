@@ -21,7 +21,7 @@
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
-#include "cases/basic_fixture.h"
+#include "public/basic_fixture.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
 #include "traffic/client.h"

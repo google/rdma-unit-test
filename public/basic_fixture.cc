@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "cases/basic_fixture.h"
+#include "public/basic_fixture.h"
 
 #include "glog/logging.h"
 #include "gtest/gtest.h"

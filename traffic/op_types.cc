@@ -58,6 +58,8 @@ std::string AbslUnparseFlag(OpTypes op_type) {
       return "fetch_add";
     case OpTypes::kInvalid:
       return "invalid";
+    default:
+      return "unknown";
   }
 }
 

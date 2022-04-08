@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/flags/declare.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
@@ -30,6 +31,12 @@
 #include "absl/types/span.h"
 
 #include "infiniband/verbs.h"
+
+ABSL_DECLARE_FLAG(ibv_mtu, verbs_mtu);
+
+bool AbslParseFlag(absl::string_view text, ibv_mtu* out, std::string* error);
+
+std::string AbslUnparseFlag(ibv_mtu mtu);
 
 namespace rdma_unit_test {
 namespace verbs_util {
@@ -62,6 +69,8 @@ constexpr uint32_t kDefaultMaxSge = 1;
 constexpr absl::Duration kDefaultCompletionTimeout = absl::Seconds(2);
 // Default timeout waiting for completion on a known qp error.
 constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(2);
+// Definition for IPv4 Loopback Address.
+constexpr std::string_view kIpV4LoopbackAddress{"127.0.0.1"};
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
 // Masks corresponding to basic attributes for modifying QP (to different
@@ -78,6 +87,9 @@ constexpr int kQpAttrRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
 //////////////////////////////////////////////////////////////////////////////
 //                          Helper Functions
 //////////////////////////////////////////////////////////////////////////////
+
+// Converts an ibv_mtu to int.
+int VerbsMtuToInt(ibv_mtu mtu);
 
 int GetIpAddressType(const ibv_gid& gid);
 
@@ -143,6 +155,8 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
 ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey);
 
 ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
+
+ibv_send_wr CreateSendWithInvalidateWr(uint64_t wr_id, uint32_t rkey);
 
 ibv_recv_wr CreateRecvWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
 
@@ -222,6 +236,10 @@ absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
                                            ibv_mr* local_mr,
                                            void* remote_buffer, uint32_t rkey,
                                            uint64_t comp_add, uint64_t swap);
+
+// Execute a local invalidate op and return completion status.
+absl::StatusOr<ibv_wc_status> LocalInvalidateSync(ibv_qp* qp, uint32_t rkey);
+
 // The return pair consists of first the send side completion status then the
 // recv side completion status.
 absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(

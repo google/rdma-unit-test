@@ -35,14 +35,14 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
-#include "cases/batch_op_fixture.h"
-#include "cases/rdma_verbs_fixture.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/batch_op_fixture.h"
+#include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
 

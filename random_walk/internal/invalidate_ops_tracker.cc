@@ -34,13 +34,9 @@ void InvalidateOpsTracker::PushInvalidate(uint64_t wr_id, uint32_t rkey,
   map_util::InsertOrDie(invalidate_wrs_, wr_id, wr);
 }
 
-absl::optional<InvalidateOpsTracker::InvalidateWr>
-InvalidateOpsTracker::TryExtractInvalidate(uint64_t wr_id) {
-  auto iter = invalidate_wrs_.find(wr_id);
-  if (iter == invalidate_wrs_.end()) {
-    return absl::nullopt;
-  }
-  return iter->second;
+InvalidateOpsTracker::InvalidateWr InvalidateOpsTracker::ExtractInvalidateWr(
+    uint64_t wr_id) {
+  return map_util::FindOrDie(invalidate_wrs_, wr_id);
 }
 
 }  // namespace random_walk

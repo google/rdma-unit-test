@@ -19,9 +19,6 @@
 
 #include <array>
 #include <cstdint>
-#include <string>
-
-#include "infiniband/verbs.h"
 
 namespace rdma_unit_test {
 namespace random_walk {
@@ -91,8 +88,12 @@ constexpr std::array<Action, 25> kActions = {Action::CREATE_CQ,
                                              Action::FETCH_ADD,
                                              Action::COMP_SWAP};
 
-// Returns a std::string which is the name of the Action.
-std::string ActionToString(const Action& action);
+// Bakes an action variable into the upper 32 bits a 64-bit WR id. The lower
+// 32-bits is given by input parameter |wr_id|.
+uint64_t EncodeAction(uint32_t wr_id, Action action);
+
+// Deciphers an Action from a 64-bit wr_id produced by EncryptAction.
+Action DecodeAction(uint64_t wr_id);
 
 }  // namespace random_walk
 }  // namespace rdma_unit_test

@@ -49,8 +49,7 @@ class InvalidateOpsTracker {
   void PushInvalidate(uint64_t wr_id, uint32_t rkey, ClientId client_id);
 
   // Retrieves and erases the invalidate op information according to its wr_id.
-  // Returns absl::nullopt when the wr is not in the record.
-  absl::optional<InvalidateWr> TryExtractInvalidate(uint64_t wr_id);
+  InvalidateWr ExtractInvalidateWr(uint64_t wr_id);
 
  private:
   absl::flat_hash_map<uint64_t, InvalidateWr> invalidate_wrs_;
