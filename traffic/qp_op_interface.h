@@ -38,9 +38,9 @@ class QpOpInterface {
     // of the Qp.
     enum class BufferType { kSrcBuffer, kDestBuffer, kInvalid };
     // Defines the number of RDMA ops to assign buffer space for.
-    uint32_t num_ops = 0;
+    int num_ops = 0;
     // Number of data bytes in each op.
-    uint32_t op_bytes = 0;
+    int op_bytes = 0;
 
     BufferType buffer_to_use = BufferType::kInvalid;
     OpTypes op_type = OpTypes::kInvalid;

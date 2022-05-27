@@ -20,6 +20,7 @@
 
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
@@ -28,7 +29,7 @@ class LoopbackFixture : public RdmaVerbsFixture {
  protected:
   struct Client {
     ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     ibv_qp* qp = nullptr;
@@ -38,7 +39,7 @@ class LoopbackFixture : public RdmaVerbsFixture {
 
   struct BasicSetup {
     ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd = nullptr;
     ibv_cq* cq = nullptr;
     ibv_qp* local_qp = nullptr;
@@ -52,8 +53,9 @@ class LoopbackFixture : public RdmaVerbsFixture {
                                               ibv_wr_opcode op_code);
 
   // Create a client given a specific QP type, memory buffer size and content.
-  absl::StatusOr<Client> CreateClient(ibv_qp_type qp_type = IBV_QPT_RC,
-                                      int pages = 1);
+  absl::StatusOr<Client> CreateClient(
+      ibv_qp_type qp_type = IBV_QPT_RC, int pages = 1,
+      QpInitAttribute qp_init_attr = QpInitAttribute());
 
   // Creates a BasicSetup struct. The object contains basic ibverbs objects that
   // facilitate a loopback connecction that sends traffic.

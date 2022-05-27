@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <cstring>
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -44,10 +43,12 @@ class PdTest : public RdmaVerbsFixture {
   static constexpr size_t kBufferMemoryPages = 1;
 };
 
-TEST_F(PdTest, OpenPd) {
+TEST_F(PdTest, AllocPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  ibv_pd* pd = ibv_.AllocPd(context);
-  EXPECT_THAT(pd, NotNull());
+  ibv_pd* pd = ibv_alloc_pd(context);
+  ASSERT_THAT(pd, NotNull());
+  EXPECT_EQ(pd->context, context);
+  EXPECT_EQ(ibv_dealloc_pd(pd), 0);
 }
 
 TEST_F(PdTest, DeleteInvalidPd) {
@@ -196,7 +197,7 @@ class PdRcLoopbackMrTest : public RdmaVerbsFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_cq* local_cq;
     ibv_cq* remote_cq;
     ibv_pd* qp_pd;
@@ -209,7 +210,7 @@ class PdRcLoopbackMrTest : public RdmaVerbsFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.local_cq = ibv_.CreateCq(setup.context);
     if (!setup.local_cq) {
       return absl::InternalError("Failed to create local cq.");
@@ -234,7 +235,8 @@ class PdRcLoopbackMrTest : public RdmaVerbsFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                            setup.port_attr));
     return setup;
   }
 };
@@ -441,14 +443,13 @@ class PdUdLoopbackTest : public RdmaVerbsFixture {
 
  protected:
   static constexpr uint32_t kClientMemoryPages = 1;
-  static constexpr uint32_t kMaxQpWr = 200;
   static constexpr int kQKey = 200;
   static constexpr size_t kPayloadSize = 1000;  // Sub-MTU size for UD.
 
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_cq* local_cq;
     ibv_cq* remote_cq;
     ibv_pd* qp_pd;
@@ -461,7 +462,7 @@ class PdUdLoopbackTest : public RdmaVerbsFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kClientMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.local_cq = ibv_.CreateCq(setup.context);
     if (!setup.local_cq) {
       return absl::InternalError("Failed to create local cq.");
@@ -478,23 +479,19 @@ class PdUdLoopbackTest : public RdmaVerbsFixture {
     if (!setup.other_pd) {
       return absl::InternalError("Failed to allocate another pd.");
     }
-    setup.local_qp =
-        ibv_.CreateQp(setup.qp_pd, setup.local_cq, setup.local_cq, nullptr,
-                      kMaxQpWr, kMaxQpWr, IBV_QPT_UD, /*sig_all=*/0);
+    setup.local_qp = ibv_.CreateQp(setup.qp_pd, setup.local_cq, IBV_QPT_UD);
     if (!setup.local_qp) {
       return absl::InternalError("Failed to create local qp.");
     }
-    absl::Status status = ibv_.SetUpUdQp(setup.local_qp, kQKey);
+    absl::Status status = ibv_.ModifyUdQpResetToRts(setup.local_qp, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up local ud qp.");
     }
-    setup.remote_qp =
-        ibv_.CreateQp(setup.qp_pd, setup.remote_cq, setup.remote_cq, nullptr,
-                      kMaxQpWr, kMaxQpWr, IBV_QPT_UD, /*sig_all=*/0);
+    setup.remote_qp = ibv_.CreateQp(setup.qp_pd, setup.remote_cq, IBV_QPT_UD);
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    status = ibv_.SetUpUdQp(setup.remote_qp, kQKey);
+    status = ibv_.ModifyUdQpResetToRts(setup.remote_qp, kQKey);
     if (!status.ok()) {
       return absl::InternalError("Failed to set up remote ud qp.");
     }
@@ -504,7 +501,7 @@ class PdUdLoopbackTest : public RdmaVerbsFixture {
 
 TEST_F(PdUdLoopbackTest, SendAhOnOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.other_pd, setup.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateLoopbackAh(setup.other_pd, setup.port_attr);
   ASSERT_THAT(ah, NotNull());
   ibv_mr* mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(mr, NotNull());
@@ -553,7 +550,8 @@ class PdType1MwTest : public LoopbackFixture {
     if (remote_qp == nullptr) {
       return absl::InternalError("Cannot create qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp));
+    RETURN_IF_ERROR(
+        ibv_.SetUpLoopbackRcQps(local_qp, remote_qp, setup.port_attr));
     absl::StatusOr<ibv_wc_status> result =
         verbs_util::BindType1MwSync(remote_qp, mw, setup.buffer.span(), mr);
     if (!result.ok()) {
@@ -634,7 +632,7 @@ class PdSrqTest : public RdmaVerbsFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_cq* cq = nullptr;
   };
 
@@ -642,7 +640,7 @@ class PdSrqTest : public RdmaVerbsFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.cq = ibv_.CreateCq(setup.context);
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
@@ -660,7 +658,7 @@ TEST_F(PdSrqTest, CreateSrq) {
   ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
   ASSERT_THAT(srq, NotNull());
-  ibv_qp* qp = ibv_.CreateQp(pd2, setup.cq, srq);
+  ibv_qp* qp = ibv_.CreateQp(pd2, setup.cq, setup.cq, srq);
   EXPECT_THAT(qp, NotNull());
 }
 
@@ -675,9 +673,9 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMatch) {
   ASSERT_THAT(srq, NotNull());
   ibv_qp* local_qp = ibv_.CreateQp(pd2, setup.cq);
   ASSERT_THAT(local_qp, NotNull());
-  ibv_qp* remote_qp = ibv_.CreateQp(pd2, setup.cq, srq);
+  ibv_qp* remote_qp = ibv_.CreateQp(pd2, setup.cq, setup.cq, srq);
   ASSERT_THAT(remote_qp, NotNull());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp, setup.port_attr));
   ibv_mr* mr_recv = ibv_.RegMr(pd1, setup.buffer);
   ASSERT_THAT(mr_recv, NotNull());
   ibv_mr* mr_send = ibv_.RegMr(pd2, setup.buffer);
@@ -710,11 +708,11 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
   ASSERT_THAT(pd1, NotNull());
   ibv_srq* srq = ibv_.CreateSrq(pd1);
   ASSERT_THAT(srq, NotNull());
-  ibv_qp* recv_qp = ibv_.CreateQp(pd2, recv_cq, srq);
+  ibv_qp* recv_qp = ibv_.CreateQp(pd2, recv_cq, recv_cq, srq);
   ASSERT_THAT(recv_qp, NotNull());
   ibv_qp* send_qp = ibv_.CreateQp(pd2, send_cq);
   ASSERT_THAT(send_qp, NotNull());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(send_qp, recv_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(send_qp, recv_qp, setup.port_attr));
   ibv_mr* mr = ibv_.RegMr(pd2, setup.buffer);
   ASSERT_THAT(mr, NotNull());
 

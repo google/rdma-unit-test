@@ -15,12 +15,16 @@
  */
 
 #include <string>
+#include <tuple>
 
 #include "glog/logging.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
+#include "absl/strings/str_format.h"
 #include "absl/time/time.h"
+#include "public/basic_fixture.h"
 #include "public/introspection.h"
+#include "random_walk/action_weights.h"
 #include "random_walk/internal/multi_node_orchestrator.h"
 #include "random_walk/internal/random_walk_config.pb.h"
 #include "random_walk/internal/single_node_orchestrator.h"
@@ -28,73 +32,35 @@
 namespace rdma_unit_test {
 namespace random_walk {
 
-class RandomWalkTest : public testing::Test {
- public:
-  const std::string kDefaultWeight = R"pb(create_cq: 1
-                                          destroy_cq: 1
-                                          allocate_pd: 2
-                                          deallocate_pd: 1
-                                          register_mr: 2
-                                          deregister_mr: 2
-                                          allocate_type_1_mw: 5
-                                          allocate_type_2_mw: 5
-                                          deallocate_type_1_mw: 5
-                                          deallocate_type_2_mw: 5
-                                          bind_type_1_mw: 5
-                                          bind_type_2_mw: 5
-                                          create_rc_qp_pair: 2
-                                          create_ud_qp: 1
-                                          modify_qp_error: 0
-                                          destroy_qp: 2
-                                          create_ah: 5
-                                          destroy_ah: 5
-                                          send: 5
-                                          send_with_inv: 0
-                                          recv: 5
-                                          read: 10
-                                          write: 10
-                                          fetch_add: 10
-                                          comp_swap: 10
-  )pb";
-
-  RandomWalkTest() {
-  }
-
-  ~RandomWalkTest() {
-  }
-
+class RandomWalkTest : public BasicFixture {
  protected:
-  static void SetUpTestSuite() {
-    Introspection();
-  }
-
-  static void TearDownTestSuite() {
-  }
+  // All random walk runs for 20 seconds. If we want to stress, use
+  // --test_per_run flag.
+  absl::Duration kRandomWalkDuration = absl::Seconds(20);
 };
 
-TEST_F(RandomWalkTest, SingleNodeTwoClientRandomWalk20SDefaultWeight) {
-  ActionWeights weights;
-  google::protobuf::TextFormat::ParseFromString(kDefaultWeight, &weights);
-  LOG(INFO) << "Debug string: " << weights.DebugString();
-  if (!Introspection().SupportsType2()) {
-    weights.set_allocate_type_2_mw(0);
-    weights.set_bind_type_2_mw(0);
-    weights.set_deallocate_type_2_mw(0);
-  }
-  SingleNodeOrchestrator orchestrator(2, weights);
-  orchestrator.RunClients(absl::Seconds(20));
+TEST_F(RandomWalkTest, SingleNodeSingleClientControlPath) {
+  ActionWeights weights = UniformControlPathActions();
+  SingleNodeOrchestrator orchestrator(1, weights);
+  orchestrator.RunClients(kRandomWalkDuration);
 }
 
-TEST_F(RandomWalkTest, MultiNodeTwoClientRandomWalk20SDefaultWeight) {
-  ActionWeights weights;
-  google::protobuf::TextFormat::ParseFromString(kDefaultWeight, &weights);
-  if (!Introspection().SupportsType2()) {
-    weights.set_allocate_type_2_mw(0);
-    weights.set_bind_type_2_mw(0);
-    weights.set_deallocate_type_2_mw(0);
-  }
+TEST_F(RandomWalkTest, SingleNodeSingleClientRdma) {
+  ActionWeights weights = SimpleRdmaActions();
+  SingleNodeOrchestrator orchestrator(1, weights);
+  orchestrator.RunClients(kRandomWalkDuration);
+}
+
+TEST_F(RandomWalkTest, SingleNodeTwoClientsRdma) {
+  ActionWeights weights = SimpleRdmaActions();
+  SingleNodeOrchestrator orchestrator(2, weights);
+  orchestrator.RunClients(kRandomWalkDuration);
+}
+
+TEST_F(RandomWalkTest, MultiNodeTwoClientsRdma) {
+  ActionWeights weights = SimpleRdmaActions();
   MultiNodeOrchestrator orchestrator(2, weights);
-  orchestrator.RunClients(absl::Seconds(20));
+  orchestrator.RunClients(kRandomWalkDuration);
 }
 
 }  // namespace random_walk

@@ -43,6 +43,7 @@
 #include "absl/types/span.h"
 #include <magic_enum.hpp>
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/map_util.h"
 #include "public/rdma_memblock.h"
@@ -87,14 +88,14 @@ RandomWalkClient::RandomWalkClient(ClientId client_id,
   memset(memory_.data(), '-', memory_.size());
   context_ = ibv_.OpenDevice().value();
   CHECK(context_);  // Crash ok
-  port_gid_ = ibv_.GetLocalPortGid(context_);
+  port_attr_ = ibv_.GetPortAttribute(context_);
 }
 
 void RandomWalkClient::AddRemoteClient(ClientId client_id, const ibv_gid& gid) {
   map_util::InsertOrDie(client_gids_, client_id, gid);
 }
 
-ibv_gid RandomWalkClient::GetGid() const { return port_gid_.gid; }
+ibv_gid RandomWalkClient::GetGid() const { return port_attr_.gid; }
 
 void RandomWalkClient::RegisterUpdateDispatcher(
     std::shared_ptr<UpdateDispatcherInterface> dispatcher) {
@@ -347,22 +348,17 @@ ibv_qp* RandomWalkClient::CreateLocalRcQp(ibv_pd* pd) {
   ibv_cq* recv_cq = send_cq_sample.value();
   DCHECK(recv_cq);
 
-  ibv_qp_init_attr init_attr = {0};
-  init_attr.send_cq = send_cq;
-  init_attr.recv_cq = recv_cq;
-  init_attr.qp_type = IBV_QPT_RC;
-  init_attr.sq_sig_all = 0;
-  init_attr.srq = nullptr;
-  init_attr.cap = verbs_util::DefaultQpCap();
-  // Randomized QP cap.
-  init_attr.cap.max_send_wr =
-      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
-  init_attr.cap.max_recv_wr =
-      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
-  init_attr.cap.max_send_sge =
-      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
-  init_attr.cap.max_recv_sge =
-      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
+  ibv_qp_init_attr init_attr =
+      QpInitAttribute()
+          .set_max_send_wr(absl::Uniform(
+              bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr))
+          .set_max_recv_wr(absl::Uniform(
+              bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr))
+          .set_max_send_sge(
+              absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge))
+          .set_max_recv_sge(
+              absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge))
+          .GetAttribute(send_cq, recv_cq, IBV_QPT_RC);
   ibv_qp* qp = ibv_.CreateQp(pd, init_attr);
   if (!qp) {
     return nullptr;
@@ -394,7 +390,8 @@ absl::Status RandomWalkClient::ModifyRcQpResetToRts(ibv_qp* local_qp,
   };
   qp_info->remote_qp = remote_qp;
   DCHECK_EQ(IBV_QPS_RESET, verbs_util::GetQpState(local_qp));
-  RETURN_IF_ERROR(ibv_.SetUpRcQp(local_qp, port_gid_, remote_gid, remote_qpn));
+  RETURN_IF_ERROR(
+      ibv_.ModifyRcQpResetToRts(local_qp, port_attr_, remote_gid, remote_qpn));
   return absl::OkStatus();
 }
 
@@ -816,11 +813,7 @@ absl::StatusCode RandomWalkClient::TryAllocType1Mw() {
 }
 
 absl::StatusCode RandomWalkClient::TryAllocType2Mw() {
-  if (!Introspection().SupportsType2()) {
-    LOG(DFATAL) << "Nic does not support type 2. Clear type 2 action weight "
-                   "before running the client.";
-    return absl::StatusCode::kInternal;
-  }
+  DCHECK(Introspection().SupportsType2()) << "NIC does not support type 2.";
   if (resource_manager_.Type2MwCount() >= caps_.max_type_2_mw()) {
     return absl::StatusCode::kFailedPrecondition;
   }
@@ -866,11 +859,7 @@ absl::StatusCode RandomWalkClient::TryDeallocType1Mw() {
 }
 
 absl::StatusCode RandomWalkClient::TryDeallocType2Mw() {
-  if (!Introspection().SupportsType2()) {
-    LOG(DFATAL) << "Nic does not support type 2. Clear type 2 action weight "
-                   "before running the client.";
-    return absl::StatusCode::kInternal;
-  }
+  DCHECK(Introspection().SupportsType2()) << "NIC does not support type 2.";
   if (resource_manager_.Type2MwCount() <= caps_.min_type_2_mw()) {
     return absl::StatusCode::kFailedPrecondition;
   }
@@ -930,11 +919,7 @@ absl::StatusCode RandomWalkClient::TryBindType1Mw() {
 }
 
 absl::StatusCode RandomWalkClient::TryBindType2Mw() {
-  if (!Introspection().SupportsType2()) {
-    LOG(DFATAL) << "Nic does not support type 2. Clear type 2 action weight "
-                   "before running the client.";
-    return absl::StatusCode::kInternal;
-  }
+  DCHECK(Introspection().SupportsType2()) << "NIC does not support type 2.";
   auto qp_sample = resource_manager_.GetRandomQpForBind();
   if (!qp_sample.has_value()) {
     return absl::StatusCode::kFailedPrecondition;
@@ -1027,23 +1012,17 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
   ibv_cq* recv_cq = send_cq_sample.value();
   DCHECK(recv_cq);
 
-  ibv_qp_init_attr init_attr = {0};
-  init_attr.send_cq = send_cq;
-  init_attr.recv_cq = recv_cq;
-  init_attr.qp_type = IBV_QPT_UD;
-  init_attr.sq_sig_all = 0;
-  init_attr.srq = nullptr;
-  init_attr.cap = verbs_util::DefaultQpCap();
-  // Randomized QP cap.
-  init_attr.cap.max_send_wr =
-      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
-  init_attr.cap.max_recv_wr =
-      absl::Uniform(bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr);
-  init_attr.cap.max_send_sge =
-      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
-  init_attr.cap.max_recv_sge =
-      absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge);
-
+  ibv_qp_init_attr init_attr =
+      QpInitAttribute()
+          .set_max_send_wr(absl::Uniform(
+              bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr))
+          .set_max_recv_wr(absl::Uniform(
+              bitgen_, kMinQpWr, Introspection().device_attr().max_qp_wr))
+          .set_max_send_sge(
+              absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge))
+          .set_max_recv_sge(
+              absl::Uniform(bitgen_, 1, Introspection().device_attr().max_sge))
+          .GetAttribute(send_cq, recv_cq, IBV_QPT_UD);
   ibv_qp* qp = ibv_.CreateQp(pd, init_attr);
   log_.PushCreateQp(qp);
   if (!qp) {
@@ -1051,7 +1030,7 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
     return absl::StatusCode::kInternal;
   }
   uint32_t qkey = absl::Uniform<uint32_t>(bitgen_);
-  auto status = ibv_.SetUpUdQp(qp, qkey);
+  auto status = ibv_.ModifyUdQpResetToRts(qp, qkey);
   if (!status.ok()) {
     CHECK_EQ(0, ibv_.DestroyQp(qp));  // Crash ok
     LOG(DFATAL) << "Failed to bring up UD QP (" << status << ").";
@@ -1088,7 +1067,7 @@ absl::StatusCode RandomWalkClient::TryModifyQpError() {
   ibv_qp* qp = qp_sample.value();
   DCHECK(qp);
 
-  CHECK_OK(ibv_.SetQpError(qp));  // Crash ok
+  CHECK_OK(ibv_.ModifyQpToError(qp));  // Crash ok
   ++stats_.modify_qp_error;
 
   return absl::StatusCode::kOk;
@@ -1118,7 +1097,7 @@ absl::StatusCode RandomWalkClient::TryCreateAh() {
   ibv_gid gid;
   std::tie(client_id, gid) = gid_sample.value();
 
-  ibv_ah* ah = ibv_.CreateAh(pd, gid);
+  ibv_ah* ah = ibv_.CreateLoopbackAh(pd, port_attr_);
   log_.PushCreateAh(pd, client_id, ah);
   if (!ah) {
     LOG(DFATAL) << "Failed to create ah (" << errno << ").";

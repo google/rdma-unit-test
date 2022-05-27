@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include "public/status_matchers.h"
 #include "traffic/op_profiles.h"
 #include "traffic/op_types.h"
+#include "traffic/operation_generator.h"
 #include "traffic/rdma_stress_fixture.h"
 
 ABSL_FLAG(int, total_ops, 1000000,
@@ -40,130 +42,103 @@ ABSL_FLAG(int, total_ops, 1000000,
 namespace rdma_unit_test {
 namespace {
 
-struct BasicRcTestParameter {
-  std::string test_name;
-  int num_qps;
-  int op_size;
-  int total_ops;
-};
+class BasicRcTest : public RdmaStressFixture {
+ protected:
+  struct Config {
+    int num_qps = 1;
+    int op_size = 64;
+    int num_ops = 1;
+    OperationGenerator* op_generator;
+  };
 
-class BasicRcTest : public RdmaStressFixture,
-                    public testing::WithParamInterface<BasicRcTestParameter> {};
+  // Perform RC communication between two Clients:
+  // `num_qps`: number of QPs on each client.
+  // `op_size`: the size of each operation.
+  // `num_ops`: The total number of operations performed, evenly distributed
+  // across each client. `op_generator`: See OperationGenerator, used to
+  // generate operation parameters.
+  void ExecuteRcTest(const Config& config) {
+    constexpr int kMaxInflightOpsPerQp = 32;
+    constexpr int kBatchPerQp = 8;
 
-TEST_P(BasicRcTest, BasicRcTests) {
-  BasicRcTestParameter parameters = GetParam();
-  int num_qps = parameters.num_qps;
-  int op_size = parameters.op_size;
-  int total_ops = parameters.total_ops;
-  // Make sure that max_inflight_ops is large enough for the maximum number of
-  // qps used for this test.
-  constexpr int kMaxInflightOpsPerQp = 16;
-  constexpr int kBatchPerQp = 8;
-  int max_inflight_ops = kMaxInflightOpsPerQp * num_qps;
+    // Create two clients for the test.
+    const Client::Config client_config = {
+        .max_op_size =
+            std::max(config.op_size, config.op_generator->MaxOpSize()),
+        .max_outstanding_ops_per_qp = kMaxInflightOpsPerQp,
+        .max_qps = config.num_qps};
+    Client initiator(/*client_id=*/0, context(), port_attr(), client_config),
+        target(/*client_id=*/1, context(), port_attr(), client_config);
+    LOG(INFO) << "initiator id: " << initiator.client_id()
+              << ", target id: " << target.client_id();
+    CreateSetUpRcQps(initiator, target, config.num_qps);
 
-  // Create two clients for the test.
-  const Client::Config client_config = {
-      .max_op_size = op_size,
-      .max_outstanding_ops_per_qp = max_inflight_ops,
-      .max_qps = num_qps};
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   client_config),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), client_config);
-  LOG(INFO) << "initiator id: " << initiator.client_id()
-            << ", target id: " << target.client_id();
-  CreateSetUpRcQps(initiator, target, num_qps);
-  int ops_per_qp = total_ops / num_qps;
+    LOG(INFO) << "Executing " << config.num_ops << " " << config.op_size
+              << "B ops on " << config.num_ops << " qps.";
 
-  // Test each op type independently.
-  for (OpTypes op_type : {OpTypes::kRead, OpTypes::kWrite, OpTypes::kSend}) {
-    ConfigureLatencyMeasurements(op_type);
-    LOG(INFO) << "Executing " << op_size << "B " << TestOp::ToString(op_type)
-              << " on " << num_qps << " qps.";
-
-    // Test this combination of number of qps, op size, and
-    // op type
-    auto op_generator = ConstantRcOperationGenerator(op_type, op_size);
-    for (int qp_id = 0; qp_id < num_qps; ++qp_id) {
-      initiator.GetQpState(qp_id)->set_op_generator(&op_generator);
+    for (int qp_id = 0; qp_id < config.num_qps; ++qp_id) {
+      initiator.qp_state(qp_id)->set_op_generator(config.op_generator);
     }
-    initiator.ExecuteOps(target, num_qps, ops_per_qp, kBatchPerQp,
-                         kMaxInflightOpsPerQp, max_inflight_ops);
+
+    initiator.ExecuteOps(
+        target, config.num_qps, config.num_ops / config.num_qps, kBatchPerQp,
+        kMaxInflightOpsPerQp, kMaxInflightOpsPerQp * config.num_qps);
 
     HaltExecution(initiator);
     CollectClientLatencyStats(initiator);
+    DumpState(initiator);
+    EXPECT_THAT(validation_->PostTestValidation(), IsOk());
+    CheckLatencies();
   }
+};
 
-  DumpState(initiator);
-  EXPECT_THAT(validation_->PostTestValidation(), IsOk());
-  CheckLatencies();
+// This test encompasses http://b/176186131
+TEST_F(BasicRcTest, MixedRcOps) {
+  RandomizedOperationGenerator op_generator(MixedRcOpProfile());
+  const Config kConfig{
+      .num_qps = 100,
+      .op_size = op_generator.MaxOpSize(),
+      .num_ops = absl::GetFlag(FLAGS_total_ops),
+      .op_generator = &op_generator,
+  };
+
+  ExecuteRcTest(kConfig);
 }
 
-std::vector<BasicRcTestParameter> GenerateVaryQpOpSizePameters(
-    std::vector<int> qps_options, std::vector<int> op_size_options,
-    std::vector<int> total_ops_options) {
-  std::vector<BasicRcTestParameter> params;
-  for (int qps : qps_options) {
-    for (int op_size : op_size_options) {
-      for (int total_ops : total_ops_options) {
-        BasicRcTestParameter param{
-            .test_name = absl::StrFormat("%dQp%dBytes%dOpsTest", qps, op_size,
-                                         total_ops),
-            .num_qps = qps,
-            .op_size = op_size,
-            .total_ops = total_ops,
-        };
-        params.push_back(param);
-      }
-    }
-  }
-  return params;
+class RcConstantOpTest : public BasicRcTest,
+                         public testing::WithParamInterface<std::tuple<
+                             /*num_qps*/ int, /*op_size*/ int, OpTypes>> {};
+
+TEST_P(RcConstantOpTest, Basic) {
+  const int kNumQps = std::get<0>(GetParam());
+  const int kOpSize = std::get<1>(GetParam());
+  const int kNumOps = absl::GetFlag(FLAGS_total_ops);
+  const OpTypes kOpType = std::get<2>(GetParam());
+  ConstantRcOperationGenerator op_generator(kOpType, kOpSize);
+  const Config kConfig{.num_qps = kNumQps,
+                       .op_size = kOpSize,
+                       .num_ops = kNumOps,
+                       .op_generator = &op_generator};
+
+  ConfigureLatencyMeasurements(kOpType);
+  ExecuteRcTest(kConfig);
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    VaryQpOpSizeTests, BasicRcTest,
-    testing::ValuesIn(GenerateVaryQpOpSizePameters(
-        /*qps_options=*/{1, 10},
-        /*op_size_options=*/
-        {64, 512, 1024, 2 * 1024, 4 * 1024, 8 * 1024, 16 * 1024},
-        /*total_ops_options=*/{absl::GetFlag(FLAGS_total_ops)})),
-    [](const testing::TestParamInfo<BasicRcTest::ParamType>& info) {
-      return info.param.test_name;
+    Basic, RcConstantOpTest,
+    testing::Combine(
+        /*num_qps=*/testing::Values(1, 10),
+        /*op_size=*/
+        testing::Values(64, 512, 1024, 2 * 1024, 4 * 1024, 8 * 1024, 16 * 1024),
+        testing::Values(OpTypes::kRead, OpTypes::kWrite, OpTypes::kSend)),
+    [](const testing::TestParamInfo<RcConstantOpTest::ParamType>& info) {
+      const int num_qps = std::get<0>(info.param);
+      const int op_size = std::get<1>(info.param);
+      const int num_ops = absl::GetFlag(FLAGS_total_ops);
+      const OpTypes op_type = std::get<2>(info.param);
+      return absl::StrFormat("%dQps%dByteOp%dOps%s", num_qps, op_size, num_ops,
+                             TestOp::ToString(op_type));
     });
-
-// This test encompasses http://b/176186131
-TEST_F(BasicRcTest, MixedOpTypeSizeTest) {
-  RandomizedOperationGenerator rc_op_generator(MixedRcOpProfile());
-  const int max_op_bytes = rc_op_generator.MaxOpSize();
-  constexpr int kNumQps = 100;
-  constexpr int kMaxInflightOps = 32;
-
-  // Create two clients for the test.
-  const Client::Config kClientConfig = {
-      .max_op_size = max_op_bytes,
-      .max_outstanding_ops_per_qp = kMaxInflightOps,
-      .max_qps = kNumQps};
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
-  LOG(INFO) << "initiator id: " << initiator.client_id()
-            << ", target id: " << target.client_id();
-
-  CreateSetUpRcQps(initiator, target, kNumQps);
-  for (int qp_id = 0; qp_id < kNumQps; ++qp_id) {
-    initiator.GetQpState(qp_id)->set_op_generator(&rc_op_generator);
-  }
-
-  const int kTotalOps = absl::GetFlag(FLAGS_total_ops);
-  const int kOpsPerQp = kTotalOps / kNumQps;
-  initiator.ExecuteOps(target, kNumQps, kOpsPerQp, /*batch_per_qp=*/1,
-                       kMaxInflightOps, kMaxInflightOps);
-
-  HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
-  EXPECT_THAT(validation_->PostTestValidation(), IsOk());
-  CheckLatencies();
-}
 
 }  // namespace
 }  // namespace rdma_unit_test

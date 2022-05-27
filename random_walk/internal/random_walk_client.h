@@ -32,12 +32,9 @@
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "infiniband/verbs.h"
-#include "public/flags.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_helper_suite.h"
-#include "public/verbs_util.h"
 #include "random_walk/internal/bind_ops_tracker.h"
-#include "random_walk/internal/client_update_service.grpc.pb.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/completion_profile.h"
 #include "random_walk/internal/ibv_resource_manager.h"
@@ -291,7 +288,7 @@ class RandomWalkClient : public InboundUpdateInterface {
   RdmaMemBlock memory_;
   // - Other static resource for clients.
   ibv_context* context_;
-  verbs_util::PortGid port_gid_;
+  PortAttribute port_attr_;
   uint32_t next_raw_wr_id_ = 0;
 
   // Resource manager for MW, MR, and QP.

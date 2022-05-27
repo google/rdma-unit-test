@@ -14,6 +14,8 @@
 
 #include "public/verbs_helper_suite.h"
 
+#include <sys/socket.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -25,12 +27,13 @@
 #include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
+#include <magic_enum.hpp>
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "internal/verbs_cleanup.h"
 #include "internal/verbs_extension.h"
 #include "public/flags.h"
@@ -42,105 +45,145 @@
 namespace rdma_unit_test {
 
 VerbsHelperSuite::VerbsHelperSuite()
-    : extension_(InitVerbsExtension()),
-      cleanup_(std::make_unique<VerbsCleanup>()) {}
+    : extension_([]() -> std::unique_ptr<VerbsExtension> {
+        return std::make_unique<VerbsExtension>();
+      }()) {}
 
-absl::Status VerbsHelperSuite::SetUpRcQp(ibv_qp* local_qp,
-                                         const verbs_util::PortGid& local,
-                                         ibv_gid remote_gid,
-                                         uint32_t remote_qpn) {
-  RETURN_IF_ERROR(SetQpInit(local_qp, local.port));
-  RETURN_IF_ERROR(SetQpRtr(local_qp, local, remote_gid, remote_qpn));
-  return SetQpRts(local_qp);
-}
-
-absl::Status VerbsHelperSuite::SetUpRcQp(ibv_qp* local_qp, ibv_qp* remote_qp) {
-  verbs_util::PortGid local = GetLocalPortGid(local_qp->context);
-  verbs_util::PortGid remote = GetLocalPortGid(remote_qp->context);
-  return SetUpRcQp(local_qp, local, remote.gid, remote_qp->qp_num);
-}
-
-absl::Status VerbsHelperSuite::SetUpLoopbackRcQps(ibv_qp* qp1, ibv_qp* qp2) {
-  verbs_util::PortGid local1 = GetLocalPortGid(qp1->context);
-  verbs_util::PortGid local2 = GetLocalPortGid(qp2->context);
-  RETURN_IF_ERROR(SetUpRcQp(qp1, local1, local2.gid, qp2->qp_num));
-  return SetUpRcQp(qp2, local2, local1.gid, qp1->qp_num);
-}
-
-absl::Status VerbsHelperSuite::SetUpUdQp(ibv_qp* qp, verbs_util::PortGid local,
-                                         uint32_t qkey) {
-  ibv_qp_attr mod_init = {};
-  mod_init.qp_state = IBV_QPS_INIT;
-  mod_init.pkey_index = 0;
-  mod_init.port_num = local.port;
-  mod_init.qkey = qkey;
-  constexpr int kInitMask =
-      IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
-  if (ibv_modify_qp(qp, &mod_init, kInitMask) != 0) {
-    // TODO(author1): Go through and return errno for all of these
-    return absl::InternalError("Modify Qp (init) failed.");
+absl::Status VerbsHelperSuite::ModifyRcQpResetToRts(ibv_qp* local_qp,
+                                                    const PortAttribute& local,
+                                                    ibv_gid remote_gid,
+                                                    uint32_t remote_qpn,
+                                                    QpAttribute qp_attr) {
+  int result_code = ModifyRcQpResetToInit(local_qp, local.port, qp_attr);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP from RESET to INIT failed (%d).", result_code));
   }
+  result_code =
+      ModifyRcQpInitToRtr(local_qp, local, remote_gid, remote_qpn, qp_attr);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP from INIT to RTR failed (%d).", result_code));
+  }
+  result_code = ModifyRcQpRtrToRts(local_qp, qp_attr);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP from RTR to RTS failed (%d).", result_code));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status VerbsHelperSuite::ModifyLoopbackRcQpResetToRts(
+    ibv_qp* source_qp, ibv_qp* destination_qp, const PortAttribute& port_attr,
+    QpAttribute qp_attr) {
+  return ModifyRcQpResetToRts(source_qp, port_attr, port_attr.gid,
+                              destination_qp->qp_num, qp_attr);
+}
+
+int VerbsHelperSuite::ModifyRcQpResetToInit(ibv_qp* qp, uint8_t port,
+                                            QpAttribute qp_attr) {
+  ibv_qp_attr mod_init = qp_attr.GetRcResetToInitAttr(port);
+  int mask = qp_attr.GetRcResetToInitMask();
+
+  int result_code = ibv_modify_qp(qp, &mod_init, mask);
+  VLOG(1) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
+                             result_code);
+  return result_code;
+}
+
+int VerbsHelperSuite::ModifyRcQpInitToRtr(ibv_qp* qp,
+                                          const PortAttribute& local,
+                                          ibv_gid remote_gid,
+                                          uint32_t remote_qpn,
+                                          QpAttribute qp_attr) {
+  ibv_qp_attr mod_rtr = qp_attr.GetRcInitToRtrAttr(local.port, local.gid_index,
+                                                   remote_gid, remote_qpn);
+  int mask = qp_attr.GetRcInitToRtrMask();
+  LOG_IF(WARNING, mod_rtr.path_mtu > local.attr.active_mtu)
+      << absl::StrFormat("Path mtu %d bigger than port active mtu %d.",
+                         128 << mod_rtr.path_mtu, 128 << local.attr.active_mtu);
+  int result_code = extension().ModifyRcQpInitToRtr(qp, mod_rtr, mask);
+  VLOG(1) << absl::StrFormat("Modified QP (%p) from INIT to RTR (%d).", qp,
+                             result_code);
+  return result_code;
+}
+
+int VerbsHelperSuite::ModifyRcQpRtrToRts(ibv_qp* qp, QpAttribute qp_attr) {
+  ibv_qp_attr mod_rts = qp_attr.GetRcRtrToRtsAttr();
+  int mask = qp_attr.GetRcRtrToRtsMask();
+  int result_code = ibv_modify_qp(qp, &mod_rts, mask);
+  VLOG(1) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
+                             result_code);
+  return result_code;
+}
+
+absl::Status VerbsHelperSuite::SetUpLoopbackRcQps(
+    ibv_qp* source_qp, ibv_qp* destination_qp, const PortAttribute& port_attr,
+    QpAttribute qp_attr) {
+  RETURN_IF_ERROR(ModifyRcQpResetToRts(source_qp, port_attr, port_attr.gid,
+                                       destination_qp->qp_num, qp_attr));
+  return ModifyRcQpResetToRts(destination_qp, port_attr, port_attr.gid,
+                              source_qp->qp_num, qp_attr);
+}
+
+absl::Status VerbsHelperSuite::ModifyUdQpResetToRts(ibv_qp* qp,
+                                                    const PortAttribute& local,
+                                                    uint32_t qkey,
+                                                    QpAttribute qp_attr) {
+  ibv_qp_attr mod_init = qp_attr.GetUdResetToInitAttr(local.port, qkey);
+  int mask = qp_attr.GetUdResetToInitMask();
+  int result_code = ibv_modify_qp(qp, &mod_init, mask);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modify QP from RESET to INIT failed (%d).", result_code));
+  }
+  VLOG(1) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
+                             result_code);
 
   // Ready to receive.
-  ibv_qp_attr mod_rtr = {};
-  mod_rtr.qp_state = IBV_QPS_RTR;
-  constexpr int kRtrMask = IBV_QP_STATE;
-  if (ibv_modify_qp(qp, &mod_rtr, kRtrMask) != 0) {
-    return absl::InternalError("Modify QP (RtR) failed.");
+  ibv_qp_attr mod_rtr = qp_attr.GetUdInitToRtrAttr();
+  mask = qp_attr.GetUdInitToRtrMask();
+  result_code = ibv_modify_qp(qp, &mod_rtr, mask);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP from INIT to RTR failed (%d).", result_code));
   }
+  VLOG(1) << absl::StrFormat("Modify QP (%p) from INIT to RTR (%d).", qp,
+                             result_code);
 
   // Ready to send.
-  ibv_qp_attr mod_rts = {};
-  mod_rts.qp_state = IBV_QPS_RTS;
-  mod_rts.sq_psn =
-      1225;  // TODO(author1): Eventually randomize for reality.
-  constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN;
-  if (ibv_modify_qp(qp, &mod_rts, kRtsMask) != 0) {
-    return absl::InternalError("Modify Qp (RtS) failed.");
-  }
-  return absl::OkStatus();
-}
-
-absl::Status VerbsHelperSuite::SetUpUdQp(ibv_qp* qp, uint32_t qkey) {
-  return SetUpUdQp(qp, GetLocalPortGid(qp->context), qkey);
-}
-
-absl::Status VerbsHelperSuite::SetQpInit(ibv_qp* qp, uint8_t port) {
-  ibv_qp_attr mod_init = verbs_util::CreateBasicQpAttrInit(port);
-  int result_code = ibv_modify_qp(qp, &mod_init, verbs_util::kQpAttrInitMask);
+  ibv_qp_attr mod_rts = qp_attr.GetUdRtrToRtsAttr();
+  mask = qp_attr.GetUdRtrToRtsMask();
+  result_code = ibv_modify_qp(qp, &mod_rts, mask);
   if (result_code) {
-    return absl::InternalError(
-        absl::StrCat("Modify QP (Init) failed (", result_code, ")."));
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP from RTR to RTS failed (%d).", result_code));
+  }
+  VLOG(1) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
+                             result_code);
+  return absl::OkStatus();
+}
+
+absl::Status VerbsHelperSuite::ModifyUdQpResetToRts(ibv_qp* qp, uint32_t qkey,
+                                                    QpAttribute qp_attr) {
+  return ModifyUdQpResetToRts(qp, GetPortAttribute(qp->context), qkey, qp_attr);
+}
+
+absl::Status VerbsHelperSuite::ModifyQpToError(ibv_qp* qp) const {
+  ibv_qp_attr attr{.qp_state = IBV_QPS_ERR};
+  int result_code = ModifyQp(qp, attr, IBV_QP_STATE);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP to ERROR state failed (%d).", result_code));
   }
   return absl::OkStatus();
 }
 
-absl::Status VerbsHelperSuite::SetQpRtr(ibv_qp* qp,
-                                        const verbs_util::PortGid& local,
-                                        ibv_gid remote_gid,
-                                        uint32_t remote_qpn) {
-  return extension()->SetQpRtr(qp, local, remote_gid, remote_qpn);
-}
-
-absl::Status VerbsHelperSuite::SetQpRts(ibv_qp* qp) {
-  ibv_qp_attr mod_rts = verbs_util::CreateBasicQpAttrRts();
-  int result_code = ibv_modify_qp(qp, &mod_rts, verbs_util::kQpAttrRtsMask);
-  if (result_code != 0) {
-    return absl::InternalError(
-        absl::StrCat("Modify QP (Rts) failed (", result_code, ")."));
-  }
-  return absl::OkStatus();
-}
-
-absl::Status VerbsHelperSuite::SetQpError(ibv_qp* qp) {
-  ibv_qp_attr modify_error = {};
-  modify_error.qp_state = IBV_QPS_ERR;
-  int result_code = ibv_modify_qp(qp, &modify_error, IBV_QP_STATE);
-  if (result_code != 0) {
-    return absl::InternalError(
-        absl::StrCat("Modify QP (Error) failed (", result_code, ")."));
-  }
-  return absl::OkStatus();
+int VerbsHelperSuite::ModifyQp(ibv_qp* qp, ibv_qp_attr& attr, int mask) const {
+  int result_code = ibv_modify_qp(qp, &attr, mask);
+  VLOG(1) << absl::StrFormat("Modify QP (%p) to %s (%d).", qp,
+                             magic_enum::enum_name(attr.qp_state), result_code);
+  return result_code;
 }
 
 RdmaMemBlock VerbsHelperSuite::AllocBuffer(int pages,
@@ -162,7 +205,7 @@ RdmaMemBlock VerbsHelperSuite::AllocHugepageBuffer(int pages) {
 RdmaMemBlock VerbsHelperSuite::AllocAlignedBufferByBytes(size_t bytes,
                                                          size_t alignment,
                                                          bool huge_page) {
-  auto block = absl::make_unique<RdmaMemBlock>(bytes, alignment, huge_page);
+  auto block = std::make_unique<RdmaMemBlock>(bytes, alignment, huge_page);
   DCHECK(block);
   memset(block->data(), '-', block->size());
   RdmaMemBlock result = *block;
@@ -171,8 +214,7 @@ RdmaMemBlock VerbsHelperSuite::AllocAlignedBufferByBytes(size_t bytes,
   return result;
 }
 
-absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
-    bool no_ipv6_for_gid) {
+absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice() {
   std::vector<std::string> device_names;
   if (!absl::GetFlag(FLAGS_device_name).empty()) {
     device_names.push_back(absl::GetFlag(FLAGS_device_name));
@@ -184,7 +226,7 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
   }
 
   ibv_context* context = nullptr;
-  std::vector<verbs_util::PortGid> port_gids;
+  std::vector<PortAttribute> port_attrs;
   for (auto& device_name : device_names) {
     absl::StatusOr<ibv_context*> context_or =
         verbs_util::OpenUntrackedDevice(device_name);
@@ -194,11 +236,11 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
       continue;
     }
     context = context_or.value();
-    absl::StatusOr<std::vector<verbs_util::PortGid>> enum_result =
-        verbs_util::EnumeratePortGidsForContext(context);
+    absl::StatusOr<std::vector<PortAttribute>> enum_result =
+        EnumeratePorts(context);
     if (enum_result.ok() && !enum_result.value().empty()) {
-      port_gids = enum_result.value();
-      VLOG(1) << "Found (" << port_gids.size()
+      port_attrs = enum_result.value();
+      VLOG(1) << "Found (" << port_attrs.size()
               << ") active ports for device: " << device_name;
       // Just need one device with active ports. Break at this point.
       break;
@@ -208,23 +250,38 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice(
     LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
     context = nullptr;
   }
-  if (!context || port_gids.empty()) {
+  if (!context || port_attrs.empty()) {
     return absl::InternalError("Failed to open a device with active ports.");
   }
-  cleanup_->AddCleanup(context);
+  cleanup_.AddCleanup(context);
 
-  absl::MutexLock guard(&mtx_port_gids_);
-  port_gids_[context] = port_gids;
+  absl::MutexLock guard(&mtx_port_attrs_);
+  port_attrs_[context] = port_attrs;
+
+  VLOG(1) << "Opened device " << context;
 
   return context;
 }
 
-ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid,
-                                   uint8_t traffic_class) {
-  verbs_util::PortGid local = GetLocalPortGid(pd->context);
-  ibv_ah* ah = extension()->CreateAh(pd, local, remote_gid, traffic_class);
+ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, uint8_t port, uint8_t sgid_index,
+                                   ibv_gid remote_gid, AhAttribute ah_attr) {
+  ibv_ah_attr attr = ah_attr.GetAttribute(port, sgid_index, remote_gid);
+  return CreateAh(pd, attr);
+}
+
+ibv_ah* VerbsHelperSuite::CreateLoopbackAh(ibv_pd* pd,
+                                           const PortAttribute& port_attr,
+                                           AhAttribute ah_attr) {
+  ibv_ah_attr attr =
+      ah_attr.GetAttribute(port_attr.port, port_attr.gid_index, port_attr.gid);
+  return CreateAh(pd, attr);
+}
+
+ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
+  ibv_ah* ah = extension().CreateAh(pd, ah_attr);
   if (ah) {
-    cleanup_->AddCleanup(ah);
+    VLOG(1) << "Created AH " << ah;
+    cleanup_.AddCleanup(ah);
   }
   return ah;
 }
@@ -232,7 +289,8 @@ ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_gid remote_gid,
 int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
   int result = ibv_destroy_ah(ah);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(ah);
+    VLOG(1) << "Destroyed AH " << ah;
+    cleanup_.ReleaseCleanup(ah);
   }
   return result;
 }
@@ -240,7 +298,8 @@ int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
 ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
   ibv_pd* pd = ibv_alloc_pd(context);
   if (pd) {
-    cleanup_->AddCleanup(pd);
+    VLOG(1) << "Allocated PD " << pd;
+    cleanup_.AddCleanup(pd);
   }
   return pd;
 }
@@ -248,29 +307,36 @@ ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
 int VerbsHelperSuite::DeallocPd(ibv_pd* pd) {
   int result = ibv_dealloc_pd(pd);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(pd);
+    VLOG(1) << "Deallocated PD " << pd;
+    cleanup_.ReleaseCleanup(pd);
   }
   return result;
 }
 
 ibv_mr* VerbsHelperSuite::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
                                 int access) {
-  ibv_mr* mr = extension()->RegMr(pd, memblock, access);
+  ibv_mr* mr = extension().RegMr(pd, memblock, access);
   if (mr) {
-    cleanup_->AddCleanup(mr);
+    VLOG(1) << "Registered MR " << mr;
+    cleanup_.AddCleanup(mr);
   }
   return mr;
 }
 
 int VerbsHelperSuite::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
                               const RdmaMemBlock* memblock, int access) {
-  return extension_->ReregMr(mr, flags, pd, memblock, access);
+  int result = extension().ReregMr(mr, flags, pd, memblock, access);
+  if (result == 0) {
+    VLOG(1) << "Reregistered MR " << mr;
+  }
+  return result;
 }
 
 int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
   int result = ibv_dereg_mr(mr);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(mr);
+    VLOG(1) << "Deregistered MR " << mr;
+    cleanup_.ReleaseCleanup(mr);
   }
   return result;
 }
@@ -278,7 +344,8 @@ int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
 ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
   ibv_mw* mw = ibv_alloc_mw(pd, type);
   if (mw) {
-    cleanup_->AddCleanup(mw);
+    VLOG(1) << "Allocated MW " << mw;
+    cleanup_.AddCleanup(mw);
   }
   return mw;
 }
@@ -286,7 +353,8 @@ ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
 int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
   int result = ibv_dealloc_mw(mw);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(mw);
+    VLOG(1) << "Deallocated MW " << mw;
+    cleanup_.ReleaseCleanup(mw);
   }
   return result;
 }
@@ -294,7 +362,8 @@ int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
 ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
   if (channel) {
-    cleanup_->AddCleanup(channel);
+    VLOG(1) << "Created channel " << channel;
+    cleanup_.AddCleanup(channel);
   }
   return channel;
 }
@@ -302,7 +371,8 @@ ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
 int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
   int result = ibv_destroy_comp_channel(channel);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(channel);
+    VLOG(1) << "Destroyed channel " << channel;
+    cleanup_.ReleaseCleanup(channel);
   }
   return result;
 }
@@ -312,7 +382,8 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
   ibv_cq* cq = ibv_create_cq(context, cqe, /*cq_context=*/nullptr, channel,
                              /*cq_vector=*/0);
   if (cq) {
-    cleanup_->AddCleanup(cq);
+    VLOG(1) << "Created CQ " << cq;
+    cleanup_.AddCleanup(cq);
   }
   return cq;
 }
@@ -320,7 +391,8 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
 int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(cq);
+    VLOG(1) << "Destroyed CQ " << cq;
+    cleanup_.ReleaseCleanup(cq);
   }
   return result;
 }
@@ -329,7 +401,8 @@ ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
                                         ibv_cq_init_attr_ex& cq_attr) {
   ibv_cq_ex* cq = ibv_create_cq_ex(context, &cq_attr);
   if (cq) {
-    cleanup_->AddCleanup(cq);
+    VLOG(1) << "Created CQ " << cq;
+    cleanup_.AddCleanup(cq);
   }
   return cq;
 }
@@ -344,22 +417,23 @@ int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {
   ibv_cq* cq = ibv_cq_ex_to_cq(cq_ex);
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(cq_ex);
+    VLOG(1) << "Destroyed CQ " << cq;
+    cleanup_.ReleaseCleanup(cq_ex);
   }
   return result;
 }
 
-ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, uint32_t max_wr) {
-  ibv_srq_init_attr init_attr;
-  init_attr.attr = verbs_util::DefaultSrqAttr();
-  init_attr.attr.max_wr = max_wr;
-  return CreateSrq(pd, init_attr);
+ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, uint32_t max_wr,
+                                     uint32_t max_sge) {
+  ibv_srq_init_attr attr{.attr{.max_wr = max_wr, .max_sge = max_sge}};
+  return CreateSrq(pd, attr);
 }
 
 ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
   ibv_srq* srq = ibv_create_srq(pd, &attr);
   if (srq) {
-    cleanup_->AddCleanup(srq);
+    VLOG(1) << "Created SRQ " << srq;
+    cleanup_.AddCleanup(srq);
   }
   return srq;
 }
@@ -367,44 +441,36 @@ ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
 int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
   int result = ibv_destroy_srq(srq);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(srq);
+    VLOG(1) << "Destroyed SRQ " << srq;
+    cleanup_.ReleaseCleanup(srq);
   }
   return result;
 }
 
-ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* cq) {
-  return CreateQp(pd, cq, nullptr);
-}
-
-ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* cq, ibv_srq* srq) {
-  ibv_qp_init_attr attr{.send_cq = cq,
-                        .recv_cq = cq,
-                        .srq = srq,
-                        .cap = verbs_util::DefaultQpCap(),
-                        .qp_type = IBV_QPT_RC,
-                        .sq_sig_all = 0};
-  return CreateQp(pd, attr);
+ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* cq, ibv_qp_type type,
+                                   QpInitAttribute qp_init_attr) {
+  return CreateQp(pd, cq, cq, type, qp_init_attr);
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
-                                   ibv_srq* srq, uint32_t max_send_wr,
-                                   uint32_t max_recv_wr, ibv_qp_type qp_type,
-                                   int sig_all) {
-  ibv_qp_init_attr attr{.send_cq = send_cq,
-                        .recv_cq = recv_cq,
-                        .srq = srq,
-                        .cap = verbs_util::DefaultQpCap(),
-                        .qp_type = qp_type,
-                        .sq_sig_all = sig_all};
-  attr.cap.max_send_wr = max_send_wr;
-  attr.cap.max_recv_wr = max_recv_wr;
+                                   ibv_qp_type type,
+                                   QpInitAttribute qp_init_attr) {
+  return CreateQp(pd, send_cq, recv_cq, nullptr, type, qp_init_attr);
+}
+
+ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
+                                   ibv_srq* srq, ibv_qp_type type,
+                                   QpInitAttribute qp_init_attr) {
+  ibv_qp_init_attr attr =
+      qp_init_attr.GetAttribute(send_cq, recv_cq, type, srq);
   return CreateQp(pd, attr);
 }
 
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
-  ibv_qp* qp = extension()->CreateQp(pd, basic_attr);
+  ibv_qp* qp = extension().CreateQp(pd, basic_attr);
   if (qp) {
-    cleanup_->AddCleanup(qp);
+    VLOG(1) << "Created QP " << qp;
+    cleanup_.AddCleanup(qp);
   }
   return qp;
 }
@@ -412,26 +478,87 @@ ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
 int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   int result = ibv_destroy_qp(qp);
   if (result == 0) {
-    cleanup_->ReleaseCleanup(qp);
+    VLOG(1) << "Destroyed QP " << qp;
+    cleanup_.ReleaseCleanup(qp);
   }
   return result;
 }
 
-verbs_util::PortGid VerbsHelperSuite::GetLocalPortGid(
-    ibv_context* context) const {
-  absl::MutexLock guard(&mtx_port_gids_);
-  auto iter = port_gids_.find(context);
-  CHECK(iter != port_gids_.end());  // Crash ok
+PortAttribute VerbsHelperSuite::GetPortAttribute(ibv_context* context) const {
+  absl::MutexLock guard(&mtx_port_attrs_);
+  auto iter = port_attrs_.find(context);
+  CHECK(iter != port_attrs_.end());  // Crash ok
   auto& info_array = iter->second;
   return info_array[0];
 }
 
-VerbsExtension* VerbsHelperSuite::extension() { return extension_.get(); }
+VerbsExtension& VerbsHelperSuite::extension() { return *extension_; }
 
-std::unique_ptr<VerbsExtension> VerbsHelperSuite::InitVerbsExtension() {
-  return std::make_unique<VerbsExtension>();
+VerbsCleanup& VerbsHelperSuite::clean_up() { return cleanup_; }
+
+namespace {
+
+std::string GidToString(const ibv_gid& gid) {
+  return absl::StrFormat("GID: %x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x",
+                         gid.raw[0], gid.raw[1], gid.raw[2], gid.raw[3],
+                         gid.raw[4], gid.raw[5], gid.raw[6], gid.raw[7],
+                         gid.raw[8], gid.raw[9], gid.raw[10], gid.raw[11],
+                         gid.raw[12], gid.raw[13], gid.raw[14], gid.raw[15]);
 }
 
-VerbsCleanup& VerbsHelperSuite::cleanup() { return *cleanup_; }
+}  // namespace
+
+absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
+    ibv_context* context) {
+  std::vector<PortAttribute> result;
+  bool ipv4_only = absl::GetFlag(FLAGS_ipv4_only);
+  LOG(INFO) << "Enumerating Ports for " << context
+            << " ipv4_only: " << ipv4_only;
+  ibv_device_attr dev_attr = {};
+  int query_result = ibv_query_device(context, &dev_attr);
+  if (query_result != 0) {
+    return absl::InternalError("Failed to query device ports.");
+  }
+
+  // libibverbs port numbers start at 1.
+  for (uint8_t port = 1; port <= dev_attr.phys_port_cnt; ++port) {
+    ibv_port_attr port_attr = {};
+    query_result = ibv_query_port(context, port, &port_attr);
+    if (query_result != 0) {
+      return absl::InternalError("Failed to query port attributes.");
+    }
+    VLOG(1) << "Found port: " << static_cast<uint32_t>(port) << std::endl
+            << "\t"
+            << "state: " << port_attr.state << std::endl
+            << "\t"
+            << " mtu: " << (128 << port_attr.active_mtu) << std::endl
+            << "\t"
+            << "max_msg_sz: " << port_attr.max_msg_sz;
+    if (port_attr.state != IBV_PORT_ACTIVE) {
+      continue;
+    }
+    for (int gid_index = 0; gid_index < port_attr.gid_tbl_len; ++gid_index) {
+      ibv_gid gid = {};
+      query_result = ibv_query_gid(context, port, gid_index, &gid);
+      if (query_result != 0) {
+        return absl::InternalError("Failed to query gid.");
+      }
+      auto ip_type = verbs_util::GetIpAddressType(gid);
+      if (ip_type == -1) {
+        continue;
+      }
+      if (ipv4_only && (ip_type == AF_INET6)) {
+        continue;
+      }
+
+      VLOG(2) << absl::StrFormat("Adding port %u with gid %s", port,
+                                 GidToString(gid));
+      PortAttribute match{
+          .port = port, .gid = gid, .gid_index = gid_index, .attr = port_attr};
+      result.push_back(match);
+    }
+  }
+  return result;
+}
 
 }  // namespace rdma_unit_test

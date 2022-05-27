@@ -55,6 +55,7 @@ SingleNodeOrchestrator::SingleNodeOrchestrator(size_t num_clients,
 
 void SingleNodeOrchestrator::RunClients(absl::Duration duration) {
   std::vector<std::thread> client_threads;
+  client_threads.reserve(clients_.size());
   for (const auto& client : clients_) {
     client_threads.emplace_back([&]() { return client->Run(duration); });
   }
@@ -68,6 +69,7 @@ void SingleNodeOrchestrator::RunClients(absl::Duration duration) {
 
 void SingleNodeOrchestrator::RunClients(size_t steps) {
   std::vector<std::thread> client_threads;
+  client_threads.reserve(clients_.size());
   for (const auto& client : clients_) {
     client_threads.emplace_back([&]() { return client->Run(steps); });
   }

@@ -41,32 +41,6 @@
 #include "public/flags.h"
 #include "public/status_matchers.h"
 
-ABSL_FLAG(ibv_mtu, verbs_mtu, IBV_MTU_4096,
-          "The MTU value used in modify_qp. Valid values: 256, 512, 1024, "
-          "2048, 4096[default]");
-
-bool AbslParseFlag(absl::string_view text, ibv_mtu* out, std::string* error) {
-  if (text == "256") {
-    *out = IBV_MTU_256;
-  } else if (text == "512") {
-    *out = IBV_MTU_512;
-  } else if (text == "1024") {
-    *out = IBV_MTU_1024;
-  } else if (text == "2048") {
-    *out = IBV_MTU_2048;
-  } else if (text == "4096") {
-    *out = IBV_MTU_4096;
-  } else {
-    *error = absl::StrCat("Unknown MTU value : ", text);
-    return false;
-  }
-  return true;
-}
-
-std::string AbslUnparseFlag(ibv_mtu mtu) {
-  return std::to_string(rdma_unit_test::verbs_util::VerbsMtuToInt(mtu));
-}
-
 namespace rdma_unit_test {
 namespace verbs_util {
 
@@ -120,88 +94,6 @@ absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
     device_names.push_back(device->name);
   }
   return device_names;
-}
-
-absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
-    ibv_context* context) {
-  std::vector<PortGid> result;
-  bool ipv4_only = absl::GetFlag(FLAGS_ipv4_only);
-  LOG(INFO) << "Enumerating Ports for " << context
-            << " ipv4_only: " << ipv4_only;
-  ibv_device_attr dev_attr = {};
-  int query_result = ibv_query_device(context, &dev_attr);
-  if (query_result != 0) {
-    return absl::InternalError("Failed to query device ports.");
-  }
-
-  // libibverbs port numbers start at 1.
-  for (int port = 1; port <= dev_attr.phys_port_cnt; ++port) {
-    ibv_port_attr port_attr = {};
-    query_result = ibv_query_port(context, port, &port_attr);
-    if (query_result != 0) {
-      return absl::InternalError("Failed to query port attributes.");
-    }
-    if (port_attr.state != IBV_PORT_ACTIVE) {
-      VLOG(1) << "Port is not active, port: " << port
-              << ", state: " << port_attr.state;
-      continue;
-    }
-    for (int gid_index = 0; gid_index < port_attr.gid_tbl_len; ++gid_index) {
-      ibv_gid gid = {};
-      query_result = ibv_query_gid(context, port, gid_index, &gid);
-      if (query_result != 0) {
-        return absl::InternalError("Failed to query gid.");
-      }
-      auto ip_type = verbs_util::GetIpAddressType(gid);
-      if (ip_type == -1) {
-        continue;
-      }
-      if (ipv4_only && (ip_type == AF_INET6)) {
-        continue;
-      }
-
-      // Check the MTU size of the port against the max mtu attribute if the
-      // value is other than 0. 0 means it is unset. Here the comparison > works
-      // because values in the enum struct ibv_mtu is listed in ascending order.
-      if (port_attr.active_mtu && result.empty() &&
-          (absl::GetFlag(FLAGS_verbs_mtu) > port_attr.active_mtu)) {
-        LOG(FATAL) << "--verbs_mtu exceeds active port limit of "  // Crash ok
-                   << VerbsMtuToInt(port_attr.active_mtu);
-      }
-      VLOG(2) << "Adding: " << GidToString(gid);
-      PortGid match;
-      match.port = port;
-      match.gid = gid;
-      match.gid_index = gid_index;
-      result.push_back(match);
-    }
-  }
-  return result;
-}
-
-ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid,
-                         uint8_t traffic_class) {
-  ibv_ah_attr attr;
-  attr.sl = 0;
-  attr.is_global = 1;
-  attr.port_num = port_gid.port;
-  attr.grh.dgid = remote_gid;
-  attr.grh.flow_label = 0;
-  attr.grh.sgid_index = port_gid.gid_index;
-  attr.grh.hop_limit = 10;
-  attr.grh.traffic_class = traffic_class;
-  return attr;
-}
-
-ibv_qp_cap DefaultQpCap() {
-  ibv_qp_cap cap;
-  cap.max_send_wr = verbs_util::kDefaultMaxWr;
-  cap.max_recv_wr = verbs_util::kDefaultMaxWr;
-  cap.max_send_sge = verbs_util::kDefaultMaxSge;
-  cap.max_recv_sge = verbs_util::kDefaultMaxSge;
-  // By default QPs will be constructed with max_inline_data set to this.
-  cap.max_inline_data = 36;
-  return cap;
 }
 
 ibv_srq_attr DefaultSrqAttr() {
@@ -679,50 +571,6 @@ absl::StatusOr<ibv_context*> OpenUntrackedDevice(
   }
 
   return context;
-}
-
-ibv_qp_attr CreateBasicQpAttrInit(uint8_t port) {
-  ibv_qp_attr mod_init = {};
-  mod_init.qp_state = IBV_QPS_INIT;
-  mod_init.pkey_index = 0;
-  mod_init.port_num = port;
-  constexpr int kRemoteAccessAll =
-      IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
-      IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
-  mod_init.qp_access_flags = kRemoteAccessAll;
-  return mod_init;
-}
-
-ibv_qp_attr CreateBasicQpAttrRtr(const PortGid& local, ibv_gid remote_gid,
-                                 uint32_t remote_qpn) {
-  ibv_qp_attr mod_rtr = {};
-  mod_rtr.qp_state = IBV_QPS_RTR;
-  mod_rtr.path_mtu = absl::GetFlag(FLAGS_verbs_mtu);
-  mod_rtr.dest_qp_num = remote_qpn;
-  static unsigned int psn = 1225;
-  mod_rtr.rq_psn = psn;
-  // 1225;  // TODO(author1): Eventually randomize for reality.
-  mod_rtr.max_dest_rd_atomic = 10;
-  mod_rtr.min_rnr_timer = 26;  // 82us delay
-  mod_rtr.ah_attr.grh.dgid = remote_gid;
-  mod_rtr.ah_attr.grh.flow_label = 0;
-  mod_rtr.ah_attr.grh.sgid_index = local.gid_index;
-  mod_rtr.ah_attr.grh.hop_limit = 127;
-  mod_rtr.ah_attr.is_global = 1;
-  mod_rtr.ah_attr.sl = 5;
-  mod_rtr.ah_attr.port_num = local.port;
-  return mod_rtr;
-}
-
-ibv_qp_attr CreateBasicQpAttrRts() {
-  ibv_qp_attr mod_rts = {};
-  mod_rts.qp_state = IBV_QPS_RTS;
-  mod_rts.sq_psn = 1225;
-  mod_rts.timeout = 17;  // ~500 ms
-  mod_rts.retry_cnt = 5;
-  mod_rts.rnr_retry = 5;
-  mod_rts.max_rd_atomic = 5;
-  return mod_rts;
 }
 
 }  // namespace verbs_util

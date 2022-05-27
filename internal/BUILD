@@ -101,3 +101,15 @@ cc_library(
     srcs = ["handle_garble.cc"],
     hdrs = ["handle_garble.h"],
 )
+
+cc_library(
+    name = "verbs_attribute",
+    srcs = ["verbs_attribute.cc"],
+    hdrs = ["verbs_attribute.h"],
+    deps = [
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@libibverbs",
+    ],
+)

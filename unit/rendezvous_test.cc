@@ -29,13 +29,15 @@
 #include "absl/base/attributes.h"
 #include "absl/container/fixed_array.h"
 #include "absl/random/random.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_format.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -79,10 +81,16 @@ class BufferTracker {
   // Returns a buffer pointer to the start of the reservation.
   // Returns nullopt if the requested reservation could not be fulfilled.
   // count is the number bytes requested.
-  absl::optional<uint8_t*> ReserveBytes(uint64_t count) {
-    if (allocations_.size() >= max_entries_ || count > buffer_size_) {
-      LOG(WARNING) << "Reservation failed.";
-      return absl::nullopt;
+  absl::StatusOr<uint8_t*> ReserveBytes(uint64_t count) {
+    if (allocations_.size() >= max_entries_) {
+      return absl::ResourceExhaustedError(absl::StrFormat(
+          "Reservation failed due to exceeding max allocation entries (%d).",
+          max_entries_));
+    }
+    if (count > buffer_size_) {
+      return absl::ResourceExhaustedError(absl::StrFormat(
+          "Reservation failed due to exceeding max buffer size (%d > %d).",
+          count, buffer_size_));
     }
     if (allocations_.empty()) {
       Allocation alloc = {.start = 0, .length = count};
@@ -97,8 +105,8 @@ class BufferTracker {
     //     ^ end     ^ start
     if (end < start) {
       if (count > start - end) {
-        LOG(WARNING) << "Failed to find space for reservation.";
-        return absl::nullopt;
+        return absl::ResourceExhaustedError(
+            "Failed to find space for reservation.");
       }
       Allocation alloc = {.start = end, .length = count};
       allocations_.emplace_back(alloc);
@@ -121,8 +129,8 @@ class BufferTracker {
       return base_;
     }
     // Out of space.
-    LOG(WARNING) << "Failed to find space for reservation.";
-    return absl::nullopt;
+    return absl::ResourceExhaustedError(
+        "Failed to find space for reservation.");
   }
 
   // Invalidates the oldest reservation and returns its contents the pool.
@@ -167,9 +175,10 @@ class RpcControl {
              int control_pages, int max_outstanding)
       : buffer_(ibv.AllocBuffer(control_pages)),
         cq_(DieIfNull(ibv.CreateCq(context, max_outstanding * 2))),
-        qp_(DieIfNull(ibv.CreateQp(pd, cq_, cq_, nullptr, max_outstanding,
-                                   max_outstanding, IBV_QPT_RC,
-                                   /*sig_all=*/0))),
+        qp_(DieIfNull(ibv.CreateQp(pd, cq_, IBV_QPT_RC,
+                                   QpInitAttribute()
+                                       .set_max_send_wr(max_outstanding)
+                                       .set_max_recv_wr(max_outstanding)))),
         mr_(DieIfNull(ibv.RegMr(pd, buffer_))),
         send_tracker_(buffer_.subspan(0, buffer_.span().length() / 2),
                       max_outstanding),
@@ -180,15 +189,17 @@ class RpcControl {
   }
 
   void Init(VerbsHelperSuite& ibv, RpcControl& other) {
-    ASSERT_OK(ibv.SetUpRcQp(qp_, ibv.GetLocalPortGid(qp_->context),
-                            ibv.GetLocalPortGid(other.qp_->context).gid,
-                            other.qp_->qp_num));
+    ASSERT_OK(ibv.ModifyRcQpResetToRts(
+        qp_, ibv.GetPortAttribute(qp_->context),
+        ibv.GetPortAttribute(other.qp_->context).gid, other.qp_->qp_num));
     other_rkey_ = other.mr_->rkey;
   }
 
   // Post a recv buffer for a single incoming message of size |size_of_message|.
   void PostRecv(int size_of_message) {
-    uint8_t* buffer = recv_tracker_.ReserveBytes(size_of_message).value();
+    auto buffer_or = recv_tracker_.ReserveBytes(size_of_message);
+    CHECK_OK(buffer_or.status());
+    uint8_t* buffer = buffer_or.value();
     ibv_sge sg;
     sg.addr = reinterpret_cast<uint64_t>(buffer);
     sg.length = size_of_message;
@@ -205,7 +216,9 @@ class RpcControl {
   // Sends |contents| to the other side.
   void SendMessage(absl::Span<uint8_t> contents) {
     VLOG(1) << "Sending message consuming reservation.";
-    uint8_t* src = send_tracker_.ReserveBytes(contents.size()).value();
+    auto src_or = send_tracker_.ReserveBytes(contents.size());
+    CHECK_OK(src_or.status());
+    uint8_t* src = src_or.value();
     memcpy(src, contents.data(), contents.size());
     ibv_sge sg;
     sg.addr = reinterpret_cast<uint64_t>(src);
@@ -331,16 +344,18 @@ class RpcBase {
         context_(DieIfNull(ibv.OpenDevice().value())),
         pd_(DieIfNull(ibv.AllocPd(context_))),
         data_cq_(DieIfNull(ibv.CreateCq(context_, max_outstanding))),
-        data_qp_(DieIfNull(ibv.CreateQp(pd_, data_cq_, data_cq_, nullptr,
-                                        max_outstanding, max_outstanding,
-                                        IBV_QPT_RC, /*sig_all=*/0))),
+        data_qp_(
+            DieIfNull(ibv.CreateQp(pd_, data_cq_, IBV_QPT_RC,
+                                   QpInitAttribute()
+                                       .set_max_send_wr(max_outstanding)
+                                       .set_max_recv_wr(max_outstanding)))),
         data_mr_(DieIfNull(ibv.RegMr(pd_, data_buffer_))),
         control_(ibv, context_, pd_, control_pages, max_outstanding) {}
 
   void Init(VerbsHelperSuite& ibv, RpcBase& other) {
-    ASSERT_OK(ibv.SetUpRcQp(data_qp_, ibv.GetLocalPortGid(data_qp_->context),
-                            ibv.GetLocalPortGid(data_qp_->context).gid,
-                            other.data_qp_->qp_num));
+    ASSERT_OK(ibv.ModifyRcQpResetToRts(
+        data_qp_, ibv.GetPortAttribute(data_qp_->context),
+        ibv.GetPortAttribute(data_qp_->context).gid, other.data_qp_->qp_num));
     control_.Init(ibv, other.control_);
   }
 
@@ -386,7 +401,9 @@ class RpcClient : public RpcBase {
   ibv_mw* StartRpc(Operation operation, uint64_t length, uint32_t seed) {
     CHECK_NE(AdvanceWindow(next_window_), oldest_window_)
         << "Exceeded max outstanding";
-    uint8_t* buffer_alloc = data_tracker_.ReserveBytes(length).value();
+    auto buffer_alloc_or = data_tracker_.ReserveBytes(length);
+    CHECK_OK(buffer_alloc_or.status());
+    uint8_t* buffer_alloc = buffer_alloc_or.value();
     ibv_mw* mw = data_windows_[next_window_];
     next_window_ = AdvanceWindow(next_window_);
     uint32_t rkey = next_rkey_++;
@@ -470,7 +487,8 @@ class RpcClient : public RpcBase {
     ibv_send_wr* bad_wr;
     int result = ibv_post_send(data_qp_, &invalidate, &bad_wr);
     ASSERT_EQ(result, 0);
-    ibv_wc completion = verbs_util::WaitForCompletion(data_cq_).value();
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(data_cq_));
     ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
     ASSERT_EQ(completion.opcode, IBV_WC_LOCAL_INV);
   }
@@ -478,11 +496,11 @@ class RpcClient : public RpcBase {
   // Handles a single control message (potentially validating data), cleans up
   // state for any outgoing messages, and reposts a recv buffer for the incoming
   // message.
-  absl::optional<ControlResponse::Result> ProcessControl(
+  absl::StatusOr<ControlResponse::Result> ProcessControl(
       absl::Duration timeout = absl::Seconds(1000)) {
     std::string payload = control_.CheckCompletions(timeout);
     if (payload.empty()) {
-      return absl::nullopt;
+      return absl::NotFoundError("Did not find completion.");
     }
     DCHECK_EQ(payload.size(), sizeof(ControlResponse));
     const auto* resp = reinterpret_cast<const ControlResponse*>(payload.data());
@@ -537,20 +555,17 @@ class RpcServer : public RpcBase {
   // Handles a single control message (potentially starting RMA), cleans up
   // state for any outgoing messages, and reposts a recv buffer.
   // Returns the request received (if any).
-  absl::optional<ControlRequest> ProcessControl(
+  absl::StatusOr<ControlRequest> ProcessControl(
       absl::Duration timeout = absl::Seconds(1000)) {
     std::string payload = control_.CheckCompletions(timeout);
     if (payload.empty()) {
-      return absl::nullopt;
+      return absl::NotFoundError("Did not find completion.");
     }
     DCHECK_EQ(payload.size(), sizeof(ControlRequest));
     const auto* req = reinterpret_cast<const ControlRequest*>(payload.data());
 
-    auto optional_buffer = data_tracker_.ReserveBytes(req->length);
-    if (!optional_buffer) {
-      return absl::nullopt;
-    }
-    uint8_t* buffer_alloc = optional_buffer.value();
+    ASSIGN_OR_RETURN(uint8_t * buffer_alloc,
+                     data_tracker_.ReserveBytes(req->length));
     ibv_sge sge;
     sge.addr = reinterpret_cast<uint64_t>(buffer_alloc);
     sge.length = req->length;
@@ -599,11 +614,11 @@ class RpcServer : public RpcBase {
 
   // Handles data completions (potentially validating data and queuing control
   // messages). Returns the result of the data operation.
-  absl::optional<ControlResponse::Result> ProcessData(
+  absl::StatusOr<ControlResponse::Result> ProcessData(
       absl::Duration timeout = absl::Seconds(1000)) {
     auto completion_or = verbs_util::WaitForCompletion(data_cq_, timeout);
     if (!completion_or.ok()) {
-      return absl::nullopt;
+      return absl::NotFoundError("Did not find completion.");
     }
     ibv_wc completion = completion_or.value();
     ControlResponse::Result rma_result =
@@ -700,18 +715,20 @@ TEST_F(RendezvousTest, Read) {
 
   // Receive request.
   LOG(INFO) << "Waiting for request.";
-  ControlRequest request = setup.server.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlRequest request, setup.server.ProcessControl());
   ASSERT_EQ(Operation::kRead, request.operation);
   ASSERT_EQ(kRpcSize, request.length);
 
   // Wait for RMA to finish.
   LOG(INFO) << "Waiting for RMA finished.";
-  ControlResponse::Result rma_result = setup.server.ProcessData().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rma_result,
+                       setup.server.ProcessData());
   ASSERT_EQ(rma_result, ControlResponse::Result::kSuccess);
 
   // Wait for finish report.
   LOG(INFO) << "Waiting for response.";
-  ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rpc_result,
+                       setup.client.ProcessControl());
   EXPECT_EQ(rpc_result, ControlResponse::Result::kSuccess);
 }
 
@@ -733,20 +750,21 @@ TEST_F(RendezvousTest, Batched) {
     while (outstanding < kMaxOutstanding) {
       Operation op =
           absl::Bernoulli(random, 0.5) ? Operation::kRead : Operation::kWrite;
-      setup.client.StartRpc(op, absl::Uniform<uint32_t>(random, 0, kMaxRpcSize),
+      setup.client.StartRpc(op, absl::Uniform<uint32_t>(random, 1, kMaxRpcSize),
                             absl::Uniform<uint32_t>(random));
       ++outstanding;
     }
     VLOG(1) << "Checking for responses.";
     for (int i = 0; i < 10; ++i) {
-      setup.server.ProcessControl(absl::ZeroDuration());
+      auto result = setup.server.ProcessControl(absl::ZeroDuration());
+      LOG_IF(WARNING, !result.ok()) << result.status();
       auto result_or = setup.server.ProcessData(absl::ZeroDuration());
-      if (result_or) {
+      if (result_or.ok()) {
         VLOG(1) << "Got data.";
         ASSERT_EQ(ControlResponse::Result::kSuccess, result_or.value());
       }
       auto rpc_result_or = setup.client.ProcessControl(absl::ZeroDuration());
-      if (rpc_result_or) {
+      if (rpc_result_or.ok()) {
         VLOG(1) << "Finished RPC.";
         EXPECT_EQ(ControlResponse::Result::kSuccess, rpc_result_or.value());
         ++total_complete;
@@ -770,16 +788,18 @@ TEST_F(RendezvousTest, ReadCancellation) {
   ASSERT_NO_FATAL_FAILURE(setup.client.CancelRpc(mw));
 
   // Receive request.
-  ControlRequest request = setup.server.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlRequest request, setup.server.ProcessControl());
   ASSERT_EQ(request.operation, Operation::kRead);
   ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
-  ControlResponse::Result rma_result = setup.server.ProcessData().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rma_result,
+                       setup.server.ProcessData());
   ASSERT_EQ(rma_result, ControlResponse::Result::kInvalidWindow);
 
   // Wait for finish report.
-  ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rpc_result,
+                       setup.client.ProcessControl());
   EXPECT_EQ(rpc_result, ControlResponse::Result::kInvalidWindow);
 }
 
@@ -792,16 +812,18 @@ TEST_F(RendezvousTest, Write) {
   setup.client.StartRpc(Operation::kWrite, kRpcSize, 15);
 
   // Receive request.
-  ControlRequest request = setup.server.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlRequest request, setup.server.ProcessControl());
   ASSERT_EQ(request.operation, Operation::kWrite);
   ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
-  ControlResponse::Result rma_result = setup.server.ProcessData().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rma_result,
+                       setup.server.ProcessData());
   ASSERT_EQ(rma_result, ControlResponse::Result::kSuccess);
 
   // Wait for finish report.
-  ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rpc_result,
+                       setup.client.ProcessControl());
   EXPECT_EQ(rpc_result, ControlResponse::Result::kSuccess);
 }
 
@@ -817,16 +839,18 @@ TEST_F(RendezvousTest, WriteCancellation) {
   ASSERT_NO_FATAL_FAILURE(setup.client.CancelRpc(mw));
 
   // Receive request.
-  ControlRequest request = setup.server.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlRequest request, setup.server.ProcessControl());
   ASSERT_EQ(request.operation, Operation::kWrite);
   ASSERT_EQ(request.length, kRpcSize);
 
   // Wait for RMA to finish.
-  ControlResponse::Result rma_result = setup.server.ProcessData().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rma_result,
+                       setup.server.ProcessData());
   ASSERT_EQ(rma_result, ControlResponse::Result::kInvalidWindow);
 
   // Wait for finish report.
-  ControlResponse::Result rpc_result = setup.client.ProcessControl().value();
+  ASSERT_OK_AND_ASSIGN(ControlResponse::Result rpc_result,
+                       setup.client.ProcessControl());
   EXPECT_EQ(rpc_result, ControlResponse::Result::kInvalidWindow);
 }
 
@@ -880,7 +904,7 @@ class RendezvousPair {
         Operation op =
             absl::Bernoulli(random, 0.5) ? Operation::kRead : Operation::kWrite;
         ibv_mw* mw = client_.StartRpc(
-            op, absl::Uniform<uint32_t>(random, 0, kMaxRpcSize),
+            op, absl::Uniform<uint32_t>(random, 1, kMaxRpcSize),
             absl::Uniform<uint32_t>(random));
         ASSERT_THAT(mw, NotNull());
         OutstandingTracking entry = {.id = mw, .cancelled = false};
@@ -890,7 +914,7 @@ class RendezvousPair {
       for (uint64_t i = 0; i < kMaxOutstanding; ++i) {
         auto rpc_result_or = client_.ProcessControl(absl::ZeroDuration());
         bool should_cancel = false;
-        if (rpc_result_or) {
+        if (rpc_result_or.ok()) {
           VLOG(1) << "Finished RPC.";
           if (!outstanding.front().cancelled) {
             ASSERT_EQ(rpc_result_or.value(), ControlResponse::Result::kSuccess);
@@ -919,8 +943,10 @@ class RendezvousPair {
   void ServerRunloop(const absl::Notification& cancelled_notification) {
     while (!cancelled_notification.HasBeenNotified() && !finished_.load()) {
       for (int i = 0; i < 10; ++i) {
-        server_.ProcessControl(absl::ZeroDuration());
-        server_.ProcessData(absl::ZeroDuration());
+        auto control_result = server_.ProcessControl(absl::ZeroDuration());
+        LOG_IF(WARNING, !control_result.ok()) << control_result.status();
+        auto data_result = server_.ProcessData(absl::ZeroDuration());
+        LOG_IF(WARNING, !data_result.ok()) << data_result.status();
       }
       // Wait a little.
       absl::SleepFor(absl::Milliseconds(50));

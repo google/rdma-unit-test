@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -32,7 +31,6 @@
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_helper_suite.h"
-#include "public/verbs_util.h"
 #include "traffic/op_types.h"
 #include "traffic/qp_op_interface.h"
 #include "traffic/qp_state.h"
@@ -65,6 +63,38 @@ class Client {
     kEventDrivenBlocking
   };
 
+  // Specifies the attributes required for UD send operations that are not
+  // already included in `OpAttributes`.
+  struct UdSendAttributes {
+    QpOpInterface* remote_qp = nullptr;
+    uint64_t remote_op_id = 0;
+    ibv_ah* remote_ah = nullptr;
+  };
+
+  // Specifies all the required and optional characteristics of a batch of RDMA
+  // ops of the same type to be posted to RDMA device.
+  struct OpAttributes {
+    OpTypes op_type = OpTypes::kInvalid;
+    int op_bytes = 0;
+    int num_ops = 0;
+    uint32_t initiator_qp_id = 0;
+    // Used for atomic Fetch&Add op. A value must be provided for kFetchAdd
+    // operations.
+    std::optional<uint64_t> add = std::nullopt;
+    // Used for atomic Compare&Swap op.If "compare" is not specified, the "swap"
+    // operation always succeeds (when the RDMA op completes with success
+    // status). When a value is not provided, we compare against the value
+    // residing in target address.
+    std::optional<uint64_t> compare = std::nullopt;
+    // Used for atomic Compare&Swap op. A value must be provided for kCompSwap
+    // operations.
+    std::optional<uint64_t> swap = std::nullopt;
+    // When flush is set, the ops will be submitted to h/w. The value of this
+    // field is ignored for UD operations, which are always flushed.
+    bool flush = true;
+    std::optional<UdSendAttributes> ud_send_attributes = std::nullopt;
+  };
+
   // Default constants
   static constexpr int kQKey = 200;
   static constexpr int kDefaultBuffersPerQp = 4096;
@@ -85,35 +115,24 @@ class Client {
   // capped by dev_attr.max_cqe.
   // Note: It is the responsibility of the caller ot guarantee uniqueness of
   // client_id.
-  Client(int client_id, ibv_context* context, ibv_pd* pd,
-         verbs_util::PortGid port_gid, Config config);
+  Client(int client_id, ibv_context* context, PortAttribute port_attr,
+         Config config);
   ~Client();
   Client(const Client& other) = delete;
   Client& operator=(const Client& other) = delete;
   Client(Client&& other) = default;
   Client& operator=(Client&& other) = default;
 
-  // This function should be called at the end of the test, after
-  // PollSendCompletions and ValidateCompletions calls; by then test has
-  // already failed or succeeded. Under common case, by the end of the test, all
-  // operations completed, all data landed, and data landing is validated with
-  // those two functions, the call to this function then simply returns without
-  // any stdout output. Under rare cases where some completions don't arrive, a
-  // call to this function checks if data landed for un-completed ops (ie.
-  // outstanding_ops) on all qps of this client. The purpose is to test that
-  // for the operations that we didn't receive completion, did data landed
-  // successfully or not (in some cases the data may land but completions are
-  // not delivered to the software). This function prints out which un-completed
-  // op has landed data or not.
-  void CheckAllDataLanded() {
-    for (auto& qp : qps_) {
-      qp.second->CheckDataLanded();
+  QpState* qp_state(uint32_t qp_id) const {
+    auto iter = qps_.find(qp_id);
+    if (iter != qps_.end()) {
+      return iter->second.get();
     }
+    return nullptr;
   }
-
-  QpState* GetQpState(uint32_t qp_id) const;
   size_t num_qps() const { return qps_.size(); }
   ibv_pd* pd() const { return pd_; }
+  int client_id() const { return client_id_; }
 
   // Constructs count qps for this client. Each qp will have
   // FLAGS_buffer_per_qp of src and dest buffer to send/accept data
@@ -121,41 +140,20 @@ class Client {
   // 'is_rc' specifies whether the qps are in rc mode or ud mode.
   // Returns OutOfRangeError if adding count qps goes over
   // FLAGS_max_qps_per_client.
+  // TODO(author2): Maybe use QpInitAttribute.
   absl::Status CreateQps(size_t count, bool is_rc, int sq_size = kDefaultSqSize,
                          int rq_size = kDefaultRqSize);
   absl::Status DeleteQp(uint32_t qp_id);
 
-  // Specifies the attributes required for UD send operations that are not
-  // already included in `OpAttributes`.
-  struct UdSendAttributes {
-    QpOpInterface* remote_qp = nullptr;
-    uint64_t remote_op_id = 0;
-    ibv_ah* remote_ah = nullptr;
-  };
+  // Create an address handle and store it in the Client. Since the RDMA unit
+  // test framework currently only supports loopback traffic, `port_attr`
+  // represents both source and destination port attributes.
+  ibv_ah* CreateAh(PortAttribute port_attr);
 
-  // Specifies all the required and optional characteristics of a batch of RDMA
-  // ops of the same type to be posted to RDMA device.
-  struct OpAttributes {
-    OpTypes op_type = OpTypes::kInvalid;
-    uint32_t op_bytes = 0;
-    uint32_t num_ops = 0;
-    uint32_t initiator_qp_id = 0;
-    // Used for atomic Fetch&Add op. A value must be provided for kFetchAdd
-    // operations.
-    std::optional<uint64_t> add = std::nullopt;
-    // Used for atomic Compare&Swap op.If "compare" is not specified, the "swap"
-    // operation always succeeds (when the RDMA op completes with success
-    // status). When a value is not provided, we compare against the value
-    // residing in target address.
-    std::optional<uint64_t> compare = std::nullopt;
-    // Used for atomic Compare&Swap op. A value must be provided for kCompSwap
-    // operations.
-    std::optional<uint64_t> swap = std::nullopt;
-    // When flush is set, the ops will be submitted to h/w. The value of this
-    // field is ignored for UD operations, which are always flushed.
-    bool flush = true;
-    std::optional<UdSendAttributes> ud_send_attributes = std::nullopt;
-  };
+  // Add an externally created address handle used to the Client to be used
+  // (for UD traffic). The AH is not created by VerbsHelperSuite thus is not
+  // owned by anyone prior.
+  void AddAh(ibv_ah* ah);
 
   // Creates num_ops WQEs according to the attributes provided, and saves them
   // in the QpState. Buffers for initiated operations are from distinct
@@ -254,6 +252,20 @@ class Client {
   // validated on the sender.
   absl::Status ValidateCompletions(int num_expected);
 
+  // This function should be called at the end of the test, after
+  // PollSendCompletions and ValidateCompletions calls; by then test has
+  // already failed or succeeded. Under common case, by the end of the test, all
+  // operations completed, all data landed, and data landing is validated with
+  // those two functions, the call to this function then simply returns without
+  // any stdout output. Under rare cases where some completions don't arrive, a
+  // call to this function checks if data landed for un-completed ops (ie.
+  // outstanding_ops) on all qps of this client. The purpose is to test that
+  // for the operations that we didn't receive completion, did data landed
+  // successfully or not (in some cases the data may land but completions are
+  // not delivered to the software). This function prints out which un-completed
+  // op has landed data or not.
+  void CheckAllDataLanded();
+
   // Prints number of pending ops on all QPs for this client.
   void DumpPendingOps();
 
@@ -264,8 +276,6 @@ class Client {
   RdmaMemBlock GetQpDestBuffer(uint32_t qp_id) {
     return dest_buffer_->subblock(buffer_per_qp_ * qp_id, buffer_per_qp_);
   }
-
-  int client_id() const { return client_id_; }
 
  protected:
   inline void InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
@@ -287,7 +297,7 @@ class Client {
   VerbsHelperSuite ibv_;
   ibv_context* const context_;
   ibv_pd* const pd_;
-  const verbs_util::PortGid port_gid_;
+  const PortAttribute port_attr_;
   std::unique_ptr<RdmaMemBlock> src_buffer_;
   std::unique_ptr<RdmaMemBlock> dest_buffer_;
   std::vector<ibv_mr*> src_mr_;
@@ -297,6 +307,7 @@ class Client {
   ibv_cq* send_cq_ = nullptr;
   ibv_cq* recv_cq_ = nullptr;
   absl::flat_hash_map<uint32_t, std::unique_ptr<QpState>> qps_;
+  std::vector<ibv_ah*> ahs_;
   const int client_id_ = 0;
   const int max_outstanding_ops_per_qp_;
   const int buffer_per_qp_;

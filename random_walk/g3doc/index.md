@@ -4,7 +4,7 @@ go/rdma-random-walker
 
 <!--*
 # Document freshness: For more information, see go/fresh-source.
-freshness: { owner: 'daweihuang' reviewed: '2021-10-15' }
+freshness: { owner: 'daweihuang' reviewed: '2022-4-15' }
 *-->
 
 [TOC]
@@ -34,56 +34,49 @@ Test flags:
 
 ## Architecture
 
-The random walker mainly consists of multiple *random walk clients*, each runs
-on its own thread and with a single opened device context (`ibv_context`). The
-client randomly issues valid Verbs commands to the NIC. The random walk clients
-exchanges out-of-band metadata with the *OOB backend* that either uses shared
-thread-safe queue or gRPC. Both random walk clients and OOB backend is set up
-and managed by the *test orchestrator*.
+The random walker consists of multiple *random walk clients*, each runs on its
+own thread and with a single open device (`ibv_context`). The client randomly
+issues *mostly* valid RDMA commands to the NIC. To maintain that most of the
+verbs are valid, The random walk clients exchanges out-of-band metadata with
+each other by either shared thread-safe queue or gRPC.
 
 ## Random Walk Specification
 
 The random walker runs in steps. Each step it take an *action* drawn randomly
 from its action space according to some customizable weighted distribution.
-Paramters for each action are also randomly generated. Metadata for actions that
-have implication on other clients (such as registration of a memory region or
-binding of a memory windows) will get propagated to other clients using in OOB
-backend.
+Paramters for each action are also randomly generated. Metadata of a client's
+state (such as registration of a memory region or binding of a memory windows)
+will get propagated to other clients using in OOB backend.
 
 ### Action Space
 
 The following table summarize the list of actions.
 
-| Action                 | Verbs API        | Note                      |
-| ---------------------- | ---------------- | ------------------------- |
-| Create an `ibv_cq`     | `ibv_create_cq`  |                           |
-| Destroy an `ibv_cq`    | `ibv_destroy_cq` |                           |
-| Allocate an `ibv_pd`   | `ibv_alloc_pd`   |                           |
-| Deallocate an `ibv_pd` | `ibv_dealloc_pd` |                           |
-| Register an `ibv_mr`   | `ibv_reg_mr`     |                           |
-| Deregister an `ibv_mr` | `ibv_dereg_mr`   |                           |
-| Allocate an `ibv_mw`   | `ibv_alloc_mw`   |                           |
-| Deallocate an `ibv_mw` | `ibv_dealloc_mw` |                           |
-| Bind an `ibv_mw`       | `ibv_bind_mw` ,  |                           |
-:                        : `ibv_post_send`  :                           :
-| Create a pair of       | `ibv_create_qp`, |                           |
-: interconnected RC      : `ibv_modify_qp`  :                           :
-: `ibv_qp`               :                  :                           :
-| Create a UD `ibv_qp`   | `ibv_create_qp`, |                           |
-:                        : `ibv_modify_qp`  :                           :
-| Modify an `ibv_qp` to  | `ibv_modify_qp`  |                           |
-: ERROR state            :                  :                           :
-| Destroy an `ibv_qp`    |                  | QP must be in ERROR state |
-| Create an `ibv_ah`     | `ibv_create_ah`  |                           |
-| Destroy an `ibv_ah`    | `ibv_destroy_ah` |                           |
-| Post a `SEND` WR       | `ibv_post_send`  |                           |
-| Post a `SEND_WITH_INV` | `ibv_post_send`  |                           |
-: WR                     :                  :                           :
-| Post a `RECV` WR       | `ibv_post_recv`  |                           |
-| Post a `READ` WR       | `ibv_post_send`  |                           |
-| Post a `WRITE` WR      | `ibv_post_send`  |                           |
-| Post a `FETCH_ADD` WR  | `ibv_post_send`  |                           |
-| Post a `COMP_SWAP` WR  | `ibv_post_send`  |                           |
+| Action                             | Verbs API                        | Note |
+| ---------------------------------- | -------------------------------- | ---- |
+| Create an `ibv_cq`                 | `ibv_create_cq`                  |      |
+| Destroy an `ibv_cq`                | `ibv_destroy_cq`                 |      |
+| Allocate an `ibv_pd`               | `ibv_alloc_pd`                   |      |
+| Deallocate an `ibv_pd`             | `ibv_dealloc_pd`                 |      |
+| Register an `ibv_mr`               | `ibv_reg_mr`                     |      |
+| Deregister an `ibv_mr`             | `ibv_dereg_mr`                   |      |
+| Allocate an `ibv_mw`               | `ibv_alloc_mw`                   |      |
+| Deallocate an `ibv_mw`             | `ibv_dealloc_mw`                 |      |
+| Bind an `ibv_mw`                   | `ibv_bind_mw` , `ibv_post_send`  |      |
+| Create a pair of interconnected RC | `ibv_create_qp`, `ibv_modify_qp` |      |
+: `ibv_qp`                           :                                  :      :
+| Create a UD `ibv_qp`               | `ibv_create_qp`, `ibv_modify_qp` |      |
+| Modify an `ibv_qp` to ERROR state  | `ibv_modify_qp`                  |      |
+| Destroy an `ibv_qp`                |                                  |      |
+| Create an `ibv_ah`                 | `ibv_create_ah`                  |      |
+| Destroy an `ibv_ah`                | `ibv_destroy_ah`                 |      |
+| Post a `SEND` WR                   | `ibv_post_send`                  |      |
+| Post a `SEND_WITH_INV` WR          | `ibv_post_send`                  |      |
+| Post a `RECV` WR                   | `ibv_post_recv`                  |      |
+| Post a `READ` WR                   | `ibv_post_send`                  |      |
+| Post a `WRITE` WR                  | `ibv_post_send`                  |      |
+| Post a `FETCH_ADD` WR              | `ibv_post_send`                  |      |
+| Post a `COMP_SWAP` WR              | `ibv_post_send`                  |      |
 
 For parameters and how it is sampled, please refer to the
 [random_walk_client.cc](https://github.com/google/rdma-unit-test/blob/master/random_walk/internal/random_walk_client.cc)

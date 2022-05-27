@@ -51,6 +51,7 @@ class AccessTest : public RdmaVerbsFixture,
  protected:
   struct BasicSetup {
     ibv_context* context;
+    PortAttribute port_attr;
     ibv_pd* pd;
     RdmaMemBlock src_buffer;
     RdmaMemBlock dst_buffer;
@@ -63,6 +64,7 @@ class AccessTest : public RdmaVerbsFixture,
     setup.src_buffer = ibv_.AllocBuffer(/*pages=*/2);
     setup.dst_buffer = ibv_.AllocBuffer(/*pages=*/2);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allcoate pd.");
@@ -223,7 +225,7 @@ class AccessTest : public RdmaVerbsFixture,
     if (!dst_qp) {
       return absl::InternalError("Cannot create dst qp");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(src_qp, dst_qp));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.port_attr));
     return std::make_pair(src_qp, dst_qp);
   }
 

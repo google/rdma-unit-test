@@ -46,10 +46,9 @@ class SimpleRdmaTest : public RdmaStressFixture {
       .max_op_size = 4096, .max_outstanding_ops_per_qp = 60, .max_qps = 10};
 };
 
-TEST_F(SimpleRdmaTest, SimpleWriteTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, Write) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultSmallQpsPerClient);
 
   // Post operations on all clients.
@@ -76,10 +75,9 @@ TEST_F(SimpleRdmaTest, SimpleWriteTest) {
   initiator.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, SimpleReadTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, Read) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultSmallQpsPerClient);
 
   // Post operations on all clients.
@@ -107,7 +105,7 @@ TEST_F(SimpleRdmaTest, SimpleReadTest) {
   initiator.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, SimpleBatchingTest) {
+TEST_F(SimpleRdmaTest, Batching) {
   // Tests that batching works when inflight_ops is not a multiple of
   // batch_per_qp
 
@@ -116,13 +114,12 @@ TEST_F(SimpleRdmaTest, SimpleBatchingTest) {
   constexpr OpTypes kOpType = OpTypes::kSend;
   constexpr int kBatchPerQp = 4;
 
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultLargeQpsPerClient);
   ConstantRcOperationGenerator op_generator(kOpType, kDefaultOpBytes);
   for (uint32_t qp_id = 0; qp_id < kDefaultLargeQpsPerClient; ++qp_id) {
-    initiator.GetQpState(qp_id)->set_op_generator(&op_generator);
+    initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
   initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
@@ -134,13 +131,12 @@ TEST_F(SimpleRdmaTest, SimpleBatchingTest) {
   initiator.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, SimpleOpTypeMixtureTest) {
+TEST_F(SimpleRdmaTest, MixedOpType) {
   // Create a mixture of 100 Read/Write/Send ops on 10Qpairs, with 1/3
   // proportionality of each op type.
 
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultLargeQpsPerClient);
 
   constexpr float kRatio = 1. / 5.;
@@ -168,7 +164,7 @@ TEST_F(SimpleRdmaTest, SimpleOpTypeMixtureTest) {
 
   RandomizedOperationGenerator op_generator(op_profile);
   for (uint32_t qp_id = 0; qp_id < kDefaultLargeQpsPerClient; ++qp_id) {
-    initiator.GetQpState(qp_id)->set_op_generator(&op_generator);
+    initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
   initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
@@ -181,13 +177,12 @@ TEST_F(SimpleRdmaTest, SimpleOpTypeMixtureTest) {
   initiator.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, SimpleOpSizeMixtureTest) {
+TEST_F(SimpleRdmaTest, MixedOpSize) {
   // Create a mixture of 100 Write ops on 10Qpairs, with 1/3
   // proportionality of op sizes 32, 64, and 128 bytes.
 
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultLargeQpsPerClient);
 
   Config::OperationProfile op_profile;
@@ -212,7 +207,7 @@ TEST_F(SimpleRdmaTest, SimpleOpSizeMixtureTest) {
 
   RandomizedOperationGenerator op_generator(op_profile);
   for (uint32_t qp_id = 0; qp_id < kDefaultLargeQpsPerClient; ++qp_id) {
-    initiator.GetQpState(qp_id)->set_op_generator(&op_generator);
+    initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
   initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
@@ -225,10 +220,9 @@ TEST_F(SimpleRdmaTest, SimpleOpSizeMixtureTest) {
   initiator.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, SimpleRcSendTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, RcSend) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultSmallQpsPerClient);
 
   // Post operations on all clients.
@@ -285,15 +279,14 @@ TEST_F(SimpleRdmaTest, SimpleRcSendTest) {
   target.CheckAllDataLanded();
 }
 
-TEST_F(SimpleRdmaTest, UdSimpleTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, UdSend) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
 
   ASSERT_THAT(initiator.CreateQps(/*count=*/1, /*is_rc=*/false), IsOk());
   ASSERT_THAT(target.CreateQps(/*count=*/1, /*is_rc=*/false), IsOk());
 
-  auto *ah = ibv_.CreateAh(initiator.pd(), ibv_.GetLocalPortGid(context()).gid);
+  ibv_ah *ah = initiator.CreateAh(port_attr());
 
   constexpr int kOpSize = 256;  // smaller than MTU
   Client::OpAttributes attributes = {.op_type = OpTypes::kRecv,
@@ -303,7 +296,7 @@ TEST_F(SimpleRdmaTest, UdSimpleTest) {
   ASSERT_THAT(target.PostOps(attributes), IsOk());
   attributes.op_type = OpTypes::kSend;
   attributes.ud_send_attributes = {
-      .remote_qp = target.GetQpState(0), .remote_op_id = 0, .remote_ah = ah};
+      .remote_qp = target.qp_state(0), .remote_op_id = 0, .remote_ah = ah};
   ASSERT_THAT(initiator.PostOps(attributes), IsOk());
 
   // Poll and validate the completion
@@ -311,7 +304,7 @@ TEST_F(SimpleRdmaTest, UdSimpleTest) {
   std::unique_ptr<TestOp> receiver_op = nullptr;
 
   EXPECT_THAT(initiator.PollSendCompletions(/*count*/ 1), IsOk());
-  QpState *sender_qp = initiator.GetQpState(0);
+  QpState *sender_qp = initiator.qp_state(0);
   EXPECT_EQ(sender_qp->unchecked_initiated_ops().size(), 1);
   if (!sender_qp->unchecked_initiated_ops().empty()) {
     sender_op = std::move(sender_qp->unchecked_initiated_ops().front());
@@ -320,7 +313,7 @@ TEST_F(SimpleRdmaTest, UdSimpleTest) {
   }
 
   EXPECT_THAT(target.PollRecvCompletions(/*count*/ 1), IsOk());
-  QpState *receiver_qp = target.GetQpState(0);
+  QpState *receiver_qp = target.qp_state(0);
   EXPECT_EQ(receiver_qp->unchecked_received_ops().size(), 1);
   if (!receiver_qp->unchecked_received_ops().empty()) {
     receiver_op = std::move(receiver_qp->unchecked_received_ops().front());
@@ -338,10 +331,9 @@ TEST_F(SimpleRdmaTest, UdSimpleTest) {
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
 }
 
-TEST_F(SimpleRdmaTest, SimpleFetchAddTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, FetchAdd) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultSmallQpsPerClient);
 
   // Post operations on all clients.
@@ -369,15 +361,14 @@ TEST_F(SimpleRdmaTest, SimpleFetchAddTest) {
     EXPECT_THAT(initiator.ValidateCompletions(*completions), IsOk());
   }
   for (uint32_t qp_id = 0; qp_id < kDefaultSmallQpsPerClient; ++qp_id) {
-    EXPECT_EQ(initiator.GetQpState(qp_id)->TotalOpsCompleted(),
+    EXPECT_EQ(initiator.qp_state(qp_id)->TotalOpsCompleted(),
               kDefaultSmallOpsPerQp);
   }
 }
 
-TEST_F(SimpleRdmaTest, SimpleCompareSwapTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+TEST_F(SimpleRdmaTest, CompareSwap) {
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   CreateSetUpRcQps(initiator, target, kDefaultSmallQpsPerClient);
 
   // Post compare&swap with no compare value specified, resulting in successful
@@ -430,7 +421,7 @@ TEST_F(SimpleRdmaTest, SimpleCompareSwapTest) {
     EXPECT_THAT(initiator.ValidateCompletions(*completions), IsOk());
   }
   for (uint32_t qp_id = 0; qp_id < kDefaultSmallQpsPerClient; ++qp_id) {
-    EXPECT_EQ(initiator.GetQpState(qp_id)->TotalOpsCompleted(),
+    EXPECT_EQ(initiator.qp_state(qp_id)->TotalOpsCompleted(),
               kDefaultSmallOpsPerQp * 2);
   }
 }

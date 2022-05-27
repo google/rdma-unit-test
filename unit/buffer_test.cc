@@ -59,7 +59,7 @@ class BufferTest : public RdmaVerbsFixture {
   // Struct containing some basic objects shared by all buffer tests.
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd;
     RdmaMemBlock buffer;
   };
@@ -68,7 +68,7 @@ class BufferTest : public RdmaVerbsFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(kBufferMemoryPage);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -91,7 +91,7 @@ class BufferMrTest : public BufferTest {
  protected:
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd;
     ibv_mr* mr;
     ibv_cq* send_cq;
@@ -107,7 +107,7 @@ class BufferMrTest : public BufferTest {
     setup.buffer = ibv_.AllocBuffer(kBufferMemoryPage);
     setup.mr_buffer = setup.buffer.subblock(kMrMemoryOffset, kMrMemoryLength);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -132,7 +132,8 @@ class BufferMrTest : public BufferTest {
     if (!setup.recv_qp) {
       return absl::InternalError("Failed to create recv qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp));
+    RETURN_IF_ERROR(
+        ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp, setup.port_attr));
     return setup;
   }
 };
@@ -416,70 +417,6 @@ TEST_P(BufferMwTest, BindExceedRear) {
               IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
 
-TEST_P(BufferMwTest, BindZeroByteFront) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  absl::Span<uint8_t> buffer = setup.mr_buffer.subspan(0, 0);
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, BindZeroByteRear) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  absl::Span<uint8_t> buffer =
-      setup.buffer.subspan(kMrMemoryOffset + kMrMemoryLength, 0);
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, BindZeroByteOutsideRear) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  constexpr int kDistance = 1;
-  absl::Span<uint8_t> buffer =
-      setup.buffer.subspan(kMrMemoryOffset + kMrMemoryLength + kDistance, 0);
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, BindZeroByteOutsideFront) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  constexpr int kDistance = 1;
-  absl::Span<uint8_t> buffer =
-      setup.buffer.subspan(kMrMemoryOffset - kDistance, 0);
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, BindZeroByteInZeroByteMr) {
-  if (!Introspection().SupportsZeroLengthMr()) {
-    GTEST_SKIP() << "NIC does not support zero length mr.";
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  RdmaMemBlock buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
-  ibv_mr* mr = ibv_.RegMr(setup.pd, buffer);
-  ASSERT_THAT(mr, NotNull());
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, buffer.span()), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, BindZeroByteOutsideZeroByteMr) {
-  if (!Introspection().SupportsZeroLengthMr()) {
-    GTEST_SKIP() << "NIC does not support zero length mr.";
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  RdmaMemBlock mr_buffer = setup.buffer.subblock(kMrMemoryOffset, 0);
-  ibv_mr* mr = ibv_.RegMr(setup.pd, mr_buffer);
-  ASSERT_THAT(mr, NotNull());
-  absl::Span<uint8_t> mw_buffer = setup.buffer.subspan(kMrMemoryOffset - 1, 0);
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
 TEST_P(BufferMwTest, ReadExceedFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
@@ -559,40 +496,6 @@ TEST_P(BufferMwTest, ReadZeroByteOutsideMw) {
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
-TEST_P(BufferMwTest, ReadZeroByteFromZeroByteMw) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  constexpr uint64_t kMwMemoryOffset = kPageSize;
-  constexpr uint64_t kMwMemoryLength = 0;
-  absl::Span<uint8_t> mw_buffer =
-      setup.mr_buffer.subspan(kMwMemoryOffset, kMwMemoryLength);
-  ASSERT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-
-  absl::Span<uint8_t> local_buffer = mw_buffer.subspan(0, 0);
-  absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, ReadZeroByteOutsideZeroByteMw) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  constexpr uint64_t kMwMemoryOffset = kPageSize;
-  constexpr uint64_t kMwMemoryLength = 0;
-  absl::Span<uint8_t> mw_buffer =
-      setup.mr_buffer.subspan(kMwMemoryOffset, kMwMemoryLength);
-  ASSERT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-
-  absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
-  absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
 TEST_P(BufferMwTest, WriteExceedFront) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
@@ -661,41 +564,6 @@ TEST_P(BufferMwTest, WriteZeroByteOutsideMw) {
   ASSERT_THAT(mw, NotNull());
   constexpr uint64_t kMwMemoryOffset = kPageSize;
   constexpr uint64_t kMwMemoryLength = 2 * kPageSize;
-  absl::Span<uint8_t> mw_buffer =
-      setup.mr_buffer.subspan(kMwMemoryOffset, kMwMemoryLength);
-  ASSERT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-
-  ASSERT_GT(kMrMemoryOffset, 0);
-  absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
-  absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, WriteZeroByteToZeroByteMw) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  constexpr uint64_t kMwMemoryOffset = kPageSize;
-  constexpr uint64_t kMwMemoryLength = 0;
-  absl::Span<uint8_t> mw_buffer =
-      setup.mr_buffer.subspan(kMwMemoryOffset, kMwMemoryLength);
-  ASSERT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));
-
-  absl::Span<uint8_t> local_buffer = mw_buffer.subspan(0, 0);
-  absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
-}
-
-TEST_P(BufferMwTest, WriteZeroByteOutsideZeroByteMw) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
-  ASSERT_THAT(mw, NotNull());
-  constexpr uint64_t kMwMemoryOffset = kPageSize;
-  constexpr uint64_t kMwMemoryLength = 0;
   absl::Span<uint8_t> mw_buffer =
       setup.mr_buffer.subspan(kMwMemoryOffset, kMwMemoryLength);
   ASSERT_THAT(DoBind(setup, mw, mw_buffer), IsOkAndHolds(IBV_WC_SUCCESS));

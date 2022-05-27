@@ -24,8 +24,8 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "internal/verbs_extension.h"
-#include "public/flags.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -68,7 +68,7 @@ class ThreadedTest : public RdmaVerbsFixture {
 
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     RdmaMemBlock buffer;
     ibv_pd* pd;
     ibv_cq* cq;
@@ -77,7 +77,7 @@ class ThreadedTest : public RdmaVerbsFixture {
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.cq = ibv_.CreateCq(setup.context);
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
@@ -100,8 +100,10 @@ TEST_F(ThreadedTest, CreateDestroyAh) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &results]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_ah* ah = ibv_.extension()->CreateAh(setup.pd, setup.port_gid,
-                                                setup.port_gid.gid);
+        ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
+            setup.port_attr.port, setup.port_attr.gid_index,
+            setup.port_attr.gid);
+        ibv_ah* ah = ibv_.extension().CreateAh(setup.pd, ah_attr);
         ASSERT_THAT(ah, NotNull());
         results[thread_id][i] = ibv_destroy_ah(ah);
       }
@@ -201,7 +203,7 @@ TEST_F(ThreadedTest, RegDeregMr) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &results]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_mr* mr = ibv_.extension()->RegMr(
+        ibv_mr* mr = ibv_.extension().RegMr(
             setup.pd, setup.buffer,
             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                 IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
@@ -257,13 +259,9 @@ TEST_F(ThreadedTest, CreateDestroyQp) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &results]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_qp_init_attr init_attr{.send_cq = setup.cq,
-                                   .recv_cq = setup.cq,
-                                   .srq = nullptr,
-                                   .cap = verbs_util::DefaultQpCap(),
-                                   .qp_type = IBV_QPT_RC,
-                                   .sq_sig_all = 0};
-        ibv_qp* qp = ibv_.extension()->CreateQp(setup.pd, init_attr);
+        ibv_qp_init_attr attr =
+            QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
+        ibv_qp* qp = ibv_.extension().CreateQp(setup.pd, attr);
         ASSERT_THAT(qp, NotNull());
         results[thread_id][i] = ibv_destroy_qp(qp);
       }
@@ -312,8 +310,10 @@ TEST_F(ThreadedTest, CreateAh) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &ahs]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ahs[thread_id][i] = ibv_.extension()->CreateAh(setup.pd, setup.port_gid,
-                                                       setup.port_gid.gid);
+        ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
+            setup.port_attr.port, setup.port_attr.gid_index,
+            setup.port_attr.gid);
+        ahs[thread_id][i] = ibv_.extension().CreateAh(setup.pd, ah_attr);
       }
     });
   }
@@ -410,7 +410,7 @@ TEST_F(ThreadedTest, RegMr) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &mrs]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        mrs[thread_id][i] = ibv_.extension()->RegMr(
+        mrs[thread_id][i] = ibv_.extension().RegMr(
             setup.pd, setup.buffer,
             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                 IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
@@ -464,13 +464,9 @@ TEST_F(ThreadedTest, CreateQp) {
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &qps]() {
       for (int i = 0; i < kResourcePerThread; ++i) {
-        ibv_qp_init_attr init_attr{.send_cq = setup.cq,
-                                   .recv_cq = setup.cq,
-                                   .srq = nullptr,
-                                   .cap = verbs_util::DefaultQpCap(),
-                                   .qp_type = IBV_QPT_RC,
-                                   .sq_sig_all = 0};
-        qps[thread_id][i] = ibv_.extension()->CreateQp(setup.pd, init_attr);
+        ibv_qp_init_attr attr =
+            QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
+        qps[thread_id][i] = ibv_.extension().CreateQp(setup.pd, attr);
       }
     });
   }

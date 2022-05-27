@@ -54,6 +54,7 @@ class CqExTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
+    PortAttribute port_attr;
     ibv_pd* pd;
     ibv_comp_channel* channel;
   };
@@ -61,6 +62,7 @@ class CqExTest : public RdmaVerbsFixture {
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -245,7 +247,6 @@ class CqExOpTest : public BatchOpFixture {
 
 TEST_F(CqExOpTest, BasicPollSendCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
       .wc_flags = GetWcFlags()};
@@ -253,17 +254,16 @@ TEST_F(CqExOpTest, BasicPollSendCq) {
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   QpPair qp_pair;
   qp_pair.send_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
-                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+                                  ibv_cq_ex_to_cq(recv_cq), IBV_QPT_RC);
   ASSERT_THAT(qp_pair.send_qp, NotNull())
       << "Failed to create send qp - " << errno;
   qp_pair.recv_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
-                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+                                  ibv_cq_ex_to_cq(recv_cq), IBV_QPT_RC);
   ASSERT_THAT(qp_pair.recv_qp, NotNull())
       << "Failed to create recv qp - " << errno;
-  qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
+  qp_pair.dst_buffer = setup.dst_memblock.span();
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp,
+                                    setup.port_attr));
   QueueWrite(setup, qp_pair);
 
   // Wait for completion and verify timestamp.
@@ -280,7 +280,6 @@ TEST_F(CqExOpTest, BasicPollSendCq) {
 
 TEST_F(CqExOpTest, BasicPollRecvCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  static constexpr int kMaxQpWr = 1;
   ibv_cq_init_attr_ex cq_attr = {
       .cqe = static_cast<uint32_t>(Introspection().device_attr().max_cqe),
       .wc_flags = GetWcFlags()};
@@ -288,17 +287,16 @@ TEST_F(CqExOpTest, BasicPollRecvCq) {
   ibv_cq_ex* recv_cq = ibv_.CreateCqEx(setup.context, cq_attr);
   QpPair qp_pair;
   qp_pair.send_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
-                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+                                  ibv_cq_ex_to_cq(recv_cq), IBV_QPT_RC);
   ASSERT_THAT(qp_pair.send_qp, NotNull())
       << "Failed to create send qp - " << errno;
   qp_pair.recv_qp = ibv_.CreateQp(setup.pd, ibv_cq_ex_to_cq(send_cq),
-                                  ibv_cq_ex_to_cq(recv_cq), nullptr, kMaxQpWr,
-                                  kMaxQpWr, IBV_QPT_RC, /*sig_all=*/0);
+                                  ibv_cq_ex_to_cq(recv_cq), IBV_QPT_RC);
   ASSERT_THAT(qp_pair.recv_qp, NotNull())
       << "Failed to create recv qp - " << errno;
-  qp_pair.dst_buffer = setup.dst_memblock.subspan(kMaxQpWr, kMaxQpWr);
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
+  qp_pair.dst_buffer = setup.dst_memblock.span();
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp,
+                                    setup.port_attr));
   QueueRecv(setup, qp_pair);
   QueueSend(setup, qp_pair);
 

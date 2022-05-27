@@ -18,6 +18,7 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_EXTENSION_INTERFACE_H_
 
 #include <cstdint>
+#include <utility>
 
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
@@ -47,14 +48,14 @@ class VerbsExtension {
                       const RdmaMemBlock* memblock, int access);
 
   // Creates a address handle. Calls ibv_create_ah on default.
-  virtual ibv_ah* CreateAh(ibv_pd* pd, verbs_util::PortGid local,
-                           ibv_gid remote_gid, uint8_t traffic_class = 0);
+  virtual ibv_ah* CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr);
 
   // Create a queue pair. Calls ibv_create_qp on default.
   virtual ibv_qp* CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr);
+
   // Modify the QP to RTR(ready to receive) state.
-  virtual absl::Status SetQpRtr(ibv_qp* qp, const verbs_util::PortGid& local,
-                                ibv_gid remote_gid, uint32_t remote_qpn);
+  virtual int ModifyRcQpInitToRtr(ibv_qp* qp, ibv_qp_attr& qp_attr,
+                                  int qp_attr_mask);
 };
 
 }  // namespace rdma_unit_test

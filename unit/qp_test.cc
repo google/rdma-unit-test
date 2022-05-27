@@ -20,12 +20,11 @@
 #include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -47,11 +46,11 @@ class QpTest : public RdmaVerbsFixture {
   }
 
   int InitUdQP(ibv_qp* qp, uint32_t qkey) const {
-    verbs_util::PortGid port_gid = ibv_.GetLocalPortGid(qp->context);
+    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
     ibv_qp_attr mod_init = {};
     mod_init.qp_state = IBV_QPS_INIT;
     mod_init.pkey_index = 0;
-    mod_init.port_num = port_gid.port;
+    mod_init.port_num = port_attr.port;
     mod_init.qkey = qkey;
     constexpr int kInitMask =
         IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
@@ -68,12 +67,11 @@ class QpTest : public RdmaVerbsFixture {
       IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
       IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC;
 
-  static constexpr ibv_qp_cap kBasicQpCap = {
-      .max_send_wr = 10,
-      .max_recv_wr = 1,
-      .max_send_sge = 1,
-      .max_recv_sge = 1,
-      .max_inline_data = verbs_util::kDefaultMaxInlineSize};
+  static constexpr ibv_qp_cap kBasicQpCap = {.max_send_wr = 10,
+                                             .max_recv_wr = 1,
+                                             .max_send_sge = 1,
+                                             .max_recv_sge = 1,
+                                             .max_inline_data = 36};
 
   struct BasicSetup {
     ibv_context* context;
@@ -113,17 +111,17 @@ class QpTest : public RdmaVerbsFixture {
     static constexpr int kRemoteAccessAll = IBV_ACCESS_REMOTE_WRITE |
                                             IBV_ACCESS_REMOTE_READ |
                                             IBV_ACCESS_REMOTE_ATOMIC;
-    verbs_util::PortGid port_gid = ibv_.GetLocalPortGid(qp->context);
+    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
     ibv_qp_attr mod_init = {};
     mod_init.qp_state = IBV_QPS_INIT;
     mod_init.pkey_index = 0;
-    mod_init.port_num = port_gid.port;
+    mod_init.port_num = port_attr.port;
     mod_init.qp_access_flags = kRemoteAccessAll;
     return mod_init;
   }
 
   ibv_qp_attr CreateBasicRcQpRtrAttr(ibv_qp* qp) const {
-    verbs_util::PortGid port_gid = ibv_.GetLocalPortGid(qp->context);
+    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
     ibv_qp_attr mod_rtr = {};
     mod_rtr.qp_state = IBV_QPS_RTR;
     // Small enough MTU that should be supported everywhere.
@@ -132,8 +130,8 @@ class QpTest : public RdmaVerbsFixture {
     mod_rtr.rq_psn = 24;
     mod_rtr.max_dest_rd_atomic = 10;
     mod_rtr.min_rnr_timer = 26;  // 82us delay
-    mod_rtr.ah_attr.grh.dgid = port_gid.gid;
-    mod_rtr.ah_attr.grh.sgid_index = port_gid.gid_index;
+    mod_rtr.ah_attr.grh.dgid = port_attr.gid;
+    mod_rtr.ah_attr.grh.sgid_index = port_attr.gid_index;
     mod_rtr.ah_attr.grh.hop_limit = 127;
     mod_rtr.ah_attr.is_global = 1;
     mod_rtr.ah_attr.sl = 5;
@@ -172,13 +170,33 @@ class QpTest : public RdmaVerbsFixture {
 
 TEST_F(QpTest, Create) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  EXPECT_THAT(ibv_.CreateQp(setup.pd, setup.basic_attr), NotNull());
+  ibv_qp* qp = ibv_.extension().CreateQp(setup.pd, setup.basic_attr);
+  ASSERT_THAT(qp, NotNull());
+  EXPECT_EQ(qp->pd, setup.pd);
+  EXPECT_EQ(qp->send_cq, setup.basic_attr.send_cq);
+  EXPECT_EQ(qp->recv_cq, setup.basic_attr.recv_cq);
+  EXPECT_EQ(qp->srq, setup.basic_attr.srq);
+  EXPECT_EQ(qp->qp_type, setup.basic_attr.qp_type);
+  EXPECT_EQ(qp->state, IBV_QPS_RESET);
+  EXPECT_EQ(ibv_destroy_qp(qp), 0);
 }
 
 TEST_F(QpTest, CreateWithInlineMax) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  setup.basic_attr.cap.max_inline_data = verbs_util::kDefaultMaxInlineSize;
-  EXPECT_THAT(ibv_.CreateQp(setup.pd, setup.basic_attr), NotNull());
+  // Some arbitrary values. max_inline_data is rarely over 1k.
+  for (uint32_t max_inline : {36, 96, 216, 580, 1000}) {
+    ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+    attr.cap.max_inline_data = max_inline;
+    ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
+    if (qp != nullptr) {
+      EXPECT_GE(attr.cap.max_inline_data, max_inline);
+      LOG(INFO) << "Try creating QP with max_inline_data " << max_inline
+                << ", get actual value " << attr.cap.max_inline_data << ".";
+    } else {
+      LOG(INFO) << "Creation failed with max_inline_data = " << max_inline
+                << ".";
+    }
+  }
 }
 
 TEST_F(QpTest, CreateWithInvalidSendCq) {
@@ -251,7 +269,8 @@ TEST_F(QpTest, MaxQpWr) {
   attr.cap.max_send_wr = device_attr.max_qp_wr + 1;
   ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
   if (qp != nullptr) {
-    EXPECT_LE(attr.cap.max_send_wr, device_attr.max_qp_wr);
+    LOG(WARNING) << "Nonstandard behavior: Creating a QP with max send WR "
+                    "greater than device limit is successful.";
   }
 
   attr.cap = kBasicQpCap;
@@ -260,7 +279,9 @@ TEST_F(QpTest, MaxQpWr) {
   attr.cap.max_recv_wr = device_attr.max_qp_wr + 1;
   qp = ibv_.CreateQp(setup.pd, attr);
   if (qp != nullptr) {
-    EXPECT_LE(attr.cap.max_send_wr, device_attr.max_qp_wr);
+    LOG(WARNING)
+        << "Nonstandard behavior: Creating a QP with max recv WR greater "
+           "than device limit is successful.";
   }
 }
 
@@ -465,7 +486,7 @@ class QpStateTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_cq* cq = nullptr;
     ibv_pd* pd = nullptr;
     ibv_qp* local_qp = nullptr;
@@ -481,7 +502,7 @@ class QpStateTest : public RdmaVerbsFixture {
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
     }
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -517,11 +538,8 @@ TEST_F(QpStateTest, PostSendReset) {
   // This deviates from IBTA spec, see comment above the test.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
   // Modify the QP to RTS before we poll for completion.
-  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
-  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.remote_qp, setup.local_qp,
+                                    setup.port_attr));
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
   EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
   if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
@@ -543,8 +561,9 @@ TEST_F(QpStateTest, PostRecvReset) {
   ibv_recv_wr* bad_wr = nullptr;
   EXPECT_THAT(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
   // Modify local_qp to RTS state and post a send request.
-  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                           setup.remote_qp->qp_num));
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(
+      setup.local_qp, setup.port_attr, setup.port_attr.gid,
+      setup.remote_qp->qp_num, QpAttribute().set_timeout(absl::Seconds(1))));
   ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
@@ -559,7 +578,8 @@ TEST_F(QpStateTest, PostRecvReset) {
 
 TEST_F(QpStateTest, PostSendInit) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.local_qp, setup.port_attr.port),
+            0);
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_INIT);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
@@ -568,11 +588,14 @@ TEST_F(QpStateTest, PostSendInit) {
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
-  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
+  ASSERT_OK(ibv_.ModifyLoopbackRcQpResetToRts(setup.remote_qp, setup.local_qp,
+                                              setup.port_attr));
   // Modify the QP to RTS before we poll for completion.
-  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  ASSERT_EQ(
+      ibv_.ModifyRcQpInitToRtr(setup.local_qp, setup.port_attr,
+                               setup.port_attr.gid, setup.remote_qp->qp_num),
+      0);
+  ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(setup.local_qp), 0);
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
   EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
   if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
@@ -590,14 +613,16 @@ TEST_F(QpStateTest, PostSendInit) {
 // not get processed.
 TEST_F(QpStateTest, PostRecvInit) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.remote_qp, setup.port_attr.port),
+            0);
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_INIT);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   ASSERT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
-  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                           setup.remote_qp->qp_num));
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(
+      setup.local_qp, setup.port_attr, setup.port_attr.gid,
+      setup.remote_qp->qp_num, QpAttribute().set_timeout(absl::Seconds(1))));
   ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
@@ -612,9 +637,12 @@ TEST_F(QpStateTest, PostRecvInit) {
 
 TEST_F(QpStateTest, PostSendRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.remote_qp->qp_num));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.local_qp, setup.port_attr.port),
+            0);
+  ASSERT_EQ(
+      ibv_.ModifyRcQpInitToRtr(setup.local_qp, setup.port_attr,
+                               setup.port_attr.gid, setup.remote_qp->qp_num),
+      0);
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTR);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
@@ -623,8 +651,9 @@ TEST_F(QpStateTest, PostSendRtr) {
   // This deviates from IBTA spec, see comment at QpStateTest.PostSendReset
   // for details.
   EXPECT_THAT(ibv_post_send(setup.local_qp, &read, &bad_wr), 0);
-  ASSERT_OK(ibv_.SetUpRcQp(setup.remote_qp, setup.local_qp));
-  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  ASSERT_OK(ibv_.ModifyLoopbackRcQpResetToRts(setup.remote_qp, setup.local_qp,
+                                              setup.port_attr));
+  ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(setup.local_qp), 0);
   EXPECT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
   EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTS);
   if (Introspection().SilentlyDropSendWrWhenResetInitRtr()) {
@@ -640,17 +669,21 @@ TEST_F(QpStateTest, PostSendRtr) {
 
 TEST_F(QpStateTest, PostRecvRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.local_qp->qp_num));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.remote_qp, setup.port_attr.port),
+            0);
+  ASSERT_EQ(
+      ibv_.ModifyRcQpInitToRtr(setup.remote_qp, setup.port_attr,
+                               setup.port_attr.gid, setup.local_qp->qp_num),
+      0);
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTR);
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv = verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
   ibv_recv_wr* bad_wr = nullptr;
   EXPECT_EQ(ibv_post_recv(setup.remote_qp, &recv, &bad_wr), 0);
-  ASSERT_OK(ibv_.SetQpRts(setup.remote_qp));
-  ASSERT_OK(ibv_.SetUpRcQp(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                           setup.remote_qp->qp_num));
+  ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(setup.remote_qp), 0);
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(setup.local_qp, setup.port_attr,
+                                      setup.port_attr.gid,
+                                      setup.remote_qp->qp_num));
   ibv_sge lsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
@@ -676,8 +709,9 @@ TEST_F(QpStateTest, PostRecvRtr) {
 
 TEST_F(QpStateTest, PostSendErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
-  ASSERT_OK(ibv_.SetQpError(setup.local_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                    setup.port_attr));
+  ASSERT_OK(ibv_.ModifyQpToError(setup.local_qp));
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_ERR);
   ASSERT_OK_AND_ASSIGN(
       ibv_wc_status status,
@@ -688,8 +722,9 @@ TEST_F(QpStateTest, PostSendErr) {
 
 TEST_F(QpStateTest, PostRecvErr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
-  ASSERT_OK(ibv_.SetQpError(setup.remote_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                    setup.port_attr));
+  ASSERT_OK(ibv_.ModifyQpToError(setup.remote_qp));
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
   ibv_recv_wr recv =
@@ -702,14 +737,20 @@ TEST_F(QpStateTest, PostRecvErr) {
 
 TEST_F(QpStateTest, RtsSendToRtr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetQpInit(setup.local_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.local_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetQpRts(setup.local_qp));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.local_qp, setup.port_attr.port),
+            0);
+  ASSERT_EQ(
+      ibv_.ModifyRcQpInitToRtr(setup.local_qp, setup.port_attr,
+                               setup.port_attr.gid, setup.remote_qp->qp_num),
+      0);
+  ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(setup.local_qp), 0);
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_RTS);
-  ASSERT_OK(ibv_.SetQpInit(setup.remote_qp, setup.port_gid.port));
-  ASSERT_OK(ibv_.SetQpRtr(setup.remote_qp, setup.port_gid, setup.port_gid.gid,
-                          setup.local_qp->qp_num));
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.remote_qp, setup.port_attr.port),
+            0);
+  ASSERT_EQ(
+      ibv_.ModifyRcQpInitToRtr(setup.remote_qp, setup.port_attr,
+                               setup.port_attr.gid, setup.local_qp->qp_num),
+      0);
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_RTR);
 
   ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
@@ -737,7 +778,8 @@ TEST_F(QpStateTest, RtsSendToRtr) {
 
 TEST_F(QpStateTest, ModRtsToError) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                    setup.port_attr));
   ibv_qp_attr attr;
   attr.qp_state = IBV_QPS_ERR;
   ibv_qp_attr_mask attr_mask = IBV_QP_STATE;
@@ -751,11 +793,10 @@ class QpPostTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_cq* cq = nullptr;
     ibv_pd* pd = nullptr;
     ibv_qp* qp = nullptr;
-    ibv_qp_init_attr init_attr;
     ibv_qp* remote_qp = nullptr;
     RdmaMemBlock buffer;
     ibv_mr* mr = nullptr;
@@ -768,18 +809,12 @@ class QpPostTest : public RdmaVerbsFixture {
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
     }
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
     }
-    setup.init_attr = ibv_qp_init_attr{.send_cq = setup.cq,
-                                       .recv_cq = setup.cq,
-                                       .srq = nullptr,
-                                       .cap = verbs_util::DefaultQpCap(),
-                                       .qp_type = IBV_QPT_RC,
-                                       .sq_sig_all = 0};
-    setup.qp = ibv_.CreateQp(setup.pd, setup.init_attr);
+    setup.qp = ibv_.CreateQp(setup.pd, setup.cq, IBV_QPT_RC);
     if (!setup.qp) {
       return absl::InternalError("Failed to create qp.");
     }
@@ -787,7 +822,8 @@ class QpPostTest : public RdmaVerbsFixture {
     if (!setup.remote_qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.qp, setup.remote_qp));
+    RETURN_IF_ERROR(
+        ibv_.SetUpLoopbackRcQps(setup.qp, setup.remote_qp, setup.port_attr));
     setup.buffer = ibv_.AllocBuffer(/*pages=*/1);
     setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
     if (!setup.mr) {
@@ -812,7 +848,7 @@ TEST_F(QpPostTest, OverflowSendWr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   // Issue enough commands to overflow the queue.
   ibv_send_wr wqe = DummySend();
-  int max_send_wr = setup.init_attr.cap.max_send_wr;
+  int max_send_wr = verbs_util::GetQpCap(setup.qp).max_send_wr;
   std::vector<ibv_send_wr> wqes(max_send_wr + 1, wqe);
   for (unsigned int i = 0; i < wqes.size() - 1; ++i) {
     wqes[i].wr_id = wqe.wr_id + i;
@@ -821,19 +857,6 @@ TEST_F(QpPostTest, OverflowSendWr) {
   ibv_send_wr* bad_wr = nullptr;
   EXPECT_EQ(ibv_post_send(setup.qp, wqes.data(), &bad_wr), ENOMEM);
   EXPECT_EQ(bad_wr, &wqes[max_send_wr]);
-}
-
-TEST_F(QpPostTest, PostInlineInvalidOp) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-
-  ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
-  ibv_send_wr read = verbs_util::CreateReadWr(
-      /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), setup.mr->rkey);
-  read.send_flags |= IBV_SEND_INLINE;
-  ibv_send_wr* bad_wr = nullptr;
-  // Some NICs use ENOMEM.
-  EXPECT_THAT(ibv_post_send(setup.qp, &read, &bad_wr), AnyOf(ENOMEM, EINVAL));
-  EXPECT_EQ(bad_wr, &read);
 }
 
 // TODO(author1): Test larger MTU than the device allows

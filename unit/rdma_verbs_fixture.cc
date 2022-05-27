@@ -8,6 +8,7 @@ namespace rdma_unit_test {
 
 void RdmaVerbsFixture::SetUp() {
   BasicFixture::SetUp();
+
   VLOG(1) << "Pre test stats dump.";
   VLOG(1) << Introspection().DumpHardwareCounters();
 }

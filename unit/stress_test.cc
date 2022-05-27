@@ -25,6 +25,7 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
@@ -45,7 +46,7 @@ class StressTest : public RdmaVerbsFixture {
 
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd;
   };
 
@@ -71,7 +72,7 @@ class StressTest : public RdmaVerbsFixture {
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd");
@@ -84,18 +85,15 @@ class StressTest : public RdmaVerbsFixture {
                                                     uint32_t max_send_wr,
                                                     ibv_cq* cq) {
     std::vector<QpPair> qps;
-    ibv_qp_init_attr attr{.send_cq = cq,
-                          .recv_cq = cq,
-                          .srq = nullptr,
-                          .cap = verbs_util::DefaultQpCap(),
-                          .qp_type = IBV_QPT_RC,
-                          .sq_sig_all = 0};
-    attr.cap.max_send_wr = max_send_wr;
     for (int i = 0; i < num_qps; ++i) {
       QpPair pair{
           .index = i,
-          .requestor = ibv_.CreateQp(setup.pd, attr),
-          .responder = ibv_.CreateQp(setup.pd, attr),
+          .requestor =
+              ibv_.CreateQp(setup.pd, cq, IBV_QPT_RC,
+                            QpInitAttribute().set_max_send_wr(max_send_wr)),
+          .responder =
+              ibv_.CreateQp(setup.pd, cq, IBV_QPT_RC,
+                            QpInitAttribute().set_max_send_wr(max_send_wr)),
       };
       if (!pair.requestor) {
         return absl::InternalError("Failed to create requestor qp.");
@@ -103,7 +101,8 @@ class StressTest : public RdmaVerbsFixture {
       if (!pair.responder) {
         return absl::InternalError("Failed to create responder qp.");
       }
-      RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(pair.requestor, pair.responder));
+      RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(pair.requestor, pair.responder,
+                                              setup.port_attr));
       qps.emplace_back(pair);
     }
     return qps;

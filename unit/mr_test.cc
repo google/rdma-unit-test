@@ -30,7 +30,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/notification.h"
-
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
@@ -38,6 +37,7 @@
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/loopback_fixture.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
@@ -71,7 +71,11 @@ class MrTest : public RdmaVerbsFixture {
 TEST_F(MrTest, RegisterMemory) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
-  EXPECT_THAT(mr, NotNull());
+  ASSERT_THAT(mr, NotNull());
+  EXPECT_EQ(mr->pd, setup.pd);
+  EXPECT_EQ(mr->addr, setup.buffer.data());
+  EXPECT_EQ(mr->length, setup.buffer.size());
+  EXPECT_EQ(ibv_.DeregMr(mr), 0);
 }
 
 TEST_F(MrTest, DeregInvalidMr) {
@@ -166,56 +170,13 @@ TEST_F(MrTest, ReregMrInvalidBuffer) {
 
 // TODO(author1): Threaded rkey user (IBV_WC_REM_ACCESS_ERR)
 
-class MrLoopbackTest : public RdmaVerbsFixture {
+class MrLoopbackTest : public LoopbackFixture {
  protected:
-  static constexpr int kBufferMemoryPages = 1;
-  static constexpr int kQueueSize = 200;
-  static constexpr int kQKey = 200;
-
-  struct Client {
-    ibv_context* context = nullptr;
-    verbs_util::PortGid port_gid;
-    ibv_pd* pd = nullptr;
-    ibv_cq* cq = nullptr;
-    // RC qp.
-    ibv_qp* qp = nullptr;
-    // AH pointing to the other client.
-    ibv_ah* other_ah = nullptr;
-    ibv_mr* mr = nullptr;
-    RdmaMemBlock buffer;
-  };
-
-  absl::StatusOr<Client> CreateClient(uint8_t buf_content = '-') {
-    Client client;
-    client.buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-    memset(client.buffer.data(), buf_content, client.buffer.size());
-    ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
-    client.port_gid = ibv_.GetLocalPortGid(client.context);
-    client.pd = ibv_.AllocPd(client.context);
-    if (!client.pd) {
-      return absl::InternalError("Failed to allocate pd.");
-    }
-    client.cq = ibv_.CreateCq(client.context);
-    if (!client.cq) {
-      return absl::InternalError("Failed to create cq.");
-    }
-    client.qp =
-        ibv_.CreateQp(client.pd, client.cq, client.cq, nullptr, kQueueSize,
-                      kQueueSize, IBV_QPT_RC, /*sig_all=*/0);
-    if (!client.qp) {
-      return absl::InternalError("Failed to create qp.");
-    }
-    client.mr = ibv_.RegMr(client.pd, client.buffer);
-    if (!client.mr) {
-      return absl::InternalError("Failed to register mr.");
-    }
-    return client;
-  }
-
   absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair() {
-    ASSIGN_OR_RETURN(Client local, CreateClient(/*buf_content=*/'a'));
-    ASSIGN_OR_RETURN(Client remote, CreateClient(/*buf_content=*/'b'));
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
+    ASSIGN_OR_RETURN(Client local, CreateClient(IBV_QPT_RC));
+    ASSIGN_OR_RETURN(Client remote, CreateClient(IBV_QPT_RC));
+    RETURN_IF_ERROR(
+        ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_attr));
     return std::make_pair(local, remote);
   }
 

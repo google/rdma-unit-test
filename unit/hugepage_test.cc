@@ -76,7 +76,7 @@ class HugePageTest : public LoopbackFixture {
 TEST_F(HugePageTest, SendLargeChunk) {
   ASSERT_OK_AND_ASSIGN(Client local, CreateClient());
   ASSERT_OK_AND_ASSIGN(Client remote, CreateClient());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_attr));
 
   // prepare buffer
   RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(kNumHugepages);
@@ -116,7 +116,7 @@ TEST_F(HugePageTest, SendLargeChunk) {
 TEST_F(HugePageTest, SendMultipleSge) {
   ASSERT_OK_AND_ASSIGN(Client local, CreateClient());
   ASSERT_OK_AND_ASSIGN(Client remote, CreateClient());
-  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_attr));
   // prepare buffer
   RdmaMemBlock send_buf = ibv_.AllocHugepageBuffer(/*pages=*/512);
   memset(send_buf.data(), 'a', send_buf.size());

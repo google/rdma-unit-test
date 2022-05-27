@@ -47,8 +47,21 @@ TEST_F(DeviceTest, GetDeviceList) {
 }
 
 TEST_F(DeviceTest, Open) {
-  auto context = ibv_.OpenDevice();
-  ASSERT_OK(context.status());
+  int num_devices = 0;
+  ibv_device** devices = ibv_get_device_list(&num_devices);
+  ASSERT_THAT(devices, NotNull());
+  ASSERT_GE(num_devices, 1);
+
+  for (int i = 0; i < num_devices; ++i) {
+    ibv_device* device = devices[i];
+    ASSERT_THAT(device, NotNull());
+    LOG(INFO) << "Found device " << device->name << ".";
+    ibv_context* context = ibv_open_device(device);
+    ASSERT_THAT(context, NotNull());
+    EXPECT_EQ(context->device, device);
+    ASSERT_EQ(ibv_close_device(context), 0);
+  }
+  ibv_free_device_list(devices);
 }
 
 TEST_F(DeviceTest, OpenMany) {
@@ -113,11 +126,11 @@ TEST_F(DeviceLimitTest, MaxAh) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());
-  ibv_gid gid = ibv_.GetLocalPortGid(context).gid;
+  PortAttribute port_attr = ibv_.GetPortAttribute(context);
   int max_ah = Introspection().device_attr().max_ah;
   int actual_max = 0;
   for (int i = 0; i < max_ah + kErrorMax + 10; ++i) {
-    if (ibv_.CreateAh(pd, gid) != nullptr) {
+    if (ibv_.CreateLoopbackAh(pd, port_attr) != nullptr) {
       ++actual_max;
     } else {
       break;

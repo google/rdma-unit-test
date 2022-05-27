@@ -22,6 +22,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 
@@ -67,12 +68,12 @@ absl::StatusOr<ibv_wc_status> LoopbackFixture::ExecuteRdmaOp(
 }
 
 absl::StatusOr<LoopbackFixture::Client> LoopbackFixture::CreateClient(
-    ibv_qp_type qp_type, int pages) {
+    ibv_qp_type qp_type, int pages, QpInitAttribute qp_init_attr) {
   Client client;
   client.buffer = ibv_.AllocBuffer(pages);
   std::fill_n(client.buffer.data(), client.buffer.size(), '-');
   ASSIGN_OR_RETURN(client.context, ibv_.OpenDevice());
-  client.port_gid = ibv_.GetLocalPortGid(client.context);
+  client.port_attr = ibv_.GetPortAttribute(client.context);
   client.pd = ibv_.AllocPd(client.context);
   if (!client.pd) {
     return absl::InternalError("Failed to allocate pd.");
@@ -81,13 +82,7 @@ absl::StatusOr<LoopbackFixture::Client> LoopbackFixture::CreateClient(
   if (!client.cq) {
     return absl::InternalError("Failed to create cq.");
   }
-  ibv_qp_init_attr attr = {.send_cq = client.cq,
-                           .recv_cq = client.cq,
-                           .srq = nullptr,
-                           .cap = verbs_util::DefaultQpCap(),
-                           .qp_type = qp_type,
-                           .sq_sig_all = 0};
-  client.qp = ibv_.CreateQp(client.pd, attr);
+  client.qp = ibv_.CreateQp(client.pd, client.cq, qp_type, qp_init_attr);
   if (!client.qp) {
     return absl::InternalError("Failed to create qp.");
   }
@@ -105,7 +100,7 @@ absl::StatusOr<LoopbackFixture::BasicSetup> LoopbackFixture::CreateBasicSetup(
   setup.buffer = ibv_.AllocBuffer(pages);
   std::fill_n(setup.buffer.data(), setup.buffer.size(), '-');
   ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-  setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+  setup.port_attr = ibv_.GetPortAttribute(setup.context);
   setup.pd = ibv_.AllocPd(setup.context);
   if (!setup.pd) {
     return absl::InternalError("Failed to allocate pd.");
@@ -114,12 +109,8 @@ absl::StatusOr<LoopbackFixture::BasicSetup> LoopbackFixture::CreateBasicSetup(
   if (!setup.cq) {
     return absl::InternalError("Failed to create cq.");
   }
-  ibv_qp_init_attr attr = {.send_cq = setup.cq,
-                           .recv_cq = setup.cq,
-                           .srq = nullptr,
-                           .cap = verbs_util::DefaultQpCap(),
-                           .qp_type = IBV_QPT_RC,
-                           .sq_sig_all = 0};
+  ibv_qp_init_attr attr =
+      QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
   setup.local_qp = ibv_.CreateQp(setup.pd, attr);
   if (!setup.local_qp) {
     return absl::InternalError("Failed to create local qp.");
@@ -128,7 +119,8 @@ absl::StatusOr<LoopbackFixture::BasicSetup> LoopbackFixture::CreateBasicSetup(
   if (!setup.remote_qp) {
     return absl::InternalError("Failed to create remote qp.");
   }
-  RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp));
+  RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                          setup.port_attr));
   setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
   if (!setup.mr) {
     return absl::InternalError("Failed to register mr.");

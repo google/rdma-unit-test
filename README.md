@@ -20,7 +20,7 @@ These are practical tests designed to understand the behavior of a stack. In
 many places they check constraints beyond what is stated in the Infiniband
 specification. Do not assume test failures indicate bad hardware, it could be
 that your device diverged in an undefined area of the specification. Patches
-to fix overly-specified tests are encouraged.
+to fix over-specific tests are encouraged.
 
 ## Installation
 
@@ -34,7 +34,7 @@ options;
 
 Additional requirements;
 
-* ivberbs development libraries; **sudo yum install libibverbs-devel**
+* ibverbs development libraries; **sudo yum install libibverbs-devel**
 * bazel build tool; instructions [here](https://docs.bazel.build/versions/master/install-redhat.html)
 
 The user space libraries are supported and packaged [here](https://github.com/linux-rdma/rdma-core)
@@ -63,9 +63,9 @@ recursively build and execute all the test targets.
 An example using SoftRoce;
 
     cd rdma-unit-test
-    bazel test ... --test_output=all --test_arg=--verbs_mtu=1024 --test_arg=--no_ipv6_for_gid
+    bazel test ... --test_output=all --test_arg=--verbs_mtu=1024 --test_arg=--ipv4_only
 
-It has been observed that some ibverb libraries require root priviledges to
+It has been observed that some ibverb libraries require root privileges to
 create verb objects. If this is the case you can either run bazel under root
 or execute each individual test.
 
@@ -90,19 +90,27 @@ category. In the cases directory;
 You can also run the test executables directly. This method does not support
 bazel test flag options; e.g. --test_output, --test_arg
 
-    cd rdma-unit-test/bazel-bin/cases
-    ./device_test [--verbs_mtu=1024] [--no_ipv6_for_gid]
+```
+cd rdma-unit-test/bazel-bin/cases
+./device_test [--verbs_mtu=1024] [--ipv4_only]
+```
 
 ### Test Arguments
-Several command line flags select specific behaviour to accomodate adapter
+
+Several command line flags select specific behaviour to accommodate adapter
 limitations or behaviour modification;
 
-flag | default | description
------|---------|------------
-verbs_mtu | 4096 | Changes the mtu size for qp configuration. Note that some adapters may have limited support for 4096 so this flag must be set to be within device contraints
-no_ipv6_for_mtu | false | If set, will only enumerate ports with ipv4 addresses.
-device_name | none | If set, will attempt to open the named device for all tests. If the device is not found **rdma_unit_test** will list the available devices.
-
+| flag        | default | description                                          |
+| ----------- | ------- | ---------------------------------------------------- |
+| verbs_mtu   | 4096    | Changes the mtu size for qp configuration. Note that |
+:             :         : some adapters may have limited support for 4096 so   :
+:             :         : this flag must be set to be within device            :
+:             :         : constraints                                          :
+| ipv4_only   | false   | If set, will only enumerate ports with ipv4          |
+:             :         : addresses.                                           :
+| device_name | none    | If set, will attempt to open the named device for    |
+:             :         : all tests. If the device is not found                :
+:             :         : **rdma_unit_test** will list the available devices.  :
 
 ## Device Support
 **rdma-unit-test** uses ibv_get_device_list to find all available devices. By
@@ -113,4 +121,4 @@ This package has been tested on the following adapters;
 
 * Mellanox ConnectX-3
 * Mellanox ConnectX-4              (may require **--verbs_mtu=1024**)
-* SoftRoce (*limited support*, requires **--no_ipvp6_for_gid --verbs_mtu=1024**)
+* SoftRoce (*limited support*, requires **--ipv4_only --verbs_mtu=1024**)

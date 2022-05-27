@@ -25,17 +25,15 @@
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -50,8 +48,6 @@ namespace {
 // TODO(author1): UD with GRH split across many SGE.
 // TODO(author1): Send between RC and UD.
 // TODO(author1): UD Send with first SGE with invalid lkey.
-// TODO(author1): UD Recv with insufficient buffer size.
-// TODO(author1): UD send larger than MTU.
 
 using ::testing::AnyOf;
 using ::testing::Each;
@@ -64,14 +60,15 @@ class LoopbackUdQpTest : public LoopbackFixture {
   static constexpr char kRemoteBufferContent = 'b';
 
  protected:
-  absl::StatusOr<std::pair<Client, Client>> CreateUdClientsPair() {
-    ASSIGN_OR_RETURN(Client local, CreateClient(IBV_QPT_UD));
+  absl::StatusOr<std::pair<Client, Client>> CreateUdClientsPair(
+      size_t pages = 1) {
+    ASSIGN_OR_RETURN(Client local, CreateClient(IBV_QPT_UD, pages));
     std::fill_n(local.buffer.data(), local.buffer.size(), kLocalBufferContent);
-    ASSIGN_OR_RETURN(Client remote, CreateClient(IBV_QPT_UD));
+    ASSIGN_OR_RETURN(Client remote, CreateClient(IBV_QPT_UD, pages));
     std::fill_n(remote.buffer.data(), remote.buffer.size(),
                 kRemoteBufferContent);
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(local.qp, kQKey));
-    RETURN_IF_ERROR(ibv_.SetUpUdQp(remote.qp, kQKey));
+    RETURN_IF_ERROR(ibv_.ModifyUdQpResetToRts(local.qp, kQKey));
+    RETURN_IF_ERROR(ibv_.ModifyUdQpResetToRts(remote.qp, kQKey));
     return std::make_pair(local, remote);
   }
 };
@@ -91,7 +88,8 @@ TEST_F(LoopbackUdQpTest, Send) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -114,6 +112,39 @@ TEST_F(LoopbackUdQpTest, Send) {
   EXPECT_THAT(recv_payload, Each(kLocalBufferContent));
 }
 
+TEST_F(LoopbackUdQpTest, SendLargerThanMtu) {
+  constexpr size_t kPages = 20;
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair(kPages));
+  const int kPayloadLength =
+      verbs_util::VerbsMtuToInt(local.port_attr.attr.active_mtu) + 10;
+  ASSERT_GT(kPages * kPageSize, kPayloadLength);
+
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = kPayloadLength + sizeof(ibv_grh);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
+  ASSERT_THAT(ah, NotNull());
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_LEN_ERR);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+}
+
 TEST_F(LoopbackUdQpTest, SendRnr) {
   static constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
   Client local, remote;
@@ -123,7 +154,8 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -145,8 +177,8 @@ TEST_F(LoopbackUdQpTest, SendTrafficClass) {
     GTEST_SKIP() << "Nic does not support setting tclass.";
   }
   constexpr int kPayloadLength = 1000;
+  constexpr uint8_t traffic_class = 0xff;
   Client local, remote;
-  uint8_t traffic_class = 0xff;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
   rsge.length = kPayloadLength + sizeof(ibv_grh);
@@ -158,7 +190,10 @@ TEST_F(LoopbackUdQpTest, SendTrafficClass) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid, traffic_class);
+  // Set with customized traffic class.
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid,
+                             AhAttribute().set_traffic_class(traffic_class));
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -173,7 +208,7 @@ TEST_F(LoopbackUdQpTest, SendTrafficClass) {
   EXPECT_EQ(recv_completion.status, IBV_WC_SUCCESS);
   // Get GRH header
   auto recv_payload = remote.buffer.span().subspan(0, sizeof(ibv_grh));
-  int ip_family = verbs_util::GetIpAddressType(local.port_gid.gid);
+  int ip_family = verbs_util::GetIpAddressType(local.port_attr.gid);
   EXPECT_NE(ip_family, -1);
   if (ip_family == AF_INET) {
     // According to IPV4 header format and ROCEV2 Annex A17.4.5.2
@@ -207,7 +242,8 @@ TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -236,7 +272,8 @@ TEST_F(LoopbackUdQpTest, SendInvalidAh) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   HandleGarble garble(ah->handle);
   send.wr.ud.ah = ah;
@@ -288,7 +325,8 @@ TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = 0xDEADBEEF;
@@ -322,7 +360,8 @@ TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
   lsge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -349,7 +388,8 @@ TEST_F(LoopbackUdQpTest, Read) {
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   read.wr.ud.ah = ah;
   read.wr.ud.remote_qkey = kQKey;
@@ -381,7 +421,7 @@ TEST_F(LoopbackUdQpTest, PollMultipleCqe) {
   send_sge.length = kPayloadLength;
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &send_sge, /*num_sge=*/1);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateLoopbackAh(local.pd, remote.port_attr);
   ASSERT_THAT(ah, NotNull());
   send.wr.ud.ah = ah;
   send.wr.ud.remote_qpn = remote.qp->qp_num;
@@ -423,7 +463,8 @@ TEST_F(LoopbackUdQpTest, Write) {
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   write.wr.ud.ah = ah;
   write.wr.ud.remote_qkey = kQKey;
@@ -449,7 +490,8 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
   ibv_send_wr fetch_add = verbs_util::CreateFetchAddWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey,
       0);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   fetch_add.wr.ud.ah = ah;
   fetch_add.wr.ud.remote_qkey = kQKey;
@@ -474,7 +516,8 @@ TEST_F(LoopbackUdQpTest, CompareSwap) {
   ibv_send_wr cmp_swp = verbs_util::CreateCompSwapWr(
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey,
       2, 3);
-  ibv_ah* ah = ibv_.CreateAh(local.pd, remote.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
   ASSERT_THAT(ah, NotNull());
   cmp_swp.wr.ud.ah = ah;
   cmp_swp.wr.ud.remote_qkey = kQKey;
@@ -493,7 +536,7 @@ class AdvancedLoopbackTest : public RdmaVerbsFixture {
   struct BasicSetup {
     RdmaMemBlock buffer;
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
     ibv_pd* pd;
     ibv_mr* mr;
   };
@@ -502,7 +545,7 @@ class AdvancedLoopbackTest : public RdmaVerbsFixture {
     BasicSetup setup;
     setup.buffer = ibv_.AllocBuffer(/*pages=*/1);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -515,6 +558,7 @@ class AdvancedLoopbackTest : public RdmaVerbsFixture {
   }
 };
 
+// TODO(author2): Use LoopbackFixture and CreateClient.
 TEST_F(AdvancedLoopbackTest, RcSendToUd) {
   constexpr size_t kPayloadLength = 1000;
   constexpr int kQKey = 200;
@@ -523,18 +567,14 @@ TEST_F(AdvancedLoopbackTest, RcSendToUd) {
   ASSERT_THAT(local_cq, NotNull());
   ibv_cq* remote_cq = ibv_.CreateCq(setup.context);
   ASSERT_THAT(remote_cq, NotNull());
-  ibv_qp* local_qp = ibv_.CreateQp(
-      setup.pd, local_cq, local_cq, /*srq=*/nullptr, verbs_util::kDefaultMaxWr,
-      verbs_util::kDefaultMaxWr, IBV_QPT_RC, /*sig_all=*/0);
+  ibv_qp* local_qp = ibv_.CreateQp(setup.pd, local_cq, IBV_QPT_RC);
   ASSERT_THAT(local_qp, NotNull());
-  ibv_qp* remote_qp =
-      ibv_.CreateQp(setup.pd, remote_cq, remote_cq, /*srq=*/nullptr,
-                    verbs_util::kDefaultMaxWr, verbs_util::kDefaultMaxWr,
-                    IBV_QPT_UD, /*sig_all=*/0);
+  ibv_qp* remote_qp = ibv_.CreateQp(setup.pd, remote_cq, IBV_QPT_UD);
   ASSERT_THAT(remote_qp, NotNull());
-  ASSERT_OK(ibv_.SetUpRcQp(local_qp, setup.port_gid, setup.port_gid.gid,
-                           remote_qp->qp_num));
-  ASSERT_OK(ibv_.SetUpUdQp(remote_qp, kQKey));
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(
+      local_qp, setup.port_attr, setup.port_attr.gid, remote_qp->qp_num,
+      QpAttribute().set_timeout(absl::Seconds(1))));
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(remote_qp, kQKey));
 
   ibv_sge rsge = verbs_util::CreateSge(
       setup.buffer.span().subspan(0, kPayloadLength + sizeof(ibv_grh)),
@@ -561,19 +601,15 @@ TEST_F(AdvancedLoopbackTest, UdSendToRc) {
   ASSERT_THAT(local_cq, NotNull());
   ibv_cq* remote_cq = ibv_.CreateCq(setup.context);
   ASSERT_THAT(remote_cq, NotNull());
-  ibv_qp* local_qp = ibv_.CreateQp(
-      setup.pd, local_cq, local_cq, /*srq=*/nullptr, verbs_util::kDefaultMaxWr,
-      verbs_util::kDefaultMaxWr, IBV_QPT_UD, /*sig_all=*/0);
+  ibv_qp* local_qp = ibv_.CreateQp(setup.pd, local_cq, IBV_QPT_UD);
   ASSERT_THAT(local_qp, NotNull());
-  ibv_qp* remote_qp =
-      ibv_.CreateQp(setup.pd, remote_cq, remote_cq, /*srq=*/nullptr,
-                    verbs_util::kDefaultMaxWr, verbs_util::kDefaultMaxWr,
-                    IBV_QPT_RC, /*sig_all=*/0);
+  ibv_qp* remote_qp = ibv_.CreateQp(setup.pd, remote_cq, IBV_QPT_RC);
   ASSERT_THAT(remote_qp, NotNull());
-  ASSERT_OK(ibv_.SetUpUdQp(local_qp, kQKey));
-  ASSERT_OK(ibv_.SetUpRcQp(remote_qp, setup.port_gid, setup.port_gid.gid,
-                           local_qp->qp_num));
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(local_qp, kQKey));
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(
+      remote_qp, setup.port_attr, setup.port_attr.gid, local_qp->qp_num,
+      QpAttribute().set_timeout(absl::Seconds(1))));
+  ibv_ah* ah = ibv_.CreateLoopbackAh(setup.pd, setup.port_attr);
   ASSERT_THAT(ah, NotNull());
 
   ibv_sge rsge = verbs_util::CreateSge(

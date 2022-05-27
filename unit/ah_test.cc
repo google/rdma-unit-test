@@ -21,6 +21,7 @@
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "internal/verbs_attribute.h"
 #include "public/flags.h"
 #include "public/introspection.h"
 #include "public/status_matchers.h"
@@ -36,14 +37,19 @@ class AhTest : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
-    verbs_util::PortGid port_gid;
+    PortAttribute port_attr;
+    // A simple AH attribute that points (loopback) from the port to the port
+    // that port_attr defines.
+    ibv_ah_attr simple_ah_attr;
     ibv_pd* pd;
   };
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
-    setup.port_gid = ibv_.GetLocalPortGid(setup.context);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
+    setup.simple_ah_attr = AhAttribute().GetAttribute(
+        setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -52,22 +58,25 @@ class AhTest : public RdmaVerbsFixture {
   }
 };
 
-TEST_F(AhTest, CreateAh) {
+TEST_F(AhTest, CreateAndDestroy) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
-  EXPECT_THAT(ah, NotNull());
+  ibv_ah* ah = ibv_.extension().CreateAh(setup.pd, setup.simple_ah_attr);
+  ASSERT_THAT(ah, NotNull());
+  EXPECT_EQ(ah->context, setup.context);
+  EXPECT_EQ(ah->pd, setup.pd);
+  EXPECT_EQ(ibv_destroy_ah(ah), 0);
 }
 
 TEST_F(AhTest, DeregInvalidAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.simple_ah_attr);
   HandleGarble garble(ah->handle);
   EXPECT_EQ(ibv_destroy_ah(ah), ENOENT);
 }
 
 TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.port_gid.gid);
+  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.simple_ah_attr);
   ASSERT_THAT(ah, NotNull());
   int result = ibv_.DeallocPd(setup.pd);
   EXPECT_EQ(result, EBUSY);

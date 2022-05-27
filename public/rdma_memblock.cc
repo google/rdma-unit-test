@@ -41,20 +41,18 @@ static inline int memfd_create(const char* name, unsigned int flags) {
 
 RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment,
                            bool use_huge_page) {
-  offset_ = 0;
-  size_t pad = 0;
   if (use_huge_page) {
-    pad = (alignment == kHugepageSize) ? 0 : alignment;
+    offset_ = (alignment == kHugepageSize) ? 0 : alignment;
   } else {
-    pad = (alignment == kPageSize) ? 0 : alignment;
+    offset_ = (alignment == kPageSize) ? 0 : alignment;
   }
-  size_t alloc_size = length + pad;
+  size_t alloc_size = length + offset_;
   if (use_huge_page && alloc_size % kHugepageSize) {
     // When using huge pages, buffer length must be aligned to the page size.
     alloc_size += kHugepageSize - (alloc_size % kHugepageSize);
   }
   memblock_ = Create(alloc_size, use_huge_page);
-  uint8_t* buffer = memblock_->buffer.data() + pad;
+  uint8_t* buffer = memblock_->buffer.data() + offset_;
   span_ = absl::MakeSpan(buffer, length);
   VLOG(1) << absl::StrCat("created new memblock: ", " alloc_size=", alloc_size,
                           " length=", length, " alignment=", alignment,

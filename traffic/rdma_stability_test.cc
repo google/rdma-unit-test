@@ -42,22 +42,21 @@
 #include "traffic/op_types.h"
 #include "traffic/rdma_stress_fixture.h"
 
-// TODO(bjwu) Add canned configs via TEST_P to replace the flags.
+// TODO(author5) Add canned configs via TEST_P to replace the flags.
 ABSL_FLAG(rdma_unit_test::OpTypes, op_type, rdma_unit_test::OpTypes::kRead,
           "The op type used in the test.");
 ABSL_FLAG(absl::Duration, test_duration, absl::Seconds(10),
           "The duration that the test lasts.");
-ABSL_FLAG(uint32_t, outstanding_ops, 10,
-          "The number of outstainding ops per QP.");
-ABSL_FLAG(uint32_t, qps, 10, "The number of QPs created by the test.");
-ABSL_FLAG(uint32_t, op_size, 8, "The op size in bytes.");
+ABSL_FLAG(int, outstanding_ops, 10, "The number of outstainding ops per QP.");
+ABSL_FLAG(int, qps, 10, "The number of QPs created by the test.");
+ABSL_FLAG(int, op_size, 8, "The op size in bytes.");
 
 namespace rdma_unit_test {
 namespace {
 
-constexpr uint32_t kMaxOpSize = 4096;
-constexpr uint32_t kMaxOutstandingOps = 100;
-constexpr uint32_t kMaxQps = 100;
+constexpr int kMaxOpSize = 4096;
+constexpr int kMaxOutstandingOps = 100;
+constexpr int kMaxQps = 100;
 
 // Command to run the test:
 // --op_size=8 --test_duration=1m --outstanding_ops=100 --qps=100
@@ -127,17 +126,16 @@ absl::Status PollTwoSidedOpsCompletions(Client& initiator, Client& target,
 //  2. In a loop, keep issuing ops till the end of test duration;
 //  3. Destroy created QPs;
 TEST_F(RdmaStabilityTest, StabilityDurationTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   // Test setup
-  // TODO(bjwu) Create a test suite to replace the test flags.
-  uint32_t num_qps = absl::GetFlag(FLAGS_qps);
-  CHECK_LE(num_qps, kMaxQps);
-  uint32_t ops = absl::GetFlag(FLAGS_outstanding_ops);
-  CHECK_LE(ops, kMaxOutstandingOps);
-  uint32_t op_size = absl::GetFlag(FLAGS_op_size);
-  CHECK_LE(op_size, kMaxOpSize);
+  // TODO(author5) Create a test suite to replace the test flags.
+  int num_qps = absl::GetFlag(FLAGS_qps);
+  ASSERT_LE(num_qps, kMaxQps);
+  int ops = absl::GetFlag(FLAGS_outstanding_ops);
+  ASSERT_LE(ops, kMaxOutstandingOps);
+  int op_size = absl::GetFlag(FLAGS_op_size);
+  ASSERT_LE(op_size, kMaxOpSize);
   OpTypes op_type = absl::GetFlag(FLAGS_op_type);
   CreateSetUpRcQps(initiator, target, num_qps);
 
@@ -205,16 +203,15 @@ TEST_F(RdmaStabilityTest, StabilityDurationTest) {
 //  2. Issue ops for a while;
 //  3. Destroy the created QPs;
 TEST_F(RdmaStabilityTest, StabilityResourceTest) {
-  Client initiator(/*client_id=*/0, context(), NewPd(), port_gid(),
-                   kClientConfig),
-      target(/*client_id=*/1, context(), NewPd(), port_gid(), kClientConfig);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
   // Test setup
-  uint32_t num_qps = absl::GetFlag(FLAGS_qps);
-  CHECK_LE(num_qps, kMaxQps);
-  uint32_t ops = absl::GetFlag(FLAGS_outstanding_ops);
-  CHECK_LE(ops, kMaxOutstandingOps);
-  uint32_t op_size = absl::GetFlag(FLAGS_op_size);
-  CHECK_LE(op_size, kMaxOpSize);
+  int num_qps = absl::GetFlag(FLAGS_qps);
+  ASSERT_LE(num_qps, kMaxQps);
+  int ops = absl::GetFlag(FLAGS_outstanding_ops);
+  ASSERT_LE(ops, kMaxOutstandingOps);
+  int op_size = absl::GetFlag(FLAGS_op_size);
+  ASSERT_LE(op_size, kMaxOpSize);
   OpTypes op_type = absl::GetFlag(FLAGS_op_type);
   auto traffic_duration_per_iteration = absl::Milliseconds(10);
 

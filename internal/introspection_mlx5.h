@@ -85,13 +85,7 @@ class IntrospectionMlx5 : public NicIntrospection {
         {{"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState"},
          "Provider does not generate local completion when remote is in error "
          "state."},
-        {{"MwTest", "BindType1ReadWithNoLocalWrite"},
-         "Permission not checked at bind."},
-        {{"MwTest", "BindType1AtomicWithNoLocalWrite"},
-         "Permissions not checked at bind."},
         {{"MwTest", "InvalidQp"}, "Allows bind to invalid qp."},
-        {{"MwBindTest", "MissingBind"}, "Permission not checked at bind."},
-        {{"MwBindTest", "NoMrBindAccess"}, "Permission not checked at bind."},
         // Allows creation over device cap.
         {{"QpTest", "ExceedsDeviceCap"}, ""},
     };
@@ -104,12 +98,6 @@ class IntrospectionMlx5 : public NicIntrospection {
   explicit IntrospectionMlx5(const std::string& name,
                              const ibv_device_attr& attr)
       : NicIntrospection(name, attr) {
-    // ibv_queury_device incorrectly reports max_qp_wr as 32768.
-    // Unable to create RC qp above 8192, and UD qp above 16384
-    attr_.max_qp_wr = 8192;
-    // ibv_query_device may report the incorrect capabilities for some cards.
-    // Override result when checking for Type2 support.
-    attr_.device_cap_flags &= ~IBV_DEVICE_MEM_WINDOW_TYPE_2B;
   }
 };
 

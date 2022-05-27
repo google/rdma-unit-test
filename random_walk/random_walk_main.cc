@@ -43,11 +43,6 @@ int main(int argc, char* argv[]) {
   rdma_unit_test::IntrospectionRxe::Register();
 
   rdma_unit_test::random_walk::ActionWeights weights;
-  if (!rdma_unit_test::Introspection().SupportsType2()) {
-    weights.set_allocate_type_2_mw(0);
-    weights.set_bind_type_2_mw(0);
-    weights.set_deallocate_type_2_mw(0);
-  }
   int clients = absl::GetFlag(FLAGS_clients);
   int duration = absl::GetFlag(FLAGS_duration);
   bool multinode = absl::GetFlag(FLAGS_multinode);

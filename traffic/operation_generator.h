@@ -35,7 +35,7 @@ class OperationGenerator {
  public:
   struct OpAttributes {
     OpTypes op_type;
-    uint32_t op_size_bytes;
+    int op_size_bytes;
   };
 
   OperationGenerator() {}
@@ -45,7 +45,7 @@ class OperationGenerator {
   virtual OpAttributes NextOp() = 0;
 
   // Returns the maximum operation size that this generator will generate.
-  virtual uint32_t MaxOpSize() = 0;
+  virtual int MaxOpSize() const = 0;
 };
 
 class RandomizedOperationGenerator : public OperationGenerator {
@@ -95,7 +95,7 @@ class RandomizedOperationGenerator : public OperationGenerator {
     return max;
   }
 
-  uint32_t MaxOpSize() override {
+  int MaxOpSize() const override {
     return *std::max_element(op_size_lookup_.begin(), op_size_lookup_.end());
   }
 
@@ -105,28 +105,28 @@ class RandomizedOperationGenerator : public OperationGenerator {
   const std::vector<OpTypes> op_type_lookup_;
   std::discrete_distribution<int> op_type_distribution_;
 
-  std::vector<uint32_t> op_size_lookup_;
+  std::vector<int> op_size_lookup_;
   std::discrete_distribution<int> op_size_distribution_;
 };
 
 class ConstantRcOperationGenerator : public OperationGenerator {
  public:
-  ConstantRcOperationGenerator(OpTypes op_type, uint32_t op_size_bytes)
+  ConstantRcOperationGenerator(OpTypes op_type, int op_size_bytes)
       : op_type_(op_type), op_size_bytes_(op_size_bytes) {}
   ~ConstantRcOperationGenerator() override {}
 
   OpAttributes NextOp() override { return {op_type_, op_size_bytes_}; }
 
-  uint32_t MaxOpSize() override { return op_size_bytes_; }
+  int MaxOpSize() const override { return op_size_bytes_; }
 
  private:
   OpTypes op_type_;
-  uint32_t op_size_bytes_;
+  int op_size_bytes_;
 };
 
 class ConstantUdOperationGenerator : public ConstantRcOperationGenerator {
  public:
-  explicit ConstantUdOperationGenerator(uint32_t op_size_bytes)
+  explicit ConstantUdOperationGenerator(int op_size_bytes)
       : ConstantRcOperationGenerator(OpTypes::kSend, op_size_bytes) {}
   ~ConstantUdOperationGenerator() override {}
 };

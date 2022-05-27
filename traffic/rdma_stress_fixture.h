@@ -18,12 +18,11 @@
 #include <cstdint>
 #include <memory>
 
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/basic_fixture.h"
 #include "public/verbs_helper_suite.h"
-#include "public/verbs_util.h"
 #include "traffic/client.h"
 #include "traffic/latency_measurement.h"
 #include "traffic/transport_validation.h"
@@ -44,12 +43,33 @@ class RdmaStressFixture : public BasicFixture {
   // call to this function is require if you need to setup connection in the
   // reverse direction.
   absl::Status SetUpRcClientsQPs(Client* local, uint32_t local_qp_id,
-                                 Client* remote, uint32_t remote_qp_id);
+                                 Client* remote, uint32_t remote_qp_id,
+                                 QpAttribute qp_attr = QpAttribute());
 
   // Creates number of qps_per_client RC qps for each client and connects
   // pairs across the two clients.
   void CreateSetUpRcQps(Client& initiator, Client& target,
-                        uint16_t qps_per_client);
+                        uint16_t qps_per_client,
+                        QpAttribute qp_attr = QpAttribute());
+
+  // Indicates how address handles should be assigned to queue pairs.
+  enum class AddressHandleMapping {
+    kIndependent,  // Each src:dst pair has its own address handle.
+    kShared,  // A single address handle is shared amongst all src:dst pairs.
+  };
+
+  // Creates `qps_per_client` UD qps at both the initiator and the target
+  // client, and allocates a separate AddressHandle to post ops from one
+  // initiator QP to one target QP, with one-to-one mapping.
+  void CreateSetUpOneToOneUdQps(Client& initiator, Client& target,
+                                uint16_t qps_per_client);
+
+  // Creates `qps_per_client` UD qps at both the initiator and the target
+  // client, and allocates AddressHandles to send from any initiator QP to any
+  // target QP using independent or shared AHs based on `ah_mapping`.
+  void CreateSetUpMultiplexedUdQps(Client& initiator, Client& target,
+                                   uint16_t initiator_qps, uint16_t target_qps,
+                                   AddressHandleMapping ah_mapping);
 
   // Halt execution of ops by:
   // 1. Dumps the pending ops.
@@ -76,16 +96,13 @@ class RdmaStressFixture : public BasicFixture {
   // Logs the qp state for the initiator qps.
   void DumpState(Client& initiator);
 
-  // Creates and returns a new PD.
-  ibv_pd* NewPd();
-
   ibv_context* context() const { return context_; }
 
-  verbs_util::PortGid port_gid() const { return port_gid_; }
+  PortAttribute port_attr() const { return port_attr_; }
 
  protected:
   ibv_context* context_ = nullptr;
-  verbs_util::PortGid port_gid_;
+  PortAttribute port_attr_;
   std::unique_ptr<TransportValidation> validation_ = nullptr;
   std::unique_ptr<LatencyMeasurement> latency_measure_;
   VerbsHelperSuite ibv_;

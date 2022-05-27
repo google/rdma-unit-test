@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/flags/declare.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
@@ -32,33 +31,15 @@
 
 #include "infiniband/verbs.h"
 
-ABSL_DECLARE_FLAG(ibv_mtu, verbs_mtu);
-
-bool AbslParseFlag(absl::string_view text, ibv_mtu* out, std::string* error);
-
-std::string AbslUnparseFlag(ibv_mtu mtu);
 
 namespace rdma_unit_test {
 namespace verbs_util {
 
-//////////////////////////////////////////////////////////////////////////////
-//                          Classes and Data Types
-//////////////////////////////////////////////////////////////////////////////
-
-// PortGid bundles the address information such as the ibv_gid and its index and
-// port number used to create an ibv_context.
-struct PortGid {
-  uint8_t port;
-  ibv_gid gid;
-  uint8_t gid_index;
-};
 
 //////////////////////////////////////////////////////////////////////////////
 //                          Constants
 //////////////////////////////////////////////////////////////////////////////
 
-// By default QPs will be constructed with max_inline_data set to this.
-constexpr uint32_t kDefaultMaxInlineSize = 36;
 // Default Wr capacity for send queue, receive queue, completion queue and
 // shared receive queue.
 constexpr uint32_t kDefaultMaxWr = 200;
@@ -73,16 +54,6 @@ constexpr absl::Duration kDefaultErrorCompletionTimeout = absl::Seconds(2);
 constexpr std::string_view kIpV4LoopbackAddress{"127.0.0.1"};
 // Definition for IPv6 Loopback Address.
 constexpr std::string_view kIpV6LoopbackAddress{"::1"};
-// Masks corresponding to basic attributes for modifying QP (to different
-// states).
-constexpr int kQpAttrInitMask =
-    IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-constexpr int kQpAttrRtrMask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
-                               IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
-                               IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-constexpr int kQpAttrRtsMask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
-                               IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
-                               IBV_QP_MAX_QP_RD_ATOMIC;
 
 //////////////////////////////////////////////////////////////////////////////
 //                          Helper Functions
@@ -96,25 +67,12 @@ int GetIpAddressType(const ibv_gid& gid);
 // Converts an uint64_t mtu to a ibv_mtu object.
 ibv_mtu ToVerbsMtu(uint64_t mtu);
 
-// Convert Gid to a string
-std::string GidToString(const ibv_gid& gid);
 
 // Enumerates the names of all the devices available for the host.
 absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames();
 
-// Enumerate all ports with (one of) their sgid(s).
-absl::StatusOr<std::vector<PortGid>> EnumeratePortGidsForContext(
-    ibv_context* context);
-
-// Create an ibv_ah_attr from a local address and a remote gid.
-ibv_ah_attr CreateAhAttr(const PortGid& port_gid, ibv_gid remote_gid,
-                         uint8_t traffic_class = 0);
-
 // Create a defaulted ibv_srq_attr.
 ibv_srq_attr DefaultSrqAttr();
-
-// Returns the defaulted ibv_qp_cap value.
-ibv_qp_cap DefaultQpCap();
 
 // Returns the defaulted ibv_srq_attr value.
 ibv_srq_attr DefaultSrqAttr();
@@ -251,14 +209,6 @@ absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
 // function, OpenUntrackedDevice(), is mainly used as an internal util function.
 // VerbsAllocator::OpenDevice() is preferred for most end user calls.
 absl::StatusOr<ibv_context*> OpenUntrackedDevice(const std::string device_name);
-
-// Create basic attributes for ibv_modify_qp.
-ibv_qp_attr CreateBasicQpAttrInit(uint8_t port);
-
-ibv_qp_attr CreateBasicQpAttrRtr(const PortGid& local, ibv_gid remote_gid,
-                                 uint32_t remote_qpn);
-
-ibv_qp_attr CreateBasicQpAttrRts();
 
 }  // namespace verbs_util
 }  // namespace rdma_unit_test

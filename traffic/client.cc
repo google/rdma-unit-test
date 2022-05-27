@@ -41,7 +41,6 @@
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -50,9 +49,8 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-
 #include "infiniband/verbs.h"
-#include "public/map_util.h"
+#include "internal/verbs_attribute.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
@@ -210,11 +208,11 @@ void SetQpKeys(QpState* const qp_state, const ibv_mr* const src_mr,
 
 }  // namespace
 
-Client::Client(int client_id, ibv_context* context, ibv_pd* pd,
-               verbs_util::PortGid port_gid, const Config config)
+Client::Client(int client_id, ibv_context* context, PortAttribute port_attr,
+               const Config config)
     : context_(context),
-      pd_(pd),
-      port_gid_(port_gid),
+      pd_(ibv_.AllocPd(context)),
+      port_attr_(port_attr),
       send_cq_(nullptr),
       recv_cq_(nullptr),
       qps_{},
@@ -303,12 +301,6 @@ Client::~Client() {
   }
 }
 
-QpState* Client::GetQpState(uint32_t qp_id) const {
-  DCHECK_LT(qp_id, qps_.size())
-      << "Qp " << qp_id << " has not been created yet";
-  return qps_.at(qp_id).get();
-}
-
 absl::Status Client::CreateQps(size_t count, bool is_rc, int sq_size,
                                int rq_size) {
   if (qps_.size() + count > max_qps_)
@@ -318,17 +310,17 @@ absl::Status Client::CreateQps(size_t count, bool is_rc, int sq_size,
   for (size_t i = 0; i < count; ++i) {
     ibv_qp* qp;
     if (is_rc) {
-      qp = ibv_.CreateQp(pd_, send_cq_, recv_cq_, /*srq=*/nullptr,
-                         /*max_send_wr=*/sq_size, /*max_recv_wr=*/rq_size,
-                         /*qp_type=*/IBV_QPT_RC, /*sq_sig_all=*/0);
+      qp = ibv_.CreateQp(
+          pd_, send_cq_, recv_cq_, IBV_QPT_RC,
+          QpInitAttribute().set_max_send_wr(sq_size).set_max_recv_wr(rq_size));
 
       CHECK(qp);  // Crash OK
     } else {
-      qp = ibv_.CreateQp(pd_, send_cq_, recv_cq_, /* srq = */ nullptr,
-                         /*max_send_wr=*/sq_size, /*max_recv_wr=*/rq_size,
-                         IBV_QPT_UD, /*sq_sig_all=*/0);
+      qp = ibv_.CreateQp(
+          pd_, send_cq_, recv_cq_, IBV_QPT_UD,
+          QpInitAttribute().set_max_send_wr(sq_size).set_max_recv_wr(rq_size));
       CHECK(qp);                                       // Crash OK
-      CHECK_OK(ibv_.SetUpUdQp(qp, port_gid_, kQKey));  // Crash OK
+      CHECK_OK(ibv_.ModifyUdQpResetToRts(qp, port_attr_, kQKey));  // Crash OK
     }
     uint32_t qp_id = qps_.size();
     absl::Span<uint8_t> qp_src_buf = GetQpSrcBuffer(qp_id).span();
@@ -358,6 +350,21 @@ absl::Status Client::DeleteQp(uint32_t qp_id) {
   }
   qps_.erase(qp_id);
   return absl::OkStatus();
+}
+
+ibv_ah* Client::CreateAh(PortAttribute port_attr) {
+  ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
+      port_attr.port, port_attr.gid_index, port_attr.gid);
+  ibv_ah* ah = ibv_.CreateAh(pd_, ah_attr);
+  if (ah != nullptr) {
+    ahs_.push_back(ah);
+  }
+  return ah;
+}
+
+void Client::AddAh(ibv_ah* ah) {
+  ahs_.push_back(ah);
+  ibv_.clean_up().AddCleanup(ah);
 }
 
 absl::Status Client::PostOps(const OpAttributes& attributes) {
@@ -398,7 +405,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
           absl::StrCat("op_type '", op_type_str, "' not recognized."));
   }
 
-  uint32_t op_bytes = attributes.op_bytes;
+  int op_bytes = attributes.op_bytes;
   if (!initiator_qp_state->is_rc() && op_type == OpTypes::kRecv) {
     // Add space for the Global Routing Header at the beginning of a UD receive
     // buffer.
@@ -429,7 +436,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
     const uint64_t op_id = initiator_qp_state->GetOpIdAndIncr();
 
     // Create scatter-gather entry.
-    auto sge = absl::make_unique<ibv_sge>();
+    auto sge = std::make_unique<ibv_sge>();
     sge->addr = reinterpret_cast<uint64_t>(initiator_op_addr);
     sge->length = op_bytes;
 
@@ -437,7 +444,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
                    .qp_id = attributes.initiator_qp_id,
                    .length = sge->length,
                    .op_type = op_type};
-    auto op = absl::make_unique<TestOp>(temp);
+    auto op = std::make_unique<TestOp>(temp);
 
     if (initiator_buffer_type == BufferType::kSrcBuffer) {
       sge->lkey = initiator_qp_state->src_lkey();
@@ -457,7 +464,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
       // Fill in the buffer with random bytes.
       std::generate_n(op->dest_addr, op->length, std::ref(random));
       uint64_t wr_id = reinterpret_cast<uint64_t>(op.get());
-      auto wqe_recv = absl::make_unique<ibv_recv_wr>(
+      auto wqe_recv = std::make_unique<ibv_recv_wr>(
           verbs_util::CreateRecvWr(wr_id, sge.get(), /*num_sge=*/1));
       initiator_qp_state->BatchRcRecvWqe(std::move(wqe_recv), std::move(sge),
                                          op->op_id);
@@ -473,12 +480,12 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
       uint64_t wr_id = reinterpret_cast<uint64_t>(op.get());
       switch (op_type) {
         case OpTypes::kWrite:
-          wqe_send = absl::make_unique<ibv_send_wr>(
+          wqe_send = std::make_unique<ibv_send_wr>(
               verbs_util::CreateWriteWr(wr_id, sge.get(), /*num_sge=*/1,
                                         op->dest_addr, target_dest_rkey));
           break;
         case OpTypes::kRead:
-          wqe_send = absl::make_unique<ibv_send_wr>(verbs_util::CreateReadWr(
+          wqe_send = std::make_unique<ibv_send_wr>(verbs_util::CreateReadWr(
               wr_id, sge.get(), /*num_sge=*/1, op->src_addr, target_src_rkey));
           break;
         case OpTypes::kCompSwap:
@@ -496,10 +503,9 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
             // writes to the target address.
             op->compare_add = *reinterpret_cast<uint64_t*>(op->src_addr);
           }
-          wqe_send =
-              absl::make_unique<ibv_send_wr>(verbs_util::CreateCompSwapWr(
-                  wr_id, sge.get(), /*num_sge=*/1, op->src_addr,
-                  target_src_rkey, op->compare_add, attributes.swap.value()));
+          wqe_send = std::make_unique<ibv_send_wr>(verbs_util::CreateCompSwapWr(
+              wr_id, sge.get(), /*num_sge=*/1, op->src_addr, target_src_rkey,
+              op->compare_add, attributes.swap.value()));
           break;
         case OpTypes::kFetchAdd:
           if (!attributes.add.has_value()) {
@@ -507,13 +513,12 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
                 "Cannot post kFetchAdd operation without a valid add value.");
           }
           op->compare_add = attributes.add.value();
-          wqe_send =
-              absl::make_unique<ibv_send_wr>(verbs_util::CreateFetchAddWr(
-                  wr_id, sge.get(), /*num_sge=*/1, op->src_addr,
-                  target_src_rkey, attributes.add.value()));
+          wqe_send = std::make_unique<ibv_send_wr>(verbs_util::CreateFetchAddWr(
+              wr_id, sge.get(), /*num_sge=*/1, op->src_addr, target_src_rkey,
+              attributes.add.value()));
           break;
         case OpTypes::kSend:
-          wqe_send = absl::make_unique<ibv_send_wr>(
+          wqe_send = std::make_unique<ibv_send_wr>(
               verbs_util::CreateSendWr(wr_id, sge.get(), /*num_sge=*/1));
           break;
         default:
@@ -684,7 +689,7 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
       const OperationGenerator::OpAttributes op_attributes =
           qp_state->op_generator()->NextOp();
       const OpTypes op_type = op_attributes.op_type;
-      const uint32_t op_size_bytes = op_attributes.op_size_bytes;
+      const int op_size_bytes = op_attributes.op_size_bytes;
       Client::OpAttributes initiator_attributes = {
           .op_type = op_type,
           .op_bytes = op_size_bytes,
@@ -755,7 +760,7 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
 
     if (qp_state->is_rc() && (qp_state->SendRcBatchCount() >= batch_per_qp ||
                               qp_new_ops(qp_state) >= ops_per_qp)) {
-      target.GetQpState(next_qp_id)->FlushRcRecvWqes();
+      target.qp_state(next_qp_id)->FlushRcRecvWqes();
       qp_state->FlushRcSendWqes();
     }
 
@@ -799,182 +804,12 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
   EXPECT_EQ(completed_ops, total_expected_ops);
 }
 
-void Client::InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                   uint64_t id) {
-  constexpr int kOpIdGapInBuffer = 32;
-
-  // Fill in the buffer with random bytes.
-  std::generate_n(src_addr, length, std::ref(random));
-
-  // We want the generated byte sequence to have op_id embedded into it, but
-  // also be distinguishable across MTU boundaries to validate ordering. We do
-  // this by writing op id at the first byte, incrementing it and writing it
-  // repeatedly at fixed intervals, by default every 32 bytes. Instead of
-  // writing the full op id (uint64_t), we write it modulo (UCHAR_MAX) to fit it
-  // in a single byte.
-  //
-  // [ ]................[ ]................[ ]................[ ]........
-  //  |                  |                  |                  |
-  //  v                  v                  v                  v
-  // (op_id)            (op_id + 1)        (op_id + 2)        (op_id + 3)
-  //
-
-  for (uint32_t i = 0; i * kOpIdGapInBuffer < length; ++i) {
-    src_addr[i * kOpIdGapInBuffer] = (id + i) % UCHAR_MAX;
-  }
-}
-
-void Client::InitializeUdSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                   uint64_t remote_op_id) {
-  // Fill in the buffer with random bytes.
-  std::generate_n(src_addr, length, std::ref(random));
-
-  // If the buffer is large enough to hold the remote op id, place it in the
-  // beginning of the buffer.
-  if (length >= sizeof(uint64_t)) {
-    *reinterpret_cast<uint64_t*>(src_addr) = remote_op_id;
-  }
-}
-
-int Client::ValidateOrDeferCompletions() {
-  int num_validated = 0;
-  for (const auto& [qp_id, qp_state] : qps_) {
-    auto op_uptr_it = qp_state->unchecked_initiated_ops().begin();
-    while (op_uptr_it != qp_state->unchecked_initiated_ops().end()) {
-      auto& op_uptr = *op_uptr_it;
-      EXPECT_EQ(IBV_WC_SUCCESS, op_uptr->status);
-      std::string op_type_str = TestOp::ToString(op_uptr->op_type);
-      uint8_t* src_addr = op_uptr->src_addr;
-      uint8_t* dest_addr = op_uptr->dest_addr;
-      // For two sided ops (ie. kSend, kRecv) we need to check that the
-      // completion on the other side has arrived, then we can validate the data
-      // landing. The expectation is that all Send/Recv ops on an RC qp
-      // arrive in the order they've been issued.
-      if (op_uptr->op_type == OpTypes::kSend) {
-        QpOpInterface* target_qp;
-        if (qp_state->is_rc()) {
-          target_qp = qp_state->remote_qp_state();
-        } else {
-          // UD qps can have multiple destinations, and the destination will be
-          // stored in the TestOp struct.
-          target_qp = op_uptr->remote_qp;
-        }
-        auto recv_op_or = target_qp->TryValidateRecvOp(*op_uptr);
-        if (!recv_op_or) {
-          // Cannot find the corresponding recv op.
-          if (qp_state->is_rc()) {
-            break;
-          } else {
-            ++op_uptr_it;
-            continue;
-          }
-        } else {
-          dest_addr = recv_op_or.value().dest_addr;
-          if (!qp_state->is_rc()) {
-            dest_addr += sizeof(ibv_grh);
-          }
-        }
-      }
-
-      // Print the content of the buffers and validate data landed successfully
-      // in the destination buffer.
-      MaybePrintBuffer(
-          absl::StrFormat(
-              "client %lu, qp_id %d, op_id %lu, src after %s: ", client_id(),
-              op_uptr->qp_id, op_uptr->op_id, op_type_str),
-          op_uptr->SrcBuffer());
-      MaybePrintBuffer(
-          absl::StrFormat(
-              "client %lu, qp_id %d, op_id: %lu, dest after %s: ", client_id(),
-              op_uptr->qp_id, op_uptr->op_id, op_type_str),
-          op_uptr->DestBuffer());
-      if (op_uptr->op_type == OpTypes::kFetchAdd) {
-        DCHECK(dest_addr);
-        EXPECT_EQ(
-            *reinterpret_cast<uint64_t*>(dest_addr) + op_uptr->compare_add,
-            *reinterpret_cast<uint64_t*>(src_addr));
-      } else if (op_uptr->op_type == OpTypes::kCompSwap) {
-        // If "compare" fails, swap fails. The dest address on the initiator
-        // always holds the original value of the src address in the target.
-        EXPECT_TRUE(
-            (op_uptr->compare_add == *reinterpret_cast<uint64_t*>(dest_addr) &&
-             op_uptr->swap == *reinterpret_cast<uint64_t*>(src_addr)) ||
-            (op_uptr->compare_add != *reinterpret_cast<uint64_t*>(src_addr) &&
-             *reinterpret_cast<uint64_t*>(src_addr) ==
-                 *reinterpret_cast<uint64_t*>(dest_addr)));
-      } else {
-        EXPECT_EQ(std::memcmp(src_addr, dest_addr, op_uptr->length), 0);
-      }
-      if (qp_state->is_rc()) {
-        // This op's buffer was generated with op_id = op_ptr->op_id, but it
-        // should match with ops_completed on this qp if the completion order is
-        // correct.
-        EXPECT_EQ(op_uptr->op_id, qp_state->TotalOpsCompleted());
-        EXPECT_OK(
-            ValidateDstBufferOrder(dest_addr, op_uptr->length, op_uptr->op_id));
-      }
-      // Update qp state after verification of buffers.
-      qp_state->outstanding_ops().erase(op_uptr->op_id);
-      qp_state->IncrCompletedBytes(op_uptr->length, op_uptr->op_type);
-      qp_state->IncrCompletedOps(1, op_uptr->op_type);
-      ++num_validated;
-
-      op_uptr_it = qp_state->unchecked_initiated_ops().erase(op_uptr_it);
-    }
-  }
-  return num_validated;
-}
-
-absl::Status Client::ValidateCompletions(int num_expected) {
-  int num_validated = ValidateOrDeferCompletions();
-  if (num_validated != num_expected) {
-    return absl::DataLossError(
-        "Completion validatation failed. Ops' data didn't land successfully!");
-  }
-  return absl::OkStatus();
-}
-
-absl::Status Client::ValidateDstBufferOrder(uint8_t* dst_addr, uint32_t length,
-                                            uint64_t id) {
-  constexpr uint32_t kOpIdGapInBuffer = 32;
-  // Validates the sequence of bytes in the buffer as generated by the
-  // InitializeRcSrcBuffer function.
-  for (uint32_t i = 0; i * kOpIdGapInBuffer < length; ++i) {
-    EXPECT_EQ(dst_addr[i * kOpIdGapInBuffer], (id + i) % UCHAR_MAX);
-  }
-  VLOG(2) << "Validation of dst_buffer successful.";
-  return absl::OkStatus();
-}
-
-void Client::DumpPendingOps() {
-  LOG(INFO) << "Pending ops for client " << client_id() << ":";
-  for (const auto& [qp_id, qp] : qps_) {
-    LOG(INFO) << "QP id: " << qp->qp_id() << ", #Posted: "
-              << qp->outstanding_ops_count() + qp->TotalOpsCompleted()
-              << ", #Completed: " << qp->TotalOpsCompleted()
-              << ", #Pending: " << qp->outstanding_ops_count();
-    for (auto& [op_id, op] : qp->outstanding_ops()) {
-      LOG(INFO) << op_id;
-    }
-  }
-}
-
 int Client::TryPollSendCompletions(int count) {
   return TryPollCompletions(count, send_cq_);
 }
 
 int Client::TryPollRecvCompletions(int count) {
   return TryPollCompletions(count, recv_cq_);
-}
-
-absl::StatusOr<int> Client::PollSendCompletions(
-    int count, absl::Duration timeout_duration) {
-  return PollCompletions(count, send_cq_, timeout_duration);
-}
-
-absl::StatusOr<int> Client::PollRecvCompletions(
-    int count, absl::Duration timeout_duration) {
-  return PollCompletions(count, recv_cq_, timeout_duration);
 }
 
 int Client::TryPollCompletions(int count, ibv_cq* cq) {
@@ -995,7 +830,7 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
     } else {
       // If completion fails, check if we have async events and ack them to move
       // forward.
-      // TODO(bjwu) Ideally we should handle AE in a separate thread
+      // TODO(author5) Ideally we should handle AE in a separate thread
       // concurrently.
       HandleAsyncEvent(context_);
     }
@@ -1003,25 +838,14 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
   VLOG_EVERY_N(2, 1000) << "Received " << num_completed << " completions.";
   return num_completed;
 }
+absl::StatusOr<int> Client::PollSendCompletions(
+    int count, absl::Duration timeout_duration) {
+  return PollCompletions(count, send_cq_, timeout_duration);
+}
 
-bool Client::StoreCompletion(const ibv_wc* completion) {
-  if (completion->status != IBV_WC_SUCCESS) {
-    LOG(INFO) << "Polled completion with error: ";
-    verbs_util::PrintCompletion(*completion);
-    return false;
-  }
-  auto* op = reinterpret_cast<TestOp*>(completion->wr_id);
-  op->status = completion->status;
-  auto& qp_state = qps_[op->qp_id];
-
-  if (op->op_type == OpTypes::kRecv) {
-    qp_state->unchecked_received_ops().push_back(
-        std::move(qp_state->outstanding_ops().at(op->op_id)));
-  } else {
-    qp_state->unchecked_initiated_ops().push_back(
-        std::move(qp_state->outstanding_ops().at(op->op_id)));
-  }
-  return true;
+absl::StatusOr<int> Client::PollRecvCompletions(
+    int count, absl::Duration timeout_duration) {
+  return PollCompletions(count, recv_cq_, timeout_duration);
 }
 
 absl::StatusOr<int> Client::PollCompletions(int count, ibv_cq* cq,
@@ -1153,6 +977,192 @@ int Client::TryPollCompletionsEventDriven(const int epoll_fd, ibv_cq* cq) {
   }
 
   return num_completed;
+}
+
+int Client::ValidateOrDeferCompletions() {
+  int num_validated = 0;
+  for (const auto& [qp_id, qp_state] : qps_) {
+    auto op_uptr_it = qp_state->unchecked_initiated_ops().begin();
+    while (op_uptr_it != qp_state->unchecked_initiated_ops().end()) {
+      auto& op_uptr = *op_uptr_it;
+      EXPECT_EQ(IBV_WC_SUCCESS, op_uptr->status);
+      std::string op_type_str = TestOp::ToString(op_uptr->op_type);
+      uint8_t* src_addr = op_uptr->src_addr;
+      uint8_t* dest_addr = op_uptr->dest_addr;
+      // For two sided ops (ie. kSend, kRecv) we need to check that the
+      // completion on the other side has arrived, then we can validate the data
+      // landing. The expectation is that all Send/Recv ops on an RC qp
+      // arrive in the order they've been issued.
+      if (op_uptr->op_type == OpTypes::kSend) {
+        QpOpInterface* target_qp;
+        if (qp_state->is_rc()) {
+          target_qp = qp_state->remote_qp_state();
+        } else {
+          // UD qps can have multiple destinations, and the destination will be
+          // stored in the TestOp struct.
+          target_qp = op_uptr->remote_qp;
+        }
+        auto recv_op_or = target_qp->TryValidateRecvOp(*op_uptr);
+        if (!recv_op_or) {
+          // Cannot find the corresponding recv op.
+          if (qp_state->is_rc()) {
+            break;
+          } else {
+            ++op_uptr_it;
+            continue;
+          }
+        } else {
+          dest_addr = recv_op_or.value().dest_addr;
+          if (!qp_state->is_rc()) {
+            dest_addr += sizeof(ibv_grh);
+          }
+        }
+      }
+
+      // Print the content of the buffers and validate data landed successfully
+      // in the destination buffer.
+      MaybePrintBuffer(
+          absl::StrFormat(
+              "client %lu, qp_id %d, op_id %lu, src after %s: ", client_id(),
+              op_uptr->qp_id, op_uptr->op_id, op_type_str),
+          op_uptr->SrcBuffer());
+      MaybePrintBuffer(
+          absl::StrFormat(
+              "client %lu, qp_id %d, op_id: %lu, dest after %s: ", client_id(),
+              op_uptr->qp_id, op_uptr->op_id, op_type_str),
+          op_uptr->DestBuffer());
+      if (op_uptr->op_type == OpTypes::kFetchAdd) {
+        DCHECK(dest_addr);
+        EXPECT_EQ(
+            *reinterpret_cast<uint64_t*>(dest_addr) + op_uptr->compare_add,
+            *reinterpret_cast<uint64_t*>(src_addr));
+      } else if (op_uptr->op_type == OpTypes::kCompSwap) {
+        // If "compare" fails, swap fails. The dest address on the initiator
+        // always holds the original value of the src address in the target.
+        EXPECT_TRUE(
+            (op_uptr->compare_add == *reinterpret_cast<uint64_t*>(dest_addr) &&
+             op_uptr->swap == *reinterpret_cast<uint64_t*>(src_addr)) ||
+            (op_uptr->compare_add != *reinterpret_cast<uint64_t*>(src_addr) &&
+             *reinterpret_cast<uint64_t*>(src_addr) ==
+                 *reinterpret_cast<uint64_t*>(dest_addr)));
+      } else {
+        EXPECT_EQ(std::memcmp(src_addr, dest_addr, op_uptr->length), 0);
+      }
+      if (qp_state->is_rc()) {
+        // This op's buffer was generated with op_id = op_ptr->op_id, but it
+        // should match with ops_completed on this qp if the completion order is
+        // correct.
+        EXPECT_EQ(op_uptr->op_id, qp_state->TotalOpsCompleted());
+        EXPECT_OK(
+            ValidateDstBufferOrder(dest_addr, op_uptr->length, op_uptr->op_id));
+      }
+      // Update qp state after verification of buffers.
+      qp_state->outstanding_ops().erase(op_uptr->op_id);
+      qp_state->IncrCompletedBytes(op_uptr->length, op_uptr->op_type);
+      qp_state->IncrCompletedOps(1, op_uptr->op_type);
+      ++num_validated;
+
+      op_uptr_it = qp_state->unchecked_initiated_ops().erase(op_uptr_it);
+    }
+  }
+  return num_validated;
+}
+
+absl::Status Client::ValidateCompletions(int num_expected) {
+  int num_validated = ValidateOrDeferCompletions();
+  if (num_validated != num_expected) {
+    return absl::DataLossError(
+        "Completion validatation failed. Ops' data didn't land successfully!");
+  }
+  return absl::OkStatus();
+}
+
+void Client::CheckAllDataLanded() {
+  for (auto& qp : qps_) {
+    qp.second->CheckDataLanded();
+  }
+}
+
+void Client::DumpPendingOps() {
+  LOG(INFO) << "Pending ops for client " << client_id() << ":";
+  for (const auto& [qp_id, qp] : qps_) {
+    LOG(INFO) << "QP id: " << qp->qp_id() << ", #Posted: "
+              << qp->outstanding_ops_count() + qp->TotalOpsCompleted()
+              << ", #Completed: " << qp->TotalOpsCompleted()
+              << ", #Pending: " << qp->outstanding_ops_count();
+    for (auto& [op_id, op] : qp->outstanding_ops()) {
+      LOG(INFO) << op_id;
+    }
+  }
+}
+
+void Client::InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
+                                   uint64_t id) {
+  constexpr int kOpIdGapInBuffer = 32;
+
+  // Fill in the buffer with random bytes.
+  std::generate_n(src_addr, length, std::ref(random));
+
+  // We want the generated byte sequence to have op_id embedded into it, but
+  // also be distinguishable across MTU boundaries to validate ordering. We do
+  // this by writing op id at the first byte, incrementing it and writing it
+  // repeatedly at fixed intervals, by default every 32 bytes. Instead of
+  // writing the full op id (uint64_t), we write it modulo (UCHAR_MAX) to fit it
+  // in a single byte.
+  //
+  // [ ]................[ ]................[ ]................[ ]........
+  //  |                  |                  |                  |
+  //  v                  v                  v                  v
+  // (op_id)            (op_id + 1)        (op_id + 2)        (op_id + 3)
+  //
+
+  for (uint32_t i = 0; i * kOpIdGapInBuffer < length; ++i) {
+    src_addr[i * kOpIdGapInBuffer] = (id + i) % UCHAR_MAX;
+  }
+}
+
+void Client::InitializeUdSrcBuffer(uint8_t* src_addr, uint32_t length,
+                                   uint64_t remote_op_id) {
+  // Fill in the buffer with random bytes.
+  std::generate_n(src_addr, length, std::ref(random));
+
+  // If the buffer is large enough to hold the remote op id, place it in the
+  // beginning of the buffer.
+  if (length >= sizeof(uint64_t)) {
+    *reinterpret_cast<uint64_t*>(src_addr) = remote_op_id;
+  }
+}
+
+absl::Status Client::ValidateDstBufferOrder(uint8_t* dst_addr, uint32_t length,
+                                            uint64_t id) {
+  constexpr uint32_t kOpIdGapInBuffer = 32;
+  // Validates the sequence of bytes in the buffer as generated by the
+  // InitializeRcSrcBuffer function.
+  for (uint32_t i = 0; i * kOpIdGapInBuffer < length; ++i) {
+    EXPECT_EQ(dst_addr[i * kOpIdGapInBuffer], (id + i) % UCHAR_MAX);
+  }
+  VLOG(2) << "Validation of dst_buffer successful.";
+  return absl::OkStatus();
+}
+
+bool Client::StoreCompletion(const ibv_wc* completion) {
+  if (completion->status != IBV_WC_SUCCESS) {
+    LOG(INFO) << "Polled completion with error: ";
+    verbs_util::PrintCompletion(*completion);
+    return false;
+  }
+  auto* op = reinterpret_cast<TestOp*>(completion->wr_id);
+  op->status = completion->status;
+  auto& qp_state = qps_[op->qp_id];
+
+  if (op->op_type == OpTypes::kRecv) {
+    qp_state->unchecked_received_ops().push_back(
+        std::move(qp_state->outstanding_ops().at(op->op_id)));
+  } else {
+    qp_state->unchecked_initiated_ops().push_back(
+        std::move(qp_state->outstanding_ops().at(op->op_id)));
+  }
+  return true;
 }
 
 void Client::MaybePrintBuffer(absl::string_view prefix_msg,

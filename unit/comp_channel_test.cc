@@ -56,6 +56,7 @@ class CompChannelTest : public RdmaVerbsFixture {
       ibv_qp* qp;
     };
     ibv_context* context;
+    PortAttribute port_attr;
     ibv_pd* pd;
     RdmaMemBlock buffer;
     ibv_mr* mr;
@@ -71,6 +72,7 @@ class CompChannelTest : public RdmaVerbsFixture {
       return context_or.status();
     }
     ASSIGN_OR_RETURN(setup.context, context_or);
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -107,7 +109,8 @@ class CompChannelTest : public RdmaVerbsFixture {
     if (!setup.remote.qp) {
       return absl::InternalError("Failed to create remote qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.local.qp, setup.remote.qp,
+                                            setup.port_attr));
     return setup;
   }
 
@@ -188,6 +191,7 @@ TEST_F(CompChannelTest, CreateDestroy) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
   ASSERT_THAT(channel, NotNull());
+  EXPECT_EQ(channel->context, context);
   ASSERT_EQ(ibv_destroy_comp_channel(channel), 0);
 }
 
@@ -373,7 +377,8 @@ TEST_F(CompChannelTest, MuxOntoSingleChannel) {
     ASSERT_THAT(new_pair.qp1, NotNull());
     new_pair.qp2 = ibv_.CreateQp(setup.pd, new_pair.cq2);
     ASSERT_THAT(new_pair.qp2, NotNull());
-    ASSERT_OK(ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2));
+    ASSERT_OK(
+        ibv_.SetUpLoopbackRcQps(new_pair.qp1, new_pair.qp2, setup.port_attr));
     qps.push_back(new_pair);
   }
   for (auto& pair : qps) {

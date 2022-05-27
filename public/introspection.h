@@ -35,31 +35,51 @@ class NicIntrospection {
  public:
   // Abstract hardware counter which might be supported by some providers.
   enum HardwareCounter {
-    kRdmaRxRead,       // Number of inbound RDMA read ops.
-    kRdmaRxWrite,      // Number of inbound RDMA write ops.
-    kRdmaRxSend,       // Number of inbound RDMA send ops.
-    kRdmaRxAtomic,     // Number of inbound RDMA atomic ops.
-    kRdmaTxRead,       // Number of outband RDMA read ops.
-    kRdmaTxWrite,      // Number of outband RDMA write ops.
-    kRdmaTxSend,       // Number of outband RDMA send ops.
-    kRdmaTxAtomic,     // Number of outband RDMA atomics ops.
-    kRdmaBind,         // Number of RDMA bind ops.
-    kRdmaInvalidate,   // Number of RDMA invalidate ops.
-    kBadRespErr,       // Number of bad response errors.
-    kLocLenErr,        // Number of local length errors.
-    kLocProtErr,       // Number of local protection errors.
-    kLocQpOpErr,       // Number of local QP operation errors.
-    kMwBindErr,        // Number of local MW bind errors.
-    kOutOfSeqNaks,     // Number of out of sequence NAKs received.
-    kRemAbrtErr,       // Number of remote abort error.
-    kRemAccessErr,     // Number of remote access error.
-    kRemInvReqErr,     // Number of remote invalid request error.
-    kRnrNak,           // Number of RNR NAKs received.
-    kRemOpErr,         // Number of remote operation error.
-    kRnrRetryExcErr,   // Number of RNR retry counter exceeded error.
+    // Basic RDMA counters.
+    kRdmaRxRead,      // RDMA read ops received.
+    kRdmaRxWrite,     // RDMA write ops received.
+    kRdmaRxSend,      // RDMA send ops received.
+    kRdmaRxAtomic,    // RDMA atomic ops received.
+    kRdmaTxRead,      // RDMA read ops sent.
+    kRdmaTxWrite,     // RDMA write ops sent.
+    kRdmaTxSend,      // RDMA send ops sent.
+    kRdmaTxAtomic,    // RDMA atomics ops sent.
+    kRdmaBind,        // RDMA bind ops carried out.
+    kRdmaInvalidate,  // RDMA invalidate ops carried out.
+    // Counters for verbs errors.
+    kBadRespErr,       // bad response errors.
+    kLocLenErr,        // local length errors.
+    kLocProtErr,       // local protection errors.
+    kLocQpOpErr,       // local QP operation errors.
+    kMwBindErr,        // local MW bind errors.
+    kOutOfSeqNaks,     // out of sequence NAKs received.
+    kRemAbrtErr,       // remote abort error.
+    kRemAccessErr,     // remote access error.
+    kRemInvReqErr,     // remote invalid request error.
+    kRnrNak,           // RNR NAKs received.
+    kRemOpErr,         // remote operation error.
+    kRnrRetryExcErr,   // RNR retry counter exceeded error.
     kRemSync,          // TODO(author2): No information.
-    kTrptRetryExcErr,  // Number of transport retry counter exceeded error.
-    kWrCmpltErr,       // Number of all CQE with an error.
+    kTrptRetryExcErr,  // transport retry counter exceeded error.
+    kWrCmpltErr,       // all CQE with an error.
+    // Ipv6 counters:
+    kIpv6Discards,            // IPv6 packets received and discarded.
+    kIpv6RxBytes,             // IPv6 bytes received.
+    kIpv6RxPackets,           // IPv6 packets received.
+    kIpv6RxTruncatedPackets,  // IPv6 packets received and truncated due to
+                              // insufficient buffering space in UDA RQ.
+    kIpv6TxNoRoutes,  // IPv6 datagrams discarded due to routing problem.
+    kIpv6TxBytes,     // IPv6 bytes sent.
+    kIpv6TxPackets,   // IPv6 packets sent.
+    // Ipv6 counters:
+    kIpv4Discards,            // IPv4 packets received and discarded.
+    kIpv4RxBytes,             // IPv4 bytes received.
+    kIpv4RxPackets,           // IPv4 packets received.
+    kIpv4RxTruncatedPackets,  // IPv4 packets received and truncated due to
+                              // insufficient buffering space in UDA RQ.
+    kIpv4TxNoRoutes,  // IPv4 datagrams discarded due to routing problem.
+    kIpv4TxBytes,     // IPv4 bytes sent.
+    kIpv4TxPackets,   // IPv4 packets sent.
   };
 
   // Snapshot of all hardware counters. Represented by a map to counter type

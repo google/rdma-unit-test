@@ -27,7 +27,6 @@ cc_library(
     deps = [
         ":bind_ops_tracker",
         ":client_update_service_cc_proto",
-        ":client_update_service_grpc_proto",
         ":completion_profile",
         ":ibv_resource_manager",
         ":inbound_update_interface",
@@ -37,7 +36,7 @@ cc_library(
         ":sampling",
         ":types",
         ":update_dispatcher_interface",
-        "//public:flags",
+        "//internal:verbs_attribute",
         "//public:introspection",
         "//public:map_util",
         "//public:rdma_memblock",

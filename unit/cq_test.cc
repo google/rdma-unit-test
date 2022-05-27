@@ -74,9 +74,13 @@ class CqTest : public RdmaVerbsFixture {
 };
 
 TEST_F(CqTest, Basic) {
+  constexpr int kCqe = 10;
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
+  ibv_cq* cq = ibv_create_cq(setup.context, kCqe, nullptr, nullptr, 0);
   ASSERT_THAT(cq, NotNull());
+  EXPECT_EQ(cq->context, setup.context);
+  EXPECT_EQ(cq->channel, nullptr);
+  EXPECT_GE(cq->cqe, kCqe);
   ASSERT_EQ(ibv_destroy_cq(cq), 0);
 }
 

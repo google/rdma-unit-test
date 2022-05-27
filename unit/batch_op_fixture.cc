@@ -26,6 +26,7 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/barrier.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 
@@ -40,6 +41,7 @@ absl::StatusOr<BatchOpFixture::BasicSetup> BatchOpFixture::CreateBasicSetup() {
   std::fill_n(setup.dst_memblock.data(), setup.dst_memblock.size(),
               kDstContent);
   ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+  setup.port_attr = ibv_.GetPortAttribute(setup.context);
   setup.pd = ibv_.AllocPd(setup.context);
   if (!setup.pd) {
     return absl::InternalError("Failed to allocate pd.");
@@ -113,19 +115,22 @@ BatchOpFixture::CreateTestQpPairs(BasicSetup& setup, ibv_cq* send_cq,
   std::vector<QpPair> qp_pairs;
   for (int i = 0; i < count; ++i) {
     QpPair qp_pair;
-    qp_pair.send_qp = ibv_.CreateQp(setup.pd, send_cq, recv_cq, nullptr,
-                                    max_qp_wr, max_qp_wr, IBV_QPT_RC,
-                                    /*sig_all=*/0);
+    qp_pair.send_qp = ibv_.CreateQp(
+        setup.pd, send_cq, recv_cq, IBV_QPT_RC,
+        QpInitAttribute().set_max_send_wr(max_qp_wr).set_max_recv_wr(
+            max_qp_wr));
     if (!qp_pair.send_qp) {
       return absl::InternalError("Failed to create send qp.");
     }
-    qp_pair.recv_qp = ibv_.CreateQp(setup.pd, send_cq, recv_cq, nullptr,
-                                    max_qp_wr, max_qp_wr, IBV_QPT_RC,
-                                    /*sig_all=*/0);
+    qp_pair.recv_qp = ibv_.CreateQp(
+        setup.pd, send_cq, recv_cq, IBV_QPT_RC,
+        QpInitAttribute().set_max_send_wr(max_qp_wr).set_max_recv_wr(
+            max_qp_wr));
     if (!qp_pair.recv_qp) {
       return absl::InternalError("Failed to create recv qp.");
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp));
+    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(qp_pair.send_qp, qp_pair.recv_qp,
+                                            setup.port_attr));
     qp_pair.dst_buffer = setup.dst_memblock.subspan(i * max_qp_wr, max_qp_wr);
     qp_pairs.push_back(qp_pair);
   }

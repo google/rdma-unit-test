@@ -62,6 +62,7 @@ MultiNodeOrchestrator::MultiNodeOrchestrator(size_t num_clients,
 
 void MultiNodeOrchestrator::RunClients(absl::Duration duration) {
   std::vector<std::thread> client_threads;
+  client_threads.reserve(clients_.size());
   for (const auto& client : clients_) {
     client_threads.emplace_back([&]() { return client->Run(duration); });
   }
@@ -75,6 +76,7 @@ void MultiNodeOrchestrator::RunClients(absl::Duration duration) {
 
 void MultiNodeOrchestrator::RunClients(size_t num_steps) {
   std::vector<std::thread> client_threads;
+  client_threads.reserve(clients_.size());
   for (const auto& client : clients_) {
     client_threads.emplace_back([&]() { return client->Run(num_steps); });
   }

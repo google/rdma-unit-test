@@ -56,6 +56,7 @@ class BatchOpFixture : public RdmaVerbsFixture {
     // of dst_memblock which corresponds to the QP.
     RdmaMemBlock dst_memblock;
     ibv_context* context;
+    PortAttribute port_attr;
     ibv_pd* pd;
     ibv_mr* src_mr;
     ibv_mr* dst_mr;

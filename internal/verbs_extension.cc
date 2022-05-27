@@ -14,7 +14,10 @@
 
 #include "internal/verbs_extension.h"
 
+#include <utility>
+
 #include "glog/logging.h"
+#include "infiniband/verbs.h"
 
 namespace rdma_unit_test {
 
@@ -32,28 +35,17 @@ int VerbsExtension::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
   return ibv_rereg_mr(mr, flags, pd, /*addr=*/nullptr, /*length=*/0, access);
 }
 
-ibv_ah* VerbsExtension::CreateAh(ibv_pd* pd, verbs_util::PortGid local,
-                                 ibv_gid remote_gid, uint8_t traffic_class) {
-  ibv_ah_attr attr = verbs_util::CreateAhAttr(local, remote_gid, traffic_class);
-  return ibv_create_ah(pd, &attr);
+ibv_ah* VerbsExtension::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
+  return ibv_create_ah(pd, &ah_attr);
 }
 
 ibv_qp* VerbsExtension::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
   return ibv_create_qp(pd, &basic_attr);
 }
 
-absl::Status VerbsExtension::SetQpRtr(ibv_qp* qp,
-                                      const verbs_util::PortGid& local,
-                                      ibv_gid remote_gid, uint32_t remote_qpn) {
-  ibv_qp_attr mod_rtr =
-      verbs_util::CreateBasicQpAttrRtr(local, remote_gid, remote_qpn);
-  int result_code = ibv_modify_qp(qp, &mod_rtr, verbs_util::kQpAttrRtrMask);
-  if (result_code != 0) {
-    LOG(INFO) << "ibv_modify_qp failed: " << result_code;
-    return absl::InternalError(
-        absl::StrCat("Modify QP (RtR) failed (", result_code, ")."));
-  }
-  return absl::OkStatus();
+int VerbsExtension::ModifyRcQpInitToRtr(ibv_qp* qp, ibv_qp_attr& qp_attr,
+                                        int qp_attr_mask) {
+  return ibv_modify_qp(qp, &qp_attr, qp_attr_mask);
 }
 
 }  // namespace rdma_unit_test
