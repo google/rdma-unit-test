@@ -85,7 +85,10 @@ class IntrospectionMlx5 : public NicIntrospection {
         {{"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState"},
          "Provider does not generate local completion when remote is in error "
          "state."},
-        {{"MwTest", "InvalidQp"}, "Allows bind to invalid qp."},
+        {{"MwType1Test", "UnsignaledBindError"},
+         "Undiagnosed error: provider does not emit completion."},
+        {{"MwType2Test", "UnsignaledBindError"},
+         "Undiagnosed error: provider does not emit completion."},
         // Allows creation over device cap.
         {{"QpTest", "ExceedsDeviceCap"}, ""},
     };

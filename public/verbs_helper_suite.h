@@ -102,6 +102,8 @@ class VerbsHelperSuite {
   int ModifyQp(ibv_qp* qp, ibv_qp_attr& attr, int mask) const;
   // Modify `qp` to ERROR state.
   absl::Status ModifyQpToError(ibv_qp* qp) const;
+  // Modify `qp` to RESET state.
+  absl::Status ModifyQpToReset(ibv_qp* qp) const;
 
   // Helper functions to create/destroy objects which will be automatically
   // cleaned up when VerbsHelperSuite is destroyed.

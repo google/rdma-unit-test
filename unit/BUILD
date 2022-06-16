@@ -47,13 +47,9 @@ cc_library(
     srcs = ["ah_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
-        "//internal:handle_garble",
         "//internal:verbs_attribute",
-        "//public:flags",
-        "//public:introspection",
         "//public:status_matchers",
         "//public:verbs_helper_suite",
-        "//public:verbs_util",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

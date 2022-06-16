@@ -179,6 +179,16 @@ absl::Status VerbsHelperSuite::ModifyQpToError(ibv_qp* qp) const {
   return absl::OkStatus();
 }
 
+absl::Status VerbsHelperSuite::ModifyQpToReset(ibv_qp* qp) const {
+  ibv_qp_attr attr{.qp_state = IBV_QPS_RESET};
+  int result_code = ModifyQp(qp, attr, IBV_QP_STATE);
+  if (result_code) {
+    return absl::InternalError(absl::StrFormat(
+        "Modified QP to ERROR state failed (%d).", result_code));
+  }
+  return absl::OkStatus();
+}
+
 int VerbsHelperSuite::ModifyQp(ibv_qp* qp, ibv_qp_attr& attr, int mask) const {
   int result_code = ibv_modify_qp(qp, &attr, mask);
   VLOG(1) << absl::StrFormat("Modify QP (%p) to %s (%d).", qp,

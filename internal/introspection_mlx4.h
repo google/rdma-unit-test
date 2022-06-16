@@ -49,9 +49,9 @@ class IntrospectionMlx4 : public NicIntrospection {
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {
     static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
+        {{"AhTest", "DestroyWithInvalidHandle"}, "Mlx4 keeps AH in userspace."},
         {{"AhTest", "DeallocPdWithOutstandingAh"},
-         "Allows Deallocating PD with Ah."},
-        {{"AhTest", "DeregInvalidAh"}, "Unknown AH handles crashes client."},
+         "Mlx4 keeps AH in userspace."},
         {{"BufferMrTest", "ReadZeroByte"},
          "Zero byte read gives IBV_WC_LOC_QP_OP_ERR"},
         {{"BufferMrTest", "ReadZeroByteOutsideMr"},

@@ -1719,7 +1719,6 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
         ++stats_.bind_type_2_mw_success;
         DCHECK(bind_args.rkey.has_value());
         uint32_t rkey = bind_args.rkey.value();
-        mw->rkey = rkey;
         resource_manager_.InsertBoundType2Mw(mw, bind_info, completion.qp_num);
         RcQpInfo* qp_info =
             resource_manager_.GetMutableRcQpInfo(completion.qp_num);

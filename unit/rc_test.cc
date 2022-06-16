@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -85,6 +86,27 @@ class LoopbackRcQpTest : public LoopbackFixture {
                                               local.port_attr.gid,
                                               local.qp->qp_num, qp_attr));
     return std::make_pair(local, remote);
+  }
+
+  // Returns a valid inline size and a invalid inline size based on trial
+  // and error creating qp's.
+  absl::StatusOr<std::pair<uint32_t, uint32_t>> DetermineInlineLimits() {
+    QpInitAttribute qp_init_attr;
+    static constexpr std::array kInlineTestSize{64,   128,  256,  512,
+                                                1024, 4096, 16536};
+    qp_init_attr.set_max_inline_data(kInlineTestSize[0]);
+    ASSIGN_OR_RETURN(Client local,
+                     CreateClient(IBV_QPT_RC, kPages, qp_init_attr));
+    for (int idx = 1; idx < kInlineTestSize.size(); ++idx) {
+      ibv_qp_init_attr init_attr =
+          qp_init_attr.set_max_inline_data(kInlineTestSize[idx])
+              .GetAttribute(local.cq, local.cq, IBV_QPT_RC);
+      ibv_qp* qp = ibv_.CreateQp(local.pd, init_attr);
+      if (qp == nullptr) {
+        return std::make_pair(kInlineTestSize[idx - 1], kInlineTestSize[idx]);
+      }
+    }
+    return absl::InvalidArgumentError("unable to find inline size limit.");
   }
 };
 
@@ -229,14 +251,15 @@ TEST_F(LoopbackRcQpTest, SendLargeChunk) {
 }
 
 TEST_F(LoopbackRcQpTest, SendInlineData) {
-  // A safe number that is in general within NIC's limits.
-  constexpr uint32_t kProposedMaxInlineData = 64;
+  uint32_t valid_inline_size, invalid_inline_size;
+  ASSERT_OK_AND_ASSIGN(std::tie(valid_inline_size, invalid_inline_size),
+                       DetermineInlineLimits());
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(
       std::tie(local, remote),
-      CreateConnectedClientsPair(kPages, QpInitAttribute().set_max_inline_data(
-                                             kProposedMaxInlineData)));
-  ASSERT_GE(remote.buffer.size(), kProposedMaxInlineData)
+      CreateConnectedClientsPair(
+          kPages, QpInitAttribute().set_max_inline_data(valid_inline_size)));
+  ASSERT_GE(remote.buffer.size(), valid_inline_size)
       << "receiver buffer too small";
 
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -245,12 +268,11 @@ TEST_F(LoopbackRcQpTest, SendInlineData) {
   verbs_util::PostRecv(remote.qp, recv);
 
   // a vector which is not registered to pd or mr
-  auto data_src =
-      std::make_unique<std::vector<uint8_t>>(kProposedMaxInlineData);
+  auto data_src = std::make_unique<std::vector<uint8_t>>(valid_inline_size);
   std::fill(data_src->begin(), data_src->end(), 'c');
   ibv_sge lsge{
       .addr = reinterpret_cast<uint64_t>(data_src->data()),
-      .length = kProposedMaxInlineData,
+      .length = valid_inline_size,
       .lkey = 0xDEADBEEF,  // random bad keys
   };
   ibv_send_wr send =
@@ -271,21 +293,23 @@ TEST_F(LoopbackRcQpTest, SendInlineData) {
   EXPECT_EQ(completion.opcode, IBV_WC_RECV);
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
-  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), kProposedMaxInlineData),
+  EXPECT_THAT(absl::MakeSpan(remote.buffer.data(), valid_inline_size),
               Each('c'));
-  EXPECT_THAT(absl::MakeSpan(remote.buffer.data() + kProposedMaxInlineData,
+  EXPECT_THAT(absl::MakeSpan(remote.buffer.data() + valid_inline_size,
                              remote.buffer.data() + remote.buffer.size()),
               Each(kRemoteBufferContent));
 }
 
 TEST_F(LoopbackRcQpTest, SendExceedMaxInlineData) {
-  constexpr uint32_t kProposedMaxInlineData = 64;
+  uint32_t valid_inline_size, invalid_inline_size;
+  ASSERT_OK_AND_ASSIGN(std::tie(valid_inline_size, invalid_inline_size),
+                       DetermineInlineLimits());
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(
       std::tie(local, remote),
-      CreateConnectedClientsPair(kPages, QpInitAttribute().set_max_inline_data(
-                                             kProposedMaxInlineData)));
-  ASSERT_GE(remote.buffer.size(), kProposedMaxInlineData)
+      CreateConnectedClientsPair(
+          kPages, QpInitAttribute().set_max_inline_data(valid_inline_size)));
+  ASSERT_GE(remote.buffer.size(), valid_inline_size)
       << "receiver buffer too small";
   const uint32_t actual_max_inline_data =
       verbs_util::GetQpCap(local.qp).max_inline_data;
@@ -684,6 +708,12 @@ TEST_F(LoopbackRcQpTest, SendWithTooSmallRecv) {
   EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
   EXPECT_EQ(local.qp->qp_num, completion.qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+
+  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(completion.status, IBV_WC_LOC_LEN_ERR);
+  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
+  EXPECT_EQ(completion.wr_id, 0);
+
   EXPECT_EQ(verbs_util::GetQpState(local.qp), IBV_QPS_ERR);
   EXPECT_EQ(verbs_util::GetQpState(remote.qp), IBV_QPS_ERR);
 }

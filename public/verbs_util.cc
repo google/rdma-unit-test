@@ -401,11 +401,14 @@ void PrintCompletion(const ibv_wc& completion) {
 absl::StatusOr<ibv_wc_status> BindType1MwSync(ibv_qp* qp, ibv_mw* mw,
                                               absl::Span<uint8_t> buffer,
                                               ibv_mr* mr, int access) {
-  ibv_mw_bind bind = CreateType1MwBind(/*wr_id=*/1, buffer, mr, access);
+  static uint32_t wr_id = 1;
+  ibv_mw_bind bind = CreateType1MwBind(wr_id++, buffer, mr, access);
   PostType1Bind(qp, mw, bind);
   ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  EXPECT_EQ(completion.wr_id, bind.wr_id);
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
-    EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+    EXPECT_EQ(completion.opcode, IBV_WC_BIND_MW);
   }
   return completion.status;
 }
@@ -414,13 +417,14 @@ absl::StatusOr<ibv_wc_status> BindType2MwSync(ibv_qp* qp, ibv_mw* mw,
                                               absl::Span<uint8_t> buffer,
                                               uint32_t rkey, ibv_mr* mr,
                                               int access) {
-  ibv_send_wr bind =
-      CreateType2BindWr(/*wr_id=*/1, mw, buffer, rkey, mr, access);
+  static uint32_t wr_id = 1;
+  ibv_send_wr bind = CreateType2BindWr(wr_id++, mw, buffer, rkey, mr, access);
   PostSend(qp, bind);
   ibv_wc completion = WaitForCompletion(qp->send_cq).value();
+  EXPECT_EQ(completion.wr_id, bind.wr_id);
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
-    bind.bind_mw.mw->rkey = bind.bind_mw.rkey;
   }
   return completion.status;
 }
@@ -429,11 +433,14 @@ absl::StatusOr<ibv_wc_status> ReadSync(ibv_qp* qp,
                                        absl::Span<uint8_t> local_buffer,
                                        ibv_mr* local_mr, void* remote_buffer,
                                        uint32_t rkey) {
+  static uint32_t wr_id = 1;
   ibv_sge sge = CreateSge(local_buffer, local_mr);
   ibv_send_wr read =
-      CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1, remote_buffer, rkey);
+      CreateReadWr(wr_id++, &sge, /*num_sge=*/1, remote_buffer, rkey);
   PostSend(qp, read);
   ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
+  EXPECT_EQ(completion.wr_id, read.wr_id);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_RDMA_READ, completion.opcode);
   }
@@ -444,11 +451,14 @@ absl::StatusOr<ibv_wc_status> WriteSync(ibv_qp* qp,
                                         absl::Span<uint8_t> local_buffer,
                                         ibv_mr* local_mr, void* remote_buffer,
                                         uint32_t rkey) {
+  static uint32_t wr_id = 1;
   ibv_sge sge = CreateSge(local_buffer, local_mr);
-  ibv_send_wr read =
-      CreateWriteWr(/*wr_id=*/1, &sge, /*num_sge=*/1, remote_buffer, rkey);
-  PostSend(qp, read);
+  ibv_send_wr write =
+      CreateWriteWr(wr_id++, &sge, /*num_sge=*/1, remote_buffer, rkey);
+  PostSend(qp, write);
   ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
+  EXPECT_EQ(completion.wr_id, write.wr_id);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_RDMA_WRITE, completion.opcode);
   }
@@ -459,14 +469,18 @@ absl::StatusOr<ibv_wc_status> FetchAddSync(ibv_qp* qp, void* local_buffer,
                                            ibv_mr* local_mr,
                                            void* remote_buffer, uint32_t rkey,
                                            uint64_t comp_add) {
-  ibv_sge sge;
-  sge.addr = reinterpret_cast<uint64_t>(local_buffer);
-  sge.length = 8;
-  sge.lkey = local_mr->lkey;
-  ibv_send_wr read = CreateFetchAddWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
-                                      remote_buffer, rkey, comp_add);
-  PostSend(qp, read);
+  static uint32_t wr_id = 1;
+  ibv_sge sge{
+      .addr = reinterpret_cast<uint64_t>(local_buffer),
+      .length = 8,
+      .lkey = local_mr->lkey,
+  };
+  ibv_send_wr fetch_add = CreateFetchAddWr(wr_id++, &sge, /*num_sge=*/1,
+                                           remote_buffer, rkey, comp_add);
+  PostSend(qp, fetch_add);
   ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
+  EXPECT_EQ(completion.wr_id, fetch_add.wr_id);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_FETCH_ADD, completion.opcode);
   }
@@ -477,14 +491,16 @@ absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
                                            ibv_mr* local_mr,
                                            void* remote_buffer, uint32_t rkey,
                                            uint64_t comp_add, uint64_t swap) {
-  ibv_sge sge;
-  sge.addr = reinterpret_cast<uint64_t>(local_buffer);
-  sge.length = 8;
-  sge.lkey = local_mr->lkey;
-  ibv_send_wr read = CreateCompSwapWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
-                                      remote_buffer, rkey, comp_add, swap);
-  PostSend(qp, read);
+  static uint32_t wr_id = 1;
+  ibv_sge sge{.addr = reinterpret_cast<uint64_t>(local_buffer),
+              .length = 8,
+              .lkey = local_mr->lkey};
+  ibv_send_wr comp_swap = CreateCompSwapWr(wr_id++, &sge, /*num_sge=*/1,
+                                           remote_buffer, rkey, comp_add, swap);
+  PostSend(qp, comp_swap);
   ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
+  EXPECT_EQ(completion.qp_num, qp->qp_num);
+  EXPECT_EQ(completion.wr_id, comp_swap.wr_id);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_COMP_SWAP, completion.opcode);
   }
@@ -492,10 +508,11 @@ absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
 }
 
 absl::StatusOr<ibv_wc_status> LocalInvalidateSync(ibv_qp* qp, uint32_t rkey) {
-  ibv_send_wr invalidate = CreateLocalInvalidateWr(/*wr_id=*/1, rkey);
+  static uint32_t wr_id = 1;
+  ibv_send_wr invalidate = CreateLocalInvalidateWr(wr_id++, rkey);
   PostSend(qp, invalidate);
   ASSIGN_OR_RETURN(ibv_wc completion, WaitForCompletion(qp->send_cq));
-  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_EQ(completion.wr_id, invalidate.wr_id);
   EXPECT_EQ(completion.qp_num, qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(completion.opcode, IBV_WC_LOCAL_INV);

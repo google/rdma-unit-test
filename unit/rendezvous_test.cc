@@ -454,7 +454,6 @@ class RpcClient : public RpcBase {
     CHECK_EQ(completion.status, IBV_WC_SUCCESS);
     // TODO(b/164096025): Re-enable once Simics is fixed.
     // CHECK_EQ(completion.opcode, IBV_WC_BIND_MW);
-    mw->rkey = bind.bind_mw.rkey;
 
     VLOG(1) << "Client sending request.";
     // Send Control

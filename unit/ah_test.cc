@@ -20,13 +20,9 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
-#include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
-#include "public/flags.h"
-#include "public/introspection.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
-#include "public/verbs_util.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
@@ -67,19 +63,24 @@ TEST_F(AhTest, CreateAndDestroy) {
   EXPECT_EQ(ibv_destroy_ah(ah), 0);
 }
 
-TEST_F(AhTest, DeregInvalidAh) {
+TEST_F(AhTest, DestroyWithInvalidHandle) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.simple_ah_attr);
-  HandleGarble garble(ah->handle);
-  EXPECT_EQ(ibv_destroy_ah(ah), ENOENT);
+  ibv_ah* ah = ibv_.extension().CreateAh(setup.pd, setup.simple_ah_attr);
+  uint32_t handle = ah->handle;
+  ah->handle = 0xDEADBEEF;
+  int result = ibv_destroy_ah(ah);
+  EXPECT_NE(result, 0);
+  if (result != 0) {
+    ah->handle = handle;
+    ibv_destroy_ah(ah);
+  }
 }
 
 TEST_F(AhTest, DeallocPdWithOutstandingAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.simple_ah_attr);
   ASSERT_THAT(ah, NotNull());
-  int result = ibv_.DeallocPd(setup.pd);
-  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(ibv_.DeallocPd(setup.pd), EBUSY);
 }
 
 }  // namespace rdma_unit_test
