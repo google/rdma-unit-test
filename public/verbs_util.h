@@ -28,7 +28,6 @@
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-
 #include "infiniband/verbs.h"
 
 
@@ -83,26 +82,32 @@ ibv_srq_attr DefaultSrqAttr();
 // attributes and flags. Simplifies the verb API.
 ///////////////////////////////////////////////////////////////////////////////
 
+// Returns the state of the QP.
 ibv_qp_state GetQpState(ibv_qp* qp);
 
+// Returns the capacity of the QP.
 ibv_qp_cap GetQpCap(ibv_qp* qp);
 
+// Creates a Scatter Gather
 ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr);
 
-// Create an SGE for atomic operation. Addr must be 8-byte aligned.
+// Creates an SGE for atomic operation. Addr must be 8-byte aligned.
 ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr);
 
+// Creates a MW bind info struct with local buffer information.
 ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
                                   int access = IBV_ACCESS_REMOTE_READ |
                                                IBV_ACCESS_REMOTE_WRITE |
                                                IBV_ACCESS_REMOTE_ATOMIC);
 
-ibv_mw_bind CreateType1MwBind(uint64_t wr_id, absl::Span<uint8_t> buffer,
-                              ibv_mr* mr,
-                              int access = IBV_ACCESS_REMOTE_READ |
-                                           IBV_ACCESS_REMOTE_WRITE |
-                                           IBV_ACCESS_REMOTE_ATOMIC);
+// Creates a WR for type 1 MW bind.
+ibv_mw_bind CreateType1MwBindWr(uint64_t wr_id, absl::Span<uint8_t> buffer,
+                                ibv_mr* mr,
+                                int access = IBV_ACCESS_REMOTE_READ |
+                                             IBV_ACCESS_REMOTE_WRITE |
+                                             IBV_ACCESS_REMOTE_ATOMIC);
 
+// Creates a WR for type 2 MW bind.
 ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                               const absl::Span<uint8_t> buffer, uint32_t rkey,
                               ibv_mr* mr,
@@ -110,36 +115,58 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                                            IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_ATOMIC);
 
+// Creates a WR for local invalidate.
 ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey);
 
+// Creates a WR for send.
 ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
 
+// Creates a WR for send with invalidate.
 ibv_send_wr CreateSendWithInvalidateWr(uint64_t wr_id, uint32_t rkey);
 
+// Creates  a WR for recv.
 ibv_recv_wr CreateRecvWr(uint64_t wr_id, ibv_sge* sge, int num_sge);
 
+// Creates a RDMA work request.
+ibv_send_wr CreateRdmaWr(ibv_wr_opcode opcode, uint64_t wr_id, ibv_sge* sge,
+                         int num_sge, void* remote_addr, uint32_t rkey);
+
+// Creates a WR for RDMA read.
 ibv_send_wr CreateReadWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                          void* remote_buffer, uint32_t rkey);
 
+// Creates a WR for RDMA write.
 ibv_send_wr CreateWriteWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                           void* remote_buffer, uint32_t rkey);
 
+// Create an Atomic work request.
+ibv_send_wr CreateAtomicWr(ibv_wr_opcode opcode, uint64_t wr_id, ibv_sge* sge,
+                           int num_sge, void* remote_buffer, uint32_t rkey,
+                           uint64_t compare_add, uint64_t swap = 0);
+
+// Create a WR for fetch and add.
 ibv_send_wr CreateFetchAddWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                              void* remote_buffer, uint32_t rkey,
                              uint64_t compare_add);
 
+// Creates a WR for compare and swap.
 ibv_send_wr CreateCompSwapWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                              void* remote_buffer, uint32_t rkey,
                              uint64_t compare_add, uint64_t swap);
 
+// Posts a type 1 MW bind WR to a queue pair.
 void PostType1Bind(ibv_qp* qp, ibv_mw* mw, const ibv_mw_bind& bind_args);
 
+// Posts a WR to send queue.
 void PostSend(ibv_qp* qp, const ibv_send_wr& wr);
 
+// Posts a WR to recv queue.
 void PostRecv(ibv_qp* qp, const ibv_recv_wr& wr);
 
+// Posts a WR to shared receive queue.
 void PostSrqRecv(ibv_srq* srq, const ibv_recv_wr& wr);
 
+// Polls for and returns a completion.
 absl::StatusOr<ibv_wc> WaitForCompletion(
     ibv_cq* cq, absl::Duration timeout = kDefaultCompletionTimeout);
 
@@ -160,47 +187,62 @@ bool ExpectNoExtendedCompletion(
 
 void PrintCompletion(const ibv_wc& completion);
 
-// Synchronously execute ops:
-// 1. Create WR.
-// 2. Post WR to QP.
-// 3. Wait for completion and return completion status.
-absl::StatusOr<ibv_wc_status> BindType1MwSync(
+// Executes a type 1 MW Bind operation synchronously.
+absl::StatusOr<ibv_wc_status> ExecuteType1MwBind(
     ibv_qp* qp, ibv_mw* mw, absl::Span<uint8_t> buffer, ibv_mr* mr,
     int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                  IBV_ACCESS_REMOTE_ATOMIC);
 
-absl::StatusOr<ibv_wc_status> BindType2MwSync(
+// Executes a type 2 MW Bind operation synchronnously.
+absl::StatusOr<ibv_wc_status> ExecuteType2MwBind(
     ibv_qp* qp, ibv_mw* mw, absl::Span<uint8_t> buffer, uint32_t rkey,
     ibv_mr* mr,
     int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                  IBV_ACCESS_REMOTE_ATOMIC);
 
-absl::StatusOr<ibv_wc_status> ReadSync(ibv_qp* qp,
-                                       absl::Span<uint8_t> local_buffer,
-                                       ibv_mr* local_mr, void* remote_buffer,
-                                       uint32_t rkey);
+// Executes a RDMA operation synchronnously.
+absl::StatusOr<ibv_wc_status> ExecuteRdma(ibv_wr_opcode opcode, ibv_qp* qp,
+                                          absl::Span<uint8_t> local_buffer,
+                                          ibv_mr* local_mr, void* remote_buffer,
+                                          uint32_t rkey);
 
-absl::StatusOr<ibv_wc_status> WriteSync(ibv_qp* qp,
-                                        absl::Span<uint8_t> local_buffer,
-                                        ibv_mr* local_mr, void* remote_buffer,
-                                        uint32_t rkey);
+// Executes a RDMA read operation synchronously.
+absl::StatusOr<ibv_wc_status> ExecuteRdmaRead(ibv_qp* qp,
+                                              absl::Span<uint8_t> local_buffer,
+                                              ibv_mr* local_mr,
+                                              void* remote_buffer,
+                                              uint32_t rkey);
 
-absl::StatusOr<ibv_wc_status> FetchAddSync(ibv_qp* qp, void* local_buffer,
-                                           ibv_mr* local_mr,
-                                           void* remote_buffer, uint32_t rkey,
-                                           uint64_t comp_add);
+// Executes a RDMA write operation synchronously.
+absl::StatusOr<ibv_wc_status> ExecuteRdmaWrite(ibv_qp* qp,
+                                               absl::Span<uint8_t> local_buffer,
+                                               ibv_mr* local_mr,
+                                               void* remote_buffer,
+                                               uint32_t rkey);
 
-absl::StatusOr<ibv_wc_status> CompSwapSync(ibv_qp* qp, void* local_buffer,
-                                           ibv_mr* local_mr,
-                                           void* remote_buffer, uint32_t rkey,
-                                           uint64_t comp_add, uint64_t swap);
+// Execute an atomic operation synchronnously.
+absl::StatusOr<ibv_wc_status> ExecuteAtomic(
+    ibv_wr_opcode opcode, ibv_qp* qp, void* local_buffer, ibv_mr* local_mr,
+    void* remote_buffer, uint32_t rkey, uint64_t comp_add, uint64_t swap = 0);
+
+// Executes a fetch and add operation synchronously.
+absl::StatusOr<ibv_wc_status> ExecuteFetchAndAdd(ibv_qp* qp, void* local_buffer,
+                                                 ibv_mr* local_mr,
+                                                 void* remote_buffer,
+                                                 uint32_t rkey,
+                                                 uint64_t comp_add);
+
+// Executes a compare and swap operation synchronously.
+absl::StatusOr<ibv_wc_status> ExecuteCompareAndSwap(
+    ibv_qp* qp, void* local_buffer, ibv_mr* local_mr, void* remote_buffer,
+    uint32_t rkey, uint64_t comp_add, uint64_t swap);
 
 // Execute a local invalidate op and return completion status.
-absl::StatusOr<ibv_wc_status> LocalInvalidateSync(ibv_qp* qp, uint32_t rkey);
+absl::StatusOr<ibv_wc_status> ExecuteLocalInvalidate(ibv_qp* qp, uint32_t rkey);
 
 // The return pair consists of first the send side completion status then the
 // recv side completion status.
-absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> SendRecvSync(
+absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> ExecuteSendRecv(
     ibv_qp* src_qp, ibv_qp* dst_qp, absl::Span<uint8_t> src_buffer,
     ibv_mr* src_mr, absl::Span<uint8_t> dst_buffer, ibv_mr* dst_mr);
 

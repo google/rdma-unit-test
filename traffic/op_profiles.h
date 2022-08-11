@@ -15,20 +15,21 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_OP_PROFILES_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_OP_PROFILES_H_
 
-#include "absl/flags/declare.h"
 #include "traffic/config.pb.h"
-
-ABSL_DECLARE_FLAG(bool, generate_atomics);
 
 namespace rdma_unit_test {
 
-// Returns an OperationGenerator with UD queue pairs and a even mixture of
+// Returns an OperationProfile for UD queue pairs with an even mixture of
 // operations sizes that we most commonly test.
 Config::OperationProfile MixedSizeUdOpProfile();
 
-// Returns an OperationProfile with RC queue pairs and a even mixture of all
-// operation types and operation sizes that we most commonly test.
+// Returns an OperationProfile for RC queue pairs with an even mixture of all
+// data operation types and operation sizes that we most commonly test.
 Config::OperationProfile MixedRcOpProfile();
+
+// Returns an OperationProfile for RC queue pairs with an even mixture of all
+// data + atomic operation types and operation sizes that we most commonly test.
+Config::OperationProfile MixedRcOpProfileWithAtomics();
 
 }  // namespace rdma_unit_test
 

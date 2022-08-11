@@ -16,6 +16,7 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_UNIT_RDMA_VERBS_FIXTURE_H_
 
 #include "public/basic_fixture.h"
+#include "public/verbs_helper_suite.h"
 
 namespace rdma_unit_test {
 

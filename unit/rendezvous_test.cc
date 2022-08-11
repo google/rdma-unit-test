@@ -28,6 +28,7 @@
 #include "gtest/gtest.h"
 #include "absl/base/attributes.h"
 #include "absl/container/fixed_array.h"
+#include "absl/flags/flag.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -461,7 +462,7 @@ class RpcClient : public RpcBase {
     request.operation = operation;
     request.addr = buffer_alloc;
     request.length = length;
-    request.rkey = rkey;
+    request.rkey = mw->rkey;
     request.seed = seed;
     control_.SendMessage(
         absl::MakeSpan(reinterpret_cast<uint8_t*>(&request), sizeof(request)));
@@ -682,6 +683,7 @@ class RendezvousTest : public RdmaVerbsFixture {
   static constexpr int kMaxOutstanding = 100;
 
   void SetUp() override {
+    RdmaVerbsFixture::SetUp();
     if (!Introspection().SupportsType2()) {
       GTEST_SKIP() << "Skipping due to lack of Type2 MW support.";
     }

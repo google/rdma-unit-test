@@ -326,10 +326,10 @@ inline internal_status::IsOkMatcher IsOk() {
 // A set of helpers to test the result of absl::Status
 #ifndef TESTING_BASE_PUBLIC_GMOCK_UTILS_STATUS_MATCHERS_H_
 
-#define CHECK_OK(expr) CHECK_EQ((expr), absl::OkStatus())  // Crash ok
-#define DCHECK_OK(expr) DCHECK_EQ((expr), absl::OkStatus())
-#define EXPECT_OK(expr) EXPECT_EQ((expr), absl::OkStatus())
-#define ASSERT_OK(expr) ASSERT_EQ((expr), absl::OkStatus())
+#define CHECK_OK(expr) CHECK((expr).ok())  // Crash ok
+#define DCHECK_OK(expr) DCHECK((expr).ok())
+#define EXPECT_OK(expr) EXPECT_TRUE((expr).ok())
+#define ASSERT_OK(expr) ASSERT_TRUE((expr).ok())
 
 #define CONCAT_IMPL(x, y) x##y
 #define CONCAT_MACRO(x, y) CONCAT_IMPL(x, y)

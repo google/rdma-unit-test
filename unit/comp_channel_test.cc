@@ -246,8 +246,8 @@ TEST_F(CompChannelTest, Bind) {
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
   ASSERT_THAT(
-      verbs_util::BindType2MwSync(setup.local.qp, mw, setup.buffer.span(),
-                                  kRKey, setup.mr, IBV_ACCESS_REMOTE_READ),
+      verbs_util::ExecuteType2MwBind(setup.local.qp, mw, setup.buffer.span(),
+                                     kRKey, setup.mr, IBV_ACCESS_REMOTE_READ),
       IsOkAndHolds(IBV_WC_SUCCESS));
   ASSERT_TRUE(IsReady(setup.local.channel));
   ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));

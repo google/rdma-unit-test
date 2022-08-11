@@ -111,7 +111,7 @@ TEST_P(PdBindTest, MwOnOtherPd) {
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
     // succcess/failure of the bind and if successful than check for completion.
-    ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
+    ibv_mw_bind bind_args = verbs_util::CreateType1MwBindWr(
         /*wr_id=*/1, setup.buffer.span(), setup.mr,
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
@@ -127,8 +127,8 @@ TEST_P(PdBindTest, MwOnOtherPd) {
 
   } else {
     EXPECT_THAT(
-        verbs_util::BindType2MwSync(setup.remote_qp, mw, setup.buffer.span(),
-                                    kType2RKey, setup.mr),
+        verbs_util::ExecuteType2MwBind(setup.remote_qp, mw, setup.buffer.span(),
+                                       kType2RKey, setup.mr),
         IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
 }
@@ -144,7 +144,7 @@ TEST_P(PdBindTest, MrOnOtherPd) {
   if (GetParam() == IBV_MW_TYPE_1) {
     // Some clients do client side validation on type 1. First check
     // succcess/failure of the bind and if successful than check for completion.
-    ibv_mw_bind bind_args = verbs_util::CreateType1MwBind(
+    ibv_mw_bind bind_args = verbs_util::CreateType1MwBindWr(
         /*wr_id=*/1, setup.buffer.span(), mr,
         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
             IBV_ACCESS_REMOTE_ATOMIC);
@@ -160,8 +160,8 @@ TEST_P(PdBindTest, MrOnOtherPd) {
   } else {
     ASSERT_OK_AND_ASSIGN(
         ibv_wc_status status,
-        verbs_util::BindType2MwSync(setup.remote_qp, mw, setup.buffer.span(),
-                                    kType2RKey, mr));
+        verbs_util::ExecuteType2MwBind(setup.remote_qp, mw, setup.buffer.span(),
+                                       kType2RKey, mr));
     EXPECT_EQ(status, IBV_WC_MW_BIND_ERR);
   }
 }
@@ -175,11 +175,11 @@ TEST_P(PdBindTest, MrMwOnOtherPd) {
   ibv_mw* mw = ibv_.AllocMw(alternate_pd, GetParam());
   ASSERT_THAT(mw, NotNull());
   if (GetParam() == IBV_MW_TYPE_1) {
-    EXPECT_THAT(verbs_util::BindType1MwSync(setup.remote_qp, mw,
-                                            setup.buffer.span(), mr),
+    EXPECT_THAT(verbs_util::ExecuteType1MwBind(setup.remote_qp, mw,
+                                               setup.buffer.span(), mr),
                 IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   } else {
-    EXPECT_THAT(verbs_util::BindType2MwSync(
+    EXPECT_THAT(verbs_util::ExecuteType2MwBind(
                     setup.remote_qp, mw, setup.buffer.span(), kType2RKey, mr),
                 IsOkAndHolds(IBV_WC_MW_BIND_ERR));
   }
@@ -553,7 +553,7 @@ class PdType1MwTest : public LoopbackFixture {
     RETURN_IF_ERROR(
         ibv_.SetUpLoopbackRcQps(local_qp, remote_qp, setup.port_attr));
     absl::StatusOr<ibv_wc_status> result =
-        verbs_util::BindType1MwSync(remote_qp, mw, setup.buffer.span(), mr);
+        verbs_util::ExecuteType1MwBind(remote_qp, mw, setup.buffer.span(), mr);
     if (!result.ok()) {
       return result.status();
     }

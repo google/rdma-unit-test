@@ -126,9 +126,6 @@ class NicIntrospection {
   // Returns true if the NIC supports UD Queue Pairs.
   virtual bool SupportsUdQp() const { return true; }
 
-  // Returns true if the NIC supports setting traffic class in AH.
-  virtual bool SupportsTrafficClass() const { return false; }
-
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 
@@ -137,9 +134,6 @@ class NicIntrospection {
   // If the NIC does not have known issue (and the test should proceed
   // normally), returns nullopt.
   std::optional<std::string> KnownIssue() const;
-
-  // Returns true if the NIC supports RC SendWithInvalidate.
-  virtual bool SupportsRcSendWithInvalidate() const { return true; }
 
   // Returns true if the NIC supports RC Remote Memory Window Atomic.
   virtual bool SupportsRcRemoteMwAtomic() const { return true; }

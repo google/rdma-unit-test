@@ -98,16 +98,20 @@ absl::Status RdmaStressFixture::SetUpRcClientsQPs(Client* local,
 void RdmaStressFixture::CreateSetUpRcQps(Client& initiator, Client& target,
                                          uint16_t qps_per_client,
                                          QpAttribute qp_attr) {
-  DCHECK_EQ(initiator.num_qps(), target.num_qps());
-  const auto qps_size = initiator.num_qps();
-  for (uint32_t qp_id = qps_size; qp_id < qps_size + qps_per_client; ++qp_id) {
-    CHECK_OK(initiator.CreateQps(1, /*is_rc=*/true));  // Crash OK
-    CHECK_OK(target.CreateQps(1, /*is_rc=*/true));     // Crash OK
+  for (int i = 0; i < qps_per_client; ++i) {
+    absl::StatusOr<uint32_t> initiator_qp_id =
+        initiator.CreateQp(/*is_rc=*/true);
+    absl::StatusOr<uint32_t> target_qp_id = target.CreateQp(/*is_rc=*/true);
+    CHECK_OK(initiator_qp_id);  // Crash OK.
+    CHECK_OK(target_qp_id);     // Crash OK.
+
     // Set up Qpairs.
-    EXPECT_OK(SetUpRcClientsQPs(&initiator, qp_id, &target, qp_id, qp_attr));
-    EXPECT_OK(SetUpRcClientsQPs(&target, qp_id, &initiator, qp_id, qp_attr));
+    EXPECT_OK(SetUpRcClientsQPs(&initiator, initiator_qp_id.value(), &target,
+                                target_qp_id.value(), qp_attr));
+    EXPECT_OK(SetUpRcClientsQPs(&target, target_qp_id.value(), &initiator,
+                                initiator_qp_id.value(), qp_attr));
   }
-  LOG(INFO) << "Successfully created " << initiator.num_qps() - qps_size
+  LOG(INFO) << "Successfully created " << qps_per_client
             << " new qps per client. Total qps: "
             << initiator.num_qps() + target.num_qps();
 }
@@ -116,17 +120,14 @@ void RdmaStressFixture::CreateSetUpOneToOneUdQps(Client& initiator,
                                                  Client& target,
                                                  uint16_t qps_per_client) {
   for (uint32_t i = 0; i < qps_per_client; ++i) {
-    // TODO(nkrsharma): Consider returning the qp_id or qp_state from the
-    // CreateQps method, so that we can avoid relying on num_qps(). This assumes
-    // the latest created QP has the larget qp_id, which is true.
-    uint32_t initiator_qp_id = initiator.num_qps();
-    uint32_t target_qp_id = target.num_qps();
+    absl::StatusOr<uint32_t> initiator_qp_id =
+        initiator.CreateQp(/*is_rc=*/false);
+    absl::StatusOr<uint32_t> target_qp_id = target.CreateQp(/*is_rc=*/false);
 
-    CHECK_OK(initiator.CreateQps(1, /*is_rc=*/false));  // Crash OK
-    CHECK_OK(target.CreateQps(1, /*is_rc=*/false));     // Crash OK
-
-    QpState* initiator_qp = initiator.qp_state(initiator_qp_id);
-    QpState* target_qp = target.qp_state(target_qp_id);
+    CHECK_OK(initiator_qp_id);  // Crash OK
+    CHECK_OK(target_qp_id);     // Crash OK
+    QpState* initiator_qp = initiator.qp_state(initiator_qp_id.value());
+    QpState* target_qp = target.qp_state(target_qp_id.value());
 
     ibv_ah* ah = initiator.CreateAh(port_attr());
     initiator_qp->add_ud_destination(target_qp, ah);
@@ -136,24 +137,28 @@ void RdmaStressFixture::CreateSetUpOneToOneUdQps(Client& initiator,
 void RdmaStressFixture::CreateSetUpMultiplexedUdQps(
     Client& initiator, Client& target, uint16_t initiator_qps,
     uint16_t target_qps, AddressHandleMapping ah_mapping) {
+  std::vector<uint32_t> initiator_qp_ids;
+  std::vector<uint32_t> target_qp_ids;
+
   // Create initiator and target QPs.
   for (uint32_t i = 0; i < initiator_qps; ++i) {
-    // Connection is associated with AH not QP for UD
-    CHECK_OK(initiator.CreateQps(1, /*is_rc=*/false));  // Crash OK
+    absl::StatusOr<uint32_t> initiator_qp_id =
+        initiator.CreateQp(/*is_rc=*/false);
+    CHECK_OK(initiator_qp_id);  // Crash OK
+    initiator_qp_ids.push_back(initiator_qp_id.value());
   }
   for (uint32_t i = 0; i < target_qps; ++i) {
-    // Connection is associated with AH not QP for UD
-    CHECK_OK(target.CreateQps(1, /*is_rc=*/false));  // Crash OK
+    absl::StatusOr<uint32_t> target_qp_id = target.CreateQp(/*is_rc=*/false);
+    CHECK_OK(target_qp_id);  // Crash OK
+    target_qp_ids.push_back(target_qp_id.value());
   }
 
   switch (ah_mapping) {
     case AddressHandleMapping::kIndependent:
       // For each unique initiator-target pairing, a separate independent
       // AddressHandle is created.
-      for (uint32_t i = 0; i < initiator_qps; ++i) {
-        for (uint32_t j = 0; j < target_qps; ++j) {
-          uint32_t initiator_qp_id = initiator.num_qps() - initiator_qps + i;
-          uint32_t target_qp_id = target.num_qps() - target_qps + j;
+      for (const auto initiator_qp_id : initiator_qp_ids) {
+        for (const auto target_qp_id : target_qp_ids) {
           ibv_ah* ah = initiator.CreateAh(port_attr());
           QpState* initiator_qp = initiator.qp_state(initiator_qp_id);
           QpState* target_qp = target.qp_state(target_qp_id);
@@ -165,10 +170,8 @@ void RdmaStressFixture::CreateSetUpMultiplexedUdQps(
     case AddressHandleMapping::kShared:
       // All initiator-target pairings use the same shared AddressHandle.
       ibv_ah* ah = initiator.CreateAh(port_attr());
-      for (uint32_t i = 0; i < initiator_qps; ++i) {
-        for (uint32_t j = 0; j < target_qps; ++j) {
-          uint32_t initiator_qp_id = initiator.num_qps() - initiator_qps + i;
-          uint32_t target_qp_id = target.num_qps() - target_qps + j;
+      for (const auto initiator_qp_id : initiator_qp_ids) {
+        for (const auto target_qp_id : target_qp_ids) {
           QpState* initiator_qp = initiator.qp_state(initiator_qp_id);
           CHECK(initiator_qp);  // Crash OK
           QpState* target_qp = target.qp_state(target_qp_id);

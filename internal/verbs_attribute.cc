@@ -84,6 +84,8 @@ ibv_ah_attr AhAttribute::GetAttribute(uint8_t port, uint8_t sgid_index,
   };
 }
 
+QpAttribute::QpAttribute() : path_mtu_(absl::GetFlag(FLAGS_verbs_mtu)) {}
+
 QpAttribute& QpAttribute::set_qp_access_flags(unsigned int qp_access_flags) {
   qp_access_flags_ = qp_access_flags;
   return *this;

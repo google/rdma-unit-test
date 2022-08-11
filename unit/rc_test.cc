@@ -52,6 +52,7 @@ namespace {
 
 using ::testing::AnyOf;
 using ::testing::Each;
+using ::testing::Ne;
 using ::testing::NotNull;
 
 class LoopbackRcQpTest : public LoopbackFixture {
@@ -191,33 +192,6 @@ TEST_F(LoopbackRcQpTest, UnsignaledSend) {
   EXPECT_THAT(remote.buffer.span(), Each(kLocalBufferContent));
 
   EXPECT_EQ(ibv_poll_cq(local.cq, 1, &completion), 0);
-}
-
-TEST_F(LoopbackRcQpTest, SendZeroSize) {
-  Client local, remote;
-  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
-
-  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
-  ibv_recv_wr recv =
-      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
-  verbs_util::PostRecv(remote.qp, recv);
-
-  ibv_send_wr send =
-      verbs_util::CreateSendWr(/*wr_id=*/1, nullptr, /*num_sge=*/0);
-  verbs_util::PostSend(local.qp, send);
-
-  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
-  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
-  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
-  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
-  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 0);
-  EXPECT_THAT(remote.buffer.span(), Each(kRemoteBufferContent));
 }
 
 // Send a 64MB chunk from local to remote
@@ -419,8 +393,7 @@ TEST_F(LoopbackRcQpTest, SendImmData) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
+  if (!Introspection().SupportsType2()) {
     GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   Client local, remote;
@@ -429,8 +402,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -473,8 +446,7 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateEmptySgl) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
+  if (!Introspection().SupportsType2()) {
     GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   if (!Introspection().AllowsEmptySgl()) {
@@ -486,8 +458,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateEmptySgl) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_recv_wr recv =
@@ -526,8 +498,7 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateEmptySgl) {
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
+  if (!Introspection().SupportsType2()) {
     GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   Client local, remote;
@@ -536,8 +507,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
@@ -550,25 +521,12 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.status, IBV_WC_RNR_RETRY_EXC_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-
-  // Check that rkey is valid.
-  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
-  ibv_send_wr read = verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
-                                              remote.buffer.data(), mw->rkey);
-  read.wr_id = 2;
-  verbs_util::PostSend(local.qp, read);
-  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 2);
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
+  if (!Introspection().SupportsType2()) {
     GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   Client local, remote;
@@ -577,8 +535,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -594,24 +552,19 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
   send.invalidate_rkey = (mw->rkey + 10) * 5;
   verbs_util::PostSend(local.qp, send);
 
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
-  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+                       verbs_util::WaitForCompletion(remote.cq));
+  // General memory management error undefined in ibverbs.
+  EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 0);
-  EXPECT_EQ(completion.wc_flags, 0);
+  EXPECT_EQ(completion.wr_id, recv.wr_id);
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
-  if (!Introspection().SupportsRcSendWithInvalidate()) {
-    GTEST_SKIP() << "Needs SendWithInvalidate.";
-  }
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(
       std::tie(local, remote),
@@ -620,8 +573,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
   // Bind a Type 1 MW on remote.
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(remote.qp, mw, remote.buffer.span(),
-                                          remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(remote.qp, mw,
+                                             remote.buffer.span(), remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -637,21 +590,21 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
   send.invalidate_rkey = mw->rkey;
   verbs_util::PostSend(local.qp, send);
 
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
-  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
-  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_MW_BIND_ERR);
+                       verbs_util::WaitForCompletion(remote.cq));
+  // Memory management error (IB Spec 11.6.2) undefined for ibverbs.
+  EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
 }
 
 // Send with Invalidate targeting another QPs MW.
 TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
-  if (!Introspection().SupportsType2() ||
-      !Introspection().SupportsRcSendWithInvalidate()) {
+  if (!Introspection().SupportsType2()) {
     GTEST_SKIP() << "Needs type 2 MW and SendWithInvalidate.";
   }
   Client local, remote;
@@ -660,8 +613,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(local.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(local.qp, mw, local.buffer.span(),
-                                          rkey, local.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(local.qp, mw, local.buffer.span(),
+                                             rkey, local.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
@@ -676,17 +629,16 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
   send.invalidate_rkey = mw->rkey;
   verbs_util::PostSend(local.qp, send);
 
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
-                       verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_SEND);
-  EXPECT_EQ(local.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(completion.wr_id, 1);
-  ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
-  EXPECT_EQ(completion.opcode, IBV_WC_RECV);
-  EXPECT_EQ(remote.qp->qp_num, completion.qp_num);
-  EXPECT_EQ(completion.wr_id, 0);
+                       verbs_util::WaitForCompletion(remote.cq));
+  // General memory management error undefined in ibverbs.
+  EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
+  EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, recv.wr_id);
 }
 
 TEST_F(LoopbackRcQpTest, SendWithTooSmallRecv) {
@@ -996,8 +948,8 @@ TEST_F(LoopbackRcQpTest, Type1MWRead) {
   // Bind a Type 1 MW on remote.
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(remote.qp, mw, remote.buffer.span(),
-                                          remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(remote.qp, mw,
+                                             remote.buffer.span(), remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
@@ -1023,8 +975,8 @@ TEST_F(LoopbackRcQpTest, Type2MWRead) {
   static constexpr uint32_t rkey = 1024;
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr read = verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
@@ -1046,13 +998,13 @@ TEST_F(LoopbackRcQpTest, Type1MWUnbind) {
   // Bind a Type 1 MW on remote.
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(remote.qp, mw, remote.buffer.span(),
-                                          remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(remote.qp, mw,
+                                             remote.buffer.span(), remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // Rebind to get a new rkey.
   uint32_t original_rkey = mw->rkey;
-  ASSERT_THAT(verbs_util::BindType1MwSync(remote.qp, mw, remote.buffer.span(),
-                                          remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(remote.qp, mw,
+                                             remote.buffer.span(), remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   EXPECT_NE(original_rkey, mw->rkey);
 
@@ -1404,8 +1356,8 @@ TEST_F(LoopbackRcQpTest, Type1MWWrite) {
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(remote.qp, mw, remote.buffer.span(),
-                                          remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(remote.qp, mw,
+                                             remote.buffer.span(), remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(
@@ -1430,8 +1382,8 @@ TEST_F(LoopbackRcQpTest, Type2MWWrite) {
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   ibv_mw* mw = ibv_.AllocMw(remote.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(remote.qp, mw, remote.buffer.span(),
-                                          rkey, remote.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  remote.qp, mw, remote.buffer.span(), rkey, remote.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
   ibv_send_wr write = verbs_util::CreateWriteWr(

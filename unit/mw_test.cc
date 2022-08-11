@@ -49,6 +49,7 @@ namespace rdma_unit_test {
 
 using ::testing::AnyOf;
 using ::testing::Field;
+using ::testing::Ne;
 using ::testing::NotNull;
 
 class MwFixture : public LoopbackFixture {
@@ -67,7 +68,7 @@ class MwFixture : public LoopbackFixture {
     switch (mw->type) {
       case IBV_MW_TYPE_1: {
         ibv_mw_bind bind =
-            verbs_util::CreateType1MwBind(/*wr_id=*/1, buffer, mr, kAccess);
+            verbs_util::CreateType1MwBindWr(/*wr_id=*/1, buffer, mr, kAccess);
         return ibv_bind_mw(qp, mw, &bind);
       }
       case IBV_MW_TYPE_2: {
@@ -93,10 +94,11 @@ class MwFixture : public LoopbackFixture {
                    IBV_ACCESS_REMOTE_ATOMIC) {
     switch (mw->type) {
       case IBV_MW_TYPE_1:
-        return verbs_util::BindType1MwSync(qp, mw, buffer, mr, access);
+        return verbs_util::ExecuteType1MwBind(qp, mw, buffer, mr, access);
       case IBV_MW_TYPE_2:
         static uint32_t rkey = 1024;
-        return verbs_util::BindType2MwSync(qp, mw, buffer, rkey++, mr, access);
+        return verbs_util::ExecuteType2MwBind(qp, mw, buffer, rkey++, mr,
+                                              access);
     }
   }
 };
@@ -196,9 +198,10 @@ TEST_P(MwGeneralTest, BindInvalidMr) {
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_EQ(completion.qp_num, setup.remote_qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_SUCCESS));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_SUCCESS));
   }
 }
 
@@ -215,14 +218,16 @@ TEST_P(MwGeneralTest, BindInvalidMw) {
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_EQ(completion.qp_num, setup.remote_qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_SUCCESS));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_SUCCESS));
   } else {
     EXPECT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_RETRY_EXC_ERR));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_RETRY_EXC_ERR));
   }
 }
 
@@ -240,9 +245,10 @@ TEST_P(MwGeneralTest, BindInvalidQp) {
     EXPECT_EQ(completion.wr_id, 1);
     EXPECT_EQ(completion.qp_num, setup.remote_qp->qp_num);
     if (completion.status == IBV_WC_SUCCESS) {
-      EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                       setup.mr, setup.buffer.data(), mw->rkey),
-                  IsOkAndHolds(IBV_WC_SUCCESS));
+      EXPECT_THAT(
+          verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                      setup.mr, setup.buffer.data(), mw->rkey),
+          IsOkAndHolds(IBV_WC_SUCCESS));
     }
   }
 }
@@ -257,14 +263,16 @@ TEST_P(MwGeneralTest, DeregMrWhenBound) {
   // Some NICs allow deregistering MRs with MW bound.
   if (result == 0) {
     EXPECT_EQ(0, 1);
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_REM_OP_ERR));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_REM_OP_ERR));
   } else {
     EXPECT_EQ(result, EBUSY);
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_SUCCESS));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_SUCCESS));
   }
 }
 
@@ -295,18 +303,18 @@ TEST_F(MwType1Test, BindZeroLengthMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(setup.local_qp, mw,
-                                          setup.buffer.span(), setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(setup.local_qp, mw,
+                                             setup.buffer.span(), setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   uint32_t original_rkey = mw->rkey;
   EXPECT_THAT(
-      verbs_util::BindType1MwSync(setup.local_qp, mw,
-                                  setup.buffer.span().subspan(0, 0), setup.mr),
+      verbs_util::ExecuteType1MwBind(
+          setup.local_qp, mw, setup.buffer.span().subspan(0, 0), setup.mr),
       IsOkAndHolds(IBV_WC_SUCCESS));
   // Verify the original RKey is not accessible.
   EXPECT_THAT(
-      verbs_util::ReadSync(setup.local_qp, setup.buffer.span(), setup.mr,
-                           setup.buffer.data(), original_rkey),
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), original_rkey),
       IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
@@ -315,7 +323,7 @@ TEST_F(MwType1Test, UnsignaledBindError) {
   RdmaMemBlock unregistered_memory = ibv_.AllocBuffer(/*pages = */ 1);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ibv_mw_bind bind = verbs_util::CreateType1MwBind(
+  ibv_mw_bind bind = verbs_util::CreateType1MwBindWr(
       /*wr_id=*/1, unregistered_memory.span(), setup.mr);
   bind.send_flags = bind.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostType1Bind(setup.remote_qp, mw, bind);
@@ -328,8 +336,8 @@ TEST_F(MwType1Test, DestroyQpWithType1Bound) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(setup.remote_qp, mw,
+                                             setup.buffer.span(), setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   EXPECT_EQ(ibv_.DestroyQp(setup.remote_qp), 0);
 }
@@ -338,12 +346,12 @@ TEST_F(MwType1Test, CrossQpManagement) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType1MwSync(setup.local_qp, mw,
-                                          setup.buffer.span(), setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType1MwBind(setup.local_qp, mw,
+                                             setup.buffer.span(), setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // Rebind on second.
-  EXPECT_THAT(verbs_util::BindType1MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), setup.mr),
+  EXPECT_THAT(verbs_util::ExecuteType1MwBind(setup.remote_qp, mw,
+                                             setup.buffer.span(), setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
@@ -361,9 +369,9 @@ TEST_F(MwType1Test, BindType1WhenQpError) {
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
 
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_1);
-  EXPECT_THAT(
-      verbs_util::BindType1MwSync(setup.remote_qp, mw, setup.buffer.span(), mr),
-      IsOkAndHolds(IBV_WC_WR_FLUSH_ERR));
+  EXPECT_THAT(verbs_util::ExecuteType1MwBind(setup.remote_qp, mw,
+                                             setup.buffer.span(), mr),
+              IsOkAndHolds(IBV_WC_WR_FLUSH_ERR));
 }
 
 class MwType2Test : public LoopbackFixture {
@@ -389,7 +397,7 @@ TEST_F(MwType2Test, Bind) {
                               IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND);
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  EXPECT_THAT(verbs_util::BindType2MwSync(
+  EXPECT_THAT(verbs_util::ExecuteType2MwBind(
                   setup.local_qp, mw, setup.buffer.span(), kRKey, mr,
                   IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                       IBV_ACCESS_REMOTE_ATOMIC),
@@ -422,16 +430,16 @@ TEST_F(MwType2Test, BindRKeyReuse) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw1 = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw1, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw1,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw1, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_mw* mw2 = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw2, NotNull());
   // Although we are asking for the same R_KEY, the NIC will only extract the
   // final 8 bit from the user's request. Difference in index (higher 24 bits)
   // will still make the second MW's R_KEY valid.
-  EXPECT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw2,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  EXPECT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw2, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   EXPECT_NE(mw1->rkey, mw2->rkey);
 }
@@ -454,40 +462,42 @@ TEST_F(MwType2Test, LocalInvalidate) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
-  ASSERT_THAT(verbs_util::LocalInvalidateSync(setup.remote_qp, mw->rkey),
+  ASSERT_THAT(verbs_util::ExecuteLocalInvalidate(setup.remote_qp, mw->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
-  EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                   setup.mr, setup.buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(MwType2Test, UnsignaledLocalInvalidate) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_send_wr invalidate =
       verbs_util::CreateLocalInvalidateWr(/*wr_id=*/1, mw->rkey);
   invalidate.send_flags = invalidate.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(setup.remote_qp, invalidate);
   // Do another operation to ensure no completion.
-  EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                   setup.mr, setup.buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(MwType2Test, UnsignaledLocalInvalidateError) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_send_wr invalidate =
       verbs_util::CreateLocalInvalidateWr(/*wr_id=*/1, mw->rkey + 1);
@@ -495,15 +505,16 @@ TEST_F(MwType2Test, UnsignaledLocalInvalidateError) {
   verbs_util::PostSend(setup.local_qp, invalidate);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_MW_BIND_ERR);
+  // General Memory Management Error (IB Spec 11.6.2) undefined in libibverbs.
+  EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
 }
 
 TEST_F(MwType2Test, Type1BindOnType2) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* type2_mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(type2_mw, NotNull());
-  ibv_mw_bind bind_arg =
-      verbs_util::CreateType1MwBind(/*wr_id=*/1, setup.buffer.span(), setup.mr);
+  ibv_mw_bind bind_arg = verbs_util::CreateType1MwBindWr(
+      /*wr_id=*/1, setup.buffer.span(), setup.mr);
   EXPECT_EQ(ibv_bind_mw(setup.remote_qp, type2_mw, &bind_arg), EINVAL);
 }
 
@@ -511,8 +522,8 @@ TEST_F(MwType2Test, DestroyQpWithType2Bound) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // IBTA o10-2.2.5: HCA must allow consumer to destroy the QP while Type 2B MW
   // are still bound to the QP.
@@ -523,8 +534,8 @@ TEST_F(MwType2Test, DeregMrWhenBound) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // See IBTA 10.6.7.2.6 DEREGISTERING REGIONS WITH BOUND WINDOWS, roughly
   // speaking, the HCA has options whether to allow the deregistration to be
@@ -533,15 +544,17 @@ TEST_F(MwType2Test, DeregMrWhenBound) {
   // remote access.
   int result = ibv_.DeregMr(setup.mr);
   if (result == 0) {
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 
   } else {
     EXPECT_EQ(result, EBUSY);
-    EXPECT_THAT(verbs_util::ReadSync(setup.local_qp, setup.buffer.span(),
-                                     setup.mr, setup.buffer.data(), mw->rkey),
-                IsOkAndHolds(IBV_WC_SUCCESS));
+    EXPECT_THAT(
+        verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
+                                    setup.mr, setup.buffer.data(), mw->rkey),
+        IsOkAndHolds(IBV_WC_SUCCESS));
   }
 }
 
@@ -549,8 +562,8 @@ TEST_F(MwType2Test, RebindToDifferentQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   ibv_qp* new_local_qp = ibv_.CreateQp(setup.pd, setup.cq);
   ASSERT_THAT(new_local_qp, NotNull());
@@ -559,8 +572,8 @@ TEST_F(MwType2Test, RebindToDifferentQp) {
   ASSERT_OK(
       ibv_.SetUpLoopbackRcQps(new_local_qp, new_remote_qp, setup.port_attr));
   // Type 2 MW does not allow rebinding an already bound MW. See IBTA table 78.
-  ASSERT_THAT(verbs_util::BindType2MwSync(new_remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  new_remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
 
@@ -568,12 +581,12 @@ TEST_F(MwType2Test, RebindToDifferentRKey) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // Type 2 MW does not allow rebinding an already bound MW. See IBTA table 78.
   constexpr uint32_t kNewRKey = kRKey + 1;
-  ASSERT_THAT(verbs_util::BindType2MwSync(
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
                   setup.remote_qp, mw, setup.buffer.span(), kNewRKey, setup.mr),
               IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
@@ -582,12 +595,12 @@ TEST_F(MwType2Test, CrossQpInvalidate) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   // MW is bound to `setup.remote_qp`, so invalidating on `setup.local_qp`
   // should fail.
-  ASSERT_THAT(verbs_util::LocalInvalidateSync(setup.local_qp, mw->rkey),
+  ASSERT_THAT(verbs_util::ExecuteLocalInvalidate(setup.local_qp, mw->rkey),
               IsOkAndHolds(IBV_WC_MW_BIND_ERR));
 }
 
@@ -595,8 +608,8 @@ TEST_F(MwType2Test, CrossQpRead) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
   ASSERT_THAT(mw, NotNull());
-  ASSERT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, setup.mr),
+  ASSERT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
 
   ibv_qp* new_local_qp = ibv_.CreateQp(setup.pd, setup.cq);
@@ -606,9 +619,10 @@ TEST_F(MwType2Test, CrossQpRead) {
   ASSERT_OK(
       ibv_.SetUpLoopbackRcQps(new_local_qp, new_remote_qp, setup.port_attr));
 
-  EXPECT_THAT(verbs_util::ReadSync(new_local_qp, setup.buffer.span(), setup.mr,
-                                   setup.buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaRead(new_local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(MwType2Test, BindType1WhenQpError) {
@@ -618,8 +632,8 @@ TEST_F(MwType2Test, BindType1WhenQpError) {
   ASSERT_EQ(verbs_util::GetQpState(setup.remote_qp), IBV_QPS_ERR);
 
   ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
-  EXPECT_THAT(verbs_util::BindType2MwSync(setup.remote_qp, mw,
-                                          setup.buffer.span(), kRKey, mr),
+  EXPECT_THAT(verbs_util::ExecuteType2MwBind(setup.remote_qp, mw,
+                                             setup.buffer.span(), kRKey, mr),
               IsOkAndHolds(IBV_WC_WR_FLUSH_ERR));
 }
 
@@ -654,9 +668,10 @@ class MwBindAccessTest
     static uint32_t rkey = 1024;
     switch (bind_type) {
       case IBV_MW_TYPE_1:
-        return verbs_util::BindType1MwSync(qp, mw, buffer, mr, access);
+        return verbs_util::ExecuteType1MwBind(qp, mw, buffer, mr, access);
       case IBV_MW_TYPE_2:
-        return verbs_util::BindType2MwSync(qp, mw, buffer, rkey++, mr, access);
+        return verbs_util::ExecuteType2MwBind(qp, mw, buffer, rkey++, mr,
+                                              access);
     }
   }
 };
@@ -811,9 +826,9 @@ class MwType2AdvancedTest : public LoopbackFixture {
     RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(setup.owner.qp, setup.reader.qp,
                                             setup.basic.port_attr));
     ASSIGN_OR_RETURN(ibv_wc_status result,
-                     verbs_util::BindType2MwSync(setup.owner.qp, setup.mw,
-                                                 setup.basic.buffer.span(),
-                                                 kRKey, setup.basic.mr));
+                     verbs_util::ExecuteType2MwBind(setup.owner.qp, setup.mw,
+                                                    setup.basic.buffer.span(),
+                                                    kRKey, setup.basic.mr));
     if (result != IBV_WC_SUCCESS) {
       return absl::InternalError(
           absl::StrCat("Failed to bind type 2 MW (", result, ")."));

@@ -86,16 +86,14 @@ TEST_F(MrTest, DeregInvalidMr) {
   EXPECT_EQ(ibv_dereg_mr(mr), ENOENT);
 }
 
-// Cannot have remote write without local write.
-TEST_F(MrTest, InvalidPermissions) {
+TEST_F(MrTest, RemoteWriteWithoutLocalWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   EXPECT_THAT(ibv_.RegMr(setup.pd, setup.buffer,
                          IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
               IsNull());
 }
 
-// Cannot have remote atomic without local write.
-TEST_F(MrTest, InvalidPermissions2) {
+TEST_F(MrTest, RemoteAtomicWithoutLocalWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   EXPECT_THAT(ibv_.RegMr(setup.pd, setup.buffer,
                          IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC),

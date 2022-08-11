@@ -64,7 +64,7 @@ class AhAttribute {
 // Helper class for creating ibv_qp_attr used by ibv_modified_qp.
 class QpAttribute {
  public:
-  QpAttribute() = default;
+  QpAttribute();
   ~QpAttribute() = default;
 
   QpAttribute& set_qp_access_flags(unsigned int qp_access_flags);

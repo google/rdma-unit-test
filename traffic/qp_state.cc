@@ -193,7 +193,7 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
       offset += op_bytes - (offset % op_bytes);
     }
 
-    for (size_t i = 0; i < num_ops; ++i) {
+    for (int i = 0; i < num_ops; ++i) {
       if (offset + op_bytes >= len) offset = 0;
       op_addrs.push_back(base + offset);
       VLOG(2) << "New " << TestOp::ToString(op_type)
@@ -209,7 +209,7 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
     if (len - offset < op_bytes * num_ops) {
       offset = (((len - offset) % op_bytes) + offset) % len;
     }
-    for (size_t i = 0; i < num_ops; ++i) {
+    for (int i = 0; i < num_ops; ++i) {
       VLOG(2) << "New " << TestOp::ToString(op_type)
               << " op allocated on client " << local_client_id_ << ", qp_id "
               << qp_id() << ", offset: " << offset << ", op size: " << op_bytes
@@ -405,7 +405,11 @@ std::string RcQpState::ToString() const {
   std::stringstream out;
   out << "RcQpState:\n";
   out << DumpState();
-  out << " remote_qp_id: " << remote_qp_state()->qp_id() << "\n";
+  if (remote_qp_state() != nullptr) {
+    out << " remote_qp_id: " << remote_qp_state()->qp_id() << "\n";
+  } else {
+    out << " remote_qp_id: Not Connected\n";
+  }
   return out.str();
 }
 

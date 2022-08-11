@@ -315,6 +315,7 @@ cc_library(
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:fixed_array",
+        "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -377,13 +378,13 @@ cc_library(
         ":loopback_fixture",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
-        "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
@@ -464,6 +465,7 @@ cc_library(
     deps = [
         "//public:basic_fixture",
         "//public:introspection",
+        "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",
     ],
 )
@@ -510,6 +512,7 @@ cc_library(
     deps = [
         "//public:basic_fixture",
         "//public:introspection",
+        "//public:verbs_helper_suite",
         "@com_glog_glog//:glog",
     ],
 )

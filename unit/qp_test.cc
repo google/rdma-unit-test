@@ -715,8 +715,8 @@ TEST_F(QpStateTest, PostSendErr) {
   ASSERT_EQ(verbs_util::GetQpState(setup.local_qp), IBV_QPS_ERR);
   ASSERT_OK_AND_ASSIGN(
       ibv_wc_status status,
-      verbs_util::ReadSync(setup.local_qp, setup.buffer.span(), setup.mr,
-                           setup.buffer.data(), setup.mr->rkey));
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), setup.mr->rkey));
   EXPECT_EQ(status, IBV_WC_WR_FLUSH_ERR);
 }
 

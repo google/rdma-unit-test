@@ -29,6 +29,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
+#include "internal/verbs_attribute.h"
 #include "public/rdma_memblock.h"
 #include "public/verbs_helper_suite.h"
 #include "traffic/op_types.h"
@@ -95,11 +96,9 @@ class Client {
     std::optional<UdSendAttributes> ud_send_attributes = std::nullopt;
   };
 
-  // Default constants
+  // Default constants.
   static constexpr int kQKey = 200;
   static constexpr int kDefaultBuffersPerQp = 4096;
-  static constexpr int kDefaultSqSize = 128;
-  static constexpr int kDefaultRqSize = 128;
 
   // Constructs a client associated with the fixture. Sets up all required
   // resources like pd, mr, cq, and src and dest buffers. For src and dest
@@ -134,15 +133,12 @@ class Client {
   ibv_pd* pd() const { return pd_; }
   int client_id() const { return client_id_; }
 
-  // Constructs count qps for this client. Each qp will have
-  // FLAGS_buffer_per_qp of src and dest buffer to send/accept data
-  // to/from other qps.
-  // 'is_rc' specifies whether the qps are in rc mode or ud mode.
-  // Returns OutOfRangeError if adding count qps goes over
-  // FLAGS_max_qps_per_client.
-  // TODO(author2): Maybe use QpInitAttribute.
-  absl::Status CreateQps(size_t count, bool is_rc, int sq_size = kDefaultSqSize,
-                         int rq_size = kDefaultRqSize);
+  // Constructs a qp for this client and returns its qp_id. The qp will have
+  // FLAGS_buffer_per_qp of src and dest buffer to send/accept data to/from
+  // other qps. 'is_rc' specifies whether the qps are in rc mode or ud mode.
+  // Returns OutOfRangeError if creating the qp goes over max_qps_per_client.
+  absl::StatusOr<uint32_t> CreateQp(
+      bool is_rc, QpInitAttribute qp_init_attribute = QpInitAttribute());
   absl::Status DeleteQp(uint32_t qp_id);
 
   // Create an address handle and store it in the Client. Since the RDMA unit
@@ -265,6 +261,15 @@ class Client {
   // not delivered to the software). This function prints out which un-completed
   // op has landed data or not.
   void CheckAllDataLanded();
+
+  std::vector<ibv_qp*> RetrieveQps();
+
+  // Fetches, prints and acks any asynchronous events (AEs) on the client. Does
+  // not wait or poll for an AE, but simply handles and returns existing AEs.
+  // Returns a negative value if polling for events failed.
+  // Returns 0 if there are no error events.
+  // Returns a positive number indicating the number of AEs acked.
+  int HandleAsyncEvents();
 
   // Prints number of pending ops on all QPs for this client.
   void DumpPendingOps();

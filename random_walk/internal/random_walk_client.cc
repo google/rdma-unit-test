@@ -899,7 +899,7 @@ absl::StatusCode RandomWalkClient::TryBindType1Mw() {
   DCHECK(mw);
   absl::Span<uint8_t> buffer = sampler_.RandomMwSpan(mr);
   uint64_t wr_id = EncodeAction(next_raw_wr_id_++, Action::BIND_TYPE_1_MW);
-  ibv_mw_bind bind_wr = verbs_util::CreateType1MwBind(wr_id, buffer, mr);
+  ibv_mw_bind bind_wr = verbs_util::CreateType1MwBindWr(wr_id, buffer, mr);
   int result = ibv_bind_mw(qp, mw, &bind_wr);
   log_.PushBindMw(bind_wr, mw);
   if (result) {

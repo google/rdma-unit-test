@@ -143,8 +143,8 @@ TEST_F(BufferMrTest, SendZeroByte) {
   absl::Span<uint8_t> send_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> recv_buffer = setup.mr_buffer.subspan(0, 0);
   EXPECT_THAT(
-      verbs_util::SendRecvSync(setup.send_qp, setup.recv_qp, send_buffer,
-                               setup.mr, recv_buffer, setup.mr),
+      verbs_util::ExecuteSendRecv(setup.send_qp, setup.recv_qp, send_buffer,
+                                  setup.mr, recv_buffer, setup.mr),
       IsOkAndHolds(Pair(IBV_WC_SUCCESS, IBV_WC_SUCCESS)));
 }
 
@@ -159,8 +159,8 @@ TEST_F(BufferMrTest, SendZeroByteFromZeroByteMr) {
   absl::Span<uint8_t> send_buffer = mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> recv_buffer = mr_buffer.subspan(0, 0);
   ASSERT_THAT(
-      verbs_util::SendRecvSync(setup.send_qp, setup.recv_qp, send_buffer,
-                               setup.mr, recv_buffer, setup.mr),
+      verbs_util::ExecuteSendRecv(setup.send_qp, setup.recv_qp, send_buffer,
+                                  setup.mr, recv_buffer, setup.mr),
       IsOkAndHolds(Pair(IBV_WC_SUCCESS, IBV_WC_SUCCESS)));
 }
 
@@ -170,8 +170,8 @@ TEST_F(BufferMrTest, SendZeroByteOutsideMr) {
   absl::Span<uint8_t> send_buffer = setup.buffer.subspan(0, 0);
   absl::Span<uint8_t> recv_buffer = setup.buffer.subspan(0, 0);
   ASSERT_THAT(
-      verbs_util::SendRecvSync(setup.send_qp, setup.recv_qp, send_buffer,
-                               setup.mr, recv_buffer, setup.mr),
+      verbs_util::ExecuteSendRecv(setup.send_qp, setup.recv_qp, send_buffer,
+                                  setup.mr, recv_buffer, setup.mr),
       IsOkAndHolds(Pair(IBV_WC_SUCCESS, IBV_WC_SUCCESS)));
 }
 
@@ -184,8 +184,8 @@ TEST_F(BufferMrTest, ReadExceedFront) {
       setup.buffer.subspan(kMrMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), setup.mr->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), setup.mr->rkey),
               IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
@@ -200,8 +200,8 @@ TEST_F(BufferMrTest, ReadExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), setup.mr->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), setup.mr->rkey),
               IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
@@ -209,8 +209,8 @@ TEST_F(BufferMrTest, ReadZeroByte) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), setup.mr->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), setup.mr->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
@@ -219,8 +219,8 @@ TEST_F(BufferMrTest, ReadZeroByteOutsideMr) {
   ASSERT_GT(kMrMemoryOffset, 0);
   absl::Span<uint8_t> local_buffer = setup.buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), setup.mr->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), setup.mr->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
@@ -234,9 +234,10 @@ TEST_F(BufferMrTest, ReadZeroByteFromZeroByteMr) {
   ASSERT_THAT(zerobyte_mr, NotNull());
   absl::Span<uint8_t> local_buffer = zerobyte_mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = zerobyte_mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                  remote_buffer.data(), zerobyte_mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteOutsideZeroByteMr) {
@@ -250,20 +251,21 @@ TEST_F(BufferMrTest, ReadZeroByteOutsideZeroByteMr) {
   ASSERT_GT(kMrMemoryOffset, 0);
   absl::Span<uint8_t> local_buffer = zerobyte_mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = zerobyte_mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                  remote_buffer.data(), zerobyte_mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, ReadZeroByteInvalidRKey) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  ASSERT_OK_AND_ASSIGN(
-      ibv_wc_status result,
-      verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
+  ASSERT_OK_AND_ASSIGN(ibv_wc_status result,
+                       verbs_util::ExecuteRdmaRead(
+                           setup.send_qp, local_buffer, setup.mr,
                            remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-    EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(BufferMrTest, WriteExceedFront) {
@@ -275,9 +277,10 @@ TEST_F(BufferMrTest, WriteExceedFront) {
       setup.buffer.subspan(kMrMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), setup.mr->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(BufferMrTest, WriteExceedRear) {
@@ -291,18 +294,20 @@ TEST_F(BufferMrTest, WriteExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), setup.mr->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_F(BufferMrTest, WriteZeroByte) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), setup.mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, WriteZeroByteOutsideMr) {
@@ -310,9 +315,10 @@ TEST_F(BufferMrTest, WriteZeroByteOutsideMr) {
   ASSERT_GT(kMrMemoryOffset, 0);
   absl::Span<uint8_t> local_buffer = setup.buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), setup.mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, WriteZeroByteToZeroByteMr) {
@@ -325,9 +331,10 @@ TEST_F(BufferMrTest, WriteZeroByteToZeroByteMr) {
   ASSERT_THAT(zerobyte_mr, NotNull());
   absl::Span<uint8_t> local_buffer = zerobyte_mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = zerobyte_mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), zerobyte_mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, WriteZeroByteOutsideZeroByteMr) {
@@ -341,20 +348,21 @@ TEST_F(BufferMrTest, WriteZeroByteOutsideZeroByteMr) {
   ASSERT_GT(kMrMemoryOffset, 0);
   absl::Span<uint8_t> local_buffer = setup.buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), zerobyte_mr->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), zerobyte_mr->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_F(BufferMrTest, WriteZeroByteInvalidRKey) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  ASSERT_OK_AND_ASSIGN(
-      ibv_wc_status result,
-      verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                            remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-    EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
+  ASSERT_OK_AND_ASSIGN(ibv_wc_status result,
+                       verbs_util::ExecuteRdmaWrite(
+                           setup.send_qp, local_buffer, setup.mr,
+                           remote_buffer.data(), (setup.mr->rkey + 10) * 10));
+  EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
 }
 
 class BufferMwTest : public BufferMrTest,
@@ -377,11 +385,12 @@ class BufferMwTest : public BufferMrTest,
     // Do Bind.
     switch (GetParam()) {
       case IBV_MW_TYPE_1: {
-        return verbs_util::BindType1MwSync(setup.recv_qp, mw, buffer, setup.mr);
+        return verbs_util::ExecuteType1MwBind(setup.recv_qp, mw, buffer,
+                                              setup.mr);
       } break;
       case IBV_MW_TYPE_2: {
-        return verbs_util::BindType2MwSync(setup.recv_qp, mw, buffer, ++rkey,
-                                           setup.mr);
+        return verbs_util::ExecuteType2MwBind(setup.recv_qp, mw, buffer, ++rkey,
+                                              setup.mr);
       } break;
       default:
         CHECK(false) << "Unknown param.";
@@ -434,8 +443,8 @@ TEST_P(BufferMwTest, ReadExceedFront) {
       kMwMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), mw->rkey),
               IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
@@ -457,8 +466,8 @@ TEST_P(BufferMwTest, ReadExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), mw->rkey),
               IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
@@ -474,8 +483,8 @@ TEST_P(BufferMwTest, ReadZeroByte) {
 
   absl::Span<uint8_t> local_buffer = mw_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), mw->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
@@ -491,8 +500,8 @@ TEST_P(BufferMwTest, ReadZeroByteOutsideMw) {
 
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::ReadSync(setup.send_qp, local_buffer, setup.mr,
-                                   remote_buffer.data(), mw->rkey),
+  EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                          remote_buffer.data(), mw->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
@@ -513,9 +522,10 @@ TEST_P(BufferMwTest, WriteExceedFront) {
       kMwMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_P(BufferMwTest, WriteExceedRear) {
@@ -536,9 +546,10 @@ TEST_P(BufferMwTest, WriteExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 }
 
 TEST_P(BufferMwTest, WriteZeroByte) {
@@ -553,9 +564,10 @@ TEST_P(BufferMwTest, WriteZeroByte) {
 
   absl::Span<uint8_t> local_buffer = mw_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = mw_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 TEST_P(BufferMwTest, WriteZeroByteOutsideMw) {
@@ -571,9 +583,10 @@ TEST_P(BufferMwTest, WriteZeroByteOutsideMw) {
   ASSERT_GT(kMrMemoryOffset, 0);
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  EXPECT_THAT(verbs_util::WriteSync(setup.send_qp, local_buffer, setup.mr,
-                                    remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_SUCCESS));
+  EXPECT_THAT(
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), mw->rkey),
+      IsOkAndHolds(IBV_WC_SUCCESS));
 }
 
 }  // namespace rdma_unit_test

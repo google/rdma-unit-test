@@ -40,8 +40,6 @@ class IntrospectionMlx5 : public NicIntrospection {
         });
   }
 
-  bool SupportsRcSendWithInvalidate() const override { return false; }
-
   bool SupportsRcRemoteMwAtomic() const override { return false; }
 
  protected:

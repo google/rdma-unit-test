@@ -39,15 +39,15 @@ class RdmaStressFixture : public BasicFixture {
   RdmaStressFixture();
   ~RdmaStressFixture() override = default;
 
-  // Creates a one way connection from local qp to remote qp. A separate
-  // call to this function is require if you need to setup connection in the
-  // reverse direction.
+  // Creates a one way connection from local qp to remote qp. A separate call to
+  // this function is required if you need to setup connection in the reverse
+  // direction.
   absl::Status SetUpRcClientsQPs(Client* local, uint32_t local_qp_id,
                                  Client* remote, uint32_t remote_qp_id,
                                  QpAttribute qp_attr = QpAttribute());
 
-  // Creates number of qps_per_client RC qps for each client and connects
-  // pairs across the two clients.
+  // Creates number of qps_per_client RC qps for each client and connects pairs
+  // across the two clients.
   void CreateSetUpRcQps(Client& initiator, Client& target,
                         uint16_t qps_per_client,
                         QpAttribute qp_attr = QpAttribute());

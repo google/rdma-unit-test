@@ -146,7 +146,7 @@ TEST_F(RdmaStabilityTest, StabilityDurationTest) {
     // Post operations on all clients.
     Client::OpAttributes attributes = {
         .op_type = op_type, .op_bytes = op_size, .num_ops = ops};
-    for (uint32_t qp_id = 0; qp_id < num_qps; ++qp_id) {
+    for (int qp_id = 0; qp_id < num_qps; ++qp_id) {
       attributes.initiator_qp_id = qp_id;
       // For SEND/RECV, we need to post ops on both initiator and targets. Post
       // RECV on target before posting SEND on initiator.
@@ -236,7 +236,7 @@ TEST_F(RdmaStabilityTest, StabilityResourceTest) {
       // Post operations on all clients.
       Client::OpAttributes attributes = {
           .op_type = op_type, .op_bytes = op_size, .num_ops = ops};
-      for (uint32_t qp_id = 0; qp_id < num_qps; ++qp_id) {
+      for (int qp_id = 0; qp_id < num_qps; ++qp_id) {
         attributes.initiator_qp_id = qp_id;
         // For SEND/RECV, we need to post ops on both initiator and targets.
         if (op_type == OpTypes::kRecv || op_type == OpTypes::kSend) {
@@ -283,7 +283,7 @@ TEST_F(RdmaStabilityTest, StabilityResourceTest) {
     }
 
     // Destroy qps
-    for (uint32_t qp_id = 0; qp_id < num_qps; ++qp_id) {
+    for (int qp_id = 0; qp_id < num_qps; ++qp_id) {
       ASSERT_OK(initiator.DeleteQp(qp_id))
           << "Fail to destroy initiator QP-" << qp_id << "\n"
           << validation_->TransportSnapshot();

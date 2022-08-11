@@ -172,32 +172,6 @@ void PrintAsyncEvent(struct ibv_context* ctx, struct ibv_async_event* event) {
   }
 }
 
-void HandleAsyncEvent(struct ibv_context* ctx) {
-  pollfd poll_fd{};
-  poll_fd.fd = ctx->async_fd;
-  poll_fd.events = POLLIN;
-  int millisec_timeout = 0;
-  int ret = TEMP_FAILURE_RETRY(poll(&poll_fd, 1, millisec_timeout));
-  if (ret == 0) {
-    LOG(INFO) << "No Async event";
-    return;
-  }
-
-  if (ret < 0) {
-    LOG(ERROR) << "poll failed with errno " << errno;
-  }
-
-  ibv_async_event event{};
-  ret = ibv_get_async_event(ctx, &event);
-  if (ret) {
-    LOG(INFO) << "Async event doesn't exist";
-    return;
-  }
-
-  PrintAsyncEvent(ctx, &event);
-  ibv_ack_async_event(&event);
-}
-
 void SetQpKeys(QpState* const qp_state, const ibv_mr* const src_mr,
                const ibv_mr* const dest_mr) {
   qp_state->set_src_lkey(src_mr->lkey);
@@ -301,45 +275,40 @@ Client::~Client() {
   }
 }
 
-absl::Status Client::CreateQps(size_t count, bool is_rc, int sq_size,
-                               int rq_size) {
-  if (qps_.size() + count > max_qps_)
+absl::StatusOr<uint32_t> Client::CreateQp(bool is_rc,
+                                          QpInitAttribute qp_init_attribute) {
+  if (qps_.size() == max_qps_)
     return absl::OutOfRangeError(
         absl::StrCat("Max allowed qps per client is ", max_qps_));
 
-  for (size_t i = 0; i < count; ++i) {
-    ibv_qp* qp;
-    if (is_rc) {
-      qp = ibv_.CreateQp(
-          pd_, send_cq_, recv_cq_, IBV_QPT_RC,
-          QpInitAttribute().set_max_send_wr(sq_size).set_max_recv_wr(rq_size));
+  ibv_qp* qp;
+  if (is_rc) {
+    qp = ibv_.CreateQp(pd_, send_cq_, recv_cq_, IBV_QPT_RC, qp_init_attribute);
 
-      CHECK(qp);  // Crash OK
-    } else {
-      qp = ibv_.CreateQp(
-          pd_, send_cq_, recv_cq_, IBV_QPT_UD,
-          QpInitAttribute().set_max_send_wr(sq_size).set_max_recv_wr(rq_size));
-      CHECK(qp);                                       // Crash OK
-      CHECK_OK(ibv_.ModifyUdQpResetToRts(qp, port_attr_, kQKey));  // Crash OK
-    }
-    uint32_t qp_id = qps_.size();
-    absl::Span<uint8_t> qp_src_buf = GetQpSrcBuffer(qp_id).span();
-    absl::Span<uint8_t> qp_dest_buf = GetQpDestBuffer(qp_id).span();
-    if (is_rc) {
-      auto qp_state = std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc,
-                                                  qp_src_buf, qp_dest_buf);
-      SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
-      qps_[qp_id] = std::move(qp_state);
-    } else {  // is UD
-      auto qp_state = std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc,
-                                                  qp_src_buf, qp_dest_buf);
-      SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
-      qps_[qp_id] = std::move(qp_state);
-    }
+    CHECK(qp);  // Crash OK
+  } else {
+    qp = ibv_.CreateQp(pd_, send_cq_, recv_cq_, IBV_QPT_UD, qp_init_attribute);
+    CHECK(qp);                                                   // Crash OK
+    CHECK_OK(ibv_.ModifyUdQpResetToRts(qp, port_attr_, kQKey));  // Crash OK
   }
+  uint32_t qp_id = qps_.size();
+  absl::Span<uint8_t> qp_src_buf = GetQpSrcBuffer(qp_id).span();
+  absl::Span<uint8_t> qp_dest_buf = GetQpDestBuffer(qp_id).span();
+  if (is_rc) {
+    auto qp_state = std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc,
+                                                qp_src_buf, qp_dest_buf);
+    SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
+    qps_[qp_id] = std::move(qp_state);
+  } else {  // is UD
+    auto qp_state = std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc,
+                                                qp_src_buf, qp_dest_buf);
+    SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
+    qps_[qp_id] = std::move(qp_state);
+  }
+
   VLOG(2) << "Client" << client_id()
-          << ", created Qp: " << qps_.at(qps_.size() - 1)->ToString();
-  return absl::OkStatus();
+          << ", created Qp: " << qps_[qp_id]->ToString();
+  return qp_id;
 }
 
 absl::Status Client::DeleteQp(uint32_t qp_id) {
@@ -431,7 +400,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
   }
 
   // Create TestOps, WQEs and submit WQEs.
-  for (uint32_t i = 0; i < attributes.num_ops; ++i) {
+  for (int i = 0; i < attributes.num_ops; ++i) {
     uint8_t* initiator_op_addr = initiator_op_addrs[i];
     const uint64_t op_id = initiator_qp_state->GetOpIdAndIncr();
 
@@ -830,9 +799,9 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
     } else {
       // If completion fails, check if we have async events and ack them to move
       // forward.
-      // TODO(author5) Ideally we should handle AE in a separate thread
+      // TODO(author5): Ideally we should handle AE in a separate thread
       // concurrently.
-      HandleAsyncEvent(context_);
+      HandleAsyncEvents();
     }
   }
   VLOG_EVERY_N(2, 1000) << "Received " << num_completed << " completions.";
@@ -1081,6 +1050,44 @@ void Client::CheckAllDataLanded() {
   for (auto& qp : qps_) {
     qp.second->CheckDataLanded();
   }
+}
+
+std::vector<ibv_qp*> Client::RetrieveQps() {
+  std::vector<ibv_qp*> qps;
+  for (auto& qpp : qps_) {
+    qps.push_back(qpp.second->qp());
+  }
+  return qps;
+}
+
+int Client::HandleAsyncEvents() {
+  pollfd poll_fd{};
+  poll_fd.fd = context_->async_fd;
+  poll_fd.events = POLLIN;
+  int millisec_timeout = 0;
+  int ret = TEMP_FAILURE_RETRY(poll(&poll_fd, 1, millisec_timeout));
+  if (ret == 0) {
+    LOG(INFO) << "No Async Events";
+    return 0;
+  }
+
+  if (ret < 0) {
+    LOG(ERROR) << "poll failed with errno " << errno;
+    return ret;
+  }
+
+  ibv_async_event event{};
+  int num_events = 0;
+  while (true) {
+    ret = ibv_get_async_event(context_, &event);
+    if (ret) {
+      return num_events;
+    }
+    PrintAsyncEvent(context_, &event);
+    ibv_ack_async_event(&event);
+    ++num_events;
+  }
+  return num_events;
 }
 
 void Client::DumpPendingOps() {

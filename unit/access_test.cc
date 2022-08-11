@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -30,24 +31,19 @@
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
+namespace {
 
 using ::testing::NotNull;
 using ::testing::Pair;
 
-class AccessTest : public RdmaVerbsFixture,
-                   public ::testing::WithParamInterface<ibv_mw_type> {
- public:
-  void SetUp() override {
-    if (GetParam() == IBV_MW_TYPE_1 && !Introspection().SupportsType1()) {
-      LOG(INFO) << "Nic does not support Type1 MW";
-      GTEST_SKIP();
-    }
-    if (GetParam() == IBV_MW_TYPE_2 && !Introspection().SupportsType2()) {
-      LOG(INFO) << "Nic does not support Type2 MW";
-      GTEST_SKIP();
-    }
-  }
+// The type of Ibverbs memory object from which an RKEY is derived.
+enum class RKeyMemmoryType {
+  kMemoryRegion,
+  kMemoryWindowType1,
+  kMemoryWindowType2
+};
 
+class AccessTestFixture : public RdmaVerbsFixture {
  protected:
   struct BasicSetup {
     ibv_context* context;
@@ -57,7 +53,16 @@ class AccessTest : public RdmaVerbsFixture,
     RdmaMemBlock dst_buffer;
     ibv_cq* src_cq;
     ibv_cq* dst_cq;
+    ibv_qp* src_qp;
+    ibv_qp* dst_qp;
   };
+
+  constexpr static int kMrAccessAll =
+      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_ATOMIC |
+      IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+  constexpr static int kRemoteAccessAll = IBV_ACCESS_REMOTE_READ |
+                                          IBV_ACCESS_REMOTE_WRITE |
+                                          IBV_ACCESS_REMOTE_ATOMIC;
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
@@ -77,388 +82,354 @@ class AccessTest : public RdmaVerbsFixture,
     if (!setup.dst_cq) {
       return absl::InternalError("Failed to create destination qp.");
     }
+    setup.src_qp = ibv_.CreateQp(setup.pd, setup.src_cq);
+    if (!setup.src_qp) {
+      return absl::InternalError("Failed to create source qp.");
+    }
+    setup.dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
+    if (!setup.dst_qp) {
+      return absl::InternalError("Failed to create destination qp.");
+    }
+    RETURN_IF_ERROR(
+        ibv_.SetUpLoopbackRcQps(setup.src_qp, setup.dst_qp, setup.port_attr));
     return setup;
   }
 
-  void AttemptMrRead(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                     ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    EXPECT_THAT(verbs_util::ReadSync(src_qp, setup.src_buffer.span(), src_mr,
-                                     setup.dst_buffer.data(), dst_mr->rkey),
-                IsOkAndHolds(expected));
-  }
-
-  void AttemptMwRead(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                     int dst_mw_access, ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    ASSERT_OK_AND_ASSIGN(
-        ibv_mw * dst_mw,
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
-    EXPECT_THAT(verbs_util::ReadSync(src_qp, setup.src_buffer.span(), src_mr,
-                                     setup.dst_buffer.data(), dst_mw->rkey),
-                IsOkAndHolds(expected));
-  }
-
-  void AttemptMrWrite(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                      ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    EXPECT_THAT(verbs_util::WriteSync(src_qp, setup.src_buffer.span(), src_mr,
-                                      setup.dst_buffer.data(), dst_mr->rkey),
-                IsOkAndHolds(expected));
-  }
-
-  void AttemptMwWrite(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                      int dst_mw_access, ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    ASSERT_OK_AND_ASSIGN(
-        ibv_mw * dst_mw,
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
-    EXPECT_THAT(verbs_util::WriteSync(src_qp, setup.src_buffer.span(), src_mr,
-                                      setup.dst_buffer.data(), dst_mw->rkey),
-                IsOkAndHolds(expected));
-  }
-
-  void AttemptMrAtomic(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                       ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    EXPECT_THAT(
-        verbs_util::FetchAddSync(src_qp, setup.src_buffer.data(), src_mr,
-                                 setup.dst_buffer.data(), dst_mr->rkey,
-                                 /*comp_add=*/1),
-        IsOkAndHolds(expected));
-  }
-
-  void AttemptMwAtomic(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                       int dst_mw_access, ibv_wc_status expected) {
-    if (!Introspection().SupportsRcRemoteMwAtomic()) return;
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    ASSERT_OK_AND_ASSIGN(
-        ibv_mw * dst_mw,
-        CreateAndBindMw(dst_qp, setup.dst_buffer, dst_mr, dst_mw_access));
-    EXPECT_THAT(
-        verbs_util::FetchAddSync(src_qp, setup.src_buffer.data(), src_mr,
-                                 setup.dst_buffer.data(), dst_mw->rkey,
-                                 /*comp_add=*/1),
-        IsOkAndHolds(expected));
-  }
-
-  void AttemptMrSend(BasicSetup setup, int src_mr_access, int dst_mr_access,
-                     ibv_wc_status expected) {
-    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
-    ASSERT_THAT(src_mr, NotNull());
-    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
-    ASSERT_THAT(dst_mr, NotNull());
-    ibv_qp* src_qp = nullptr;
-    ibv_qp* dst_qp = nullptr;
-    ASSERT_OK_AND_ASSIGN(std::tie(src_qp, dst_qp),
-                         CreateNewConnectedQpPair(setup));
-    ASSERT_THAT(src_qp, NotNull());
-    ASSERT_THAT(dst_qp, NotNull());
-    EXPECT_THAT(
-        verbs_util::SendRecvSync(src_qp, dst_qp, setup.src_buffer.span(),
-                                 src_mr, setup.dst_buffer.span(), dst_mr),
-        IsOkAndHolds(Pair(expected, expected)));
-  }
-
- private:
-  absl::StatusOr<std::pair<ibv_qp*, ibv_qp*>> CreateNewConnectedQpPair(
-      const BasicSetup& setup) {
-    ibv_qp* src_qp = ibv_.CreateQp(setup.pd, setup.src_cq);
-    if (!src_qp) {
-      return absl::InternalError("Cannot create src qp");
+  // Generate a R_KEY for a `memory_type` on a buffer specified by `memblock`.
+  // The memory type can be memory region, type 1 or type 2 memory window.
+  // `access` can be a combination of IBV_ACCESS_REMOTE_READ,
+  // IBV_ACCESS_REMOTE_WRITE and IBV_ACCESS_REMOTE_ATOMIC.
+  absl::StatusOr<uint32_t> CreateRKeyForBuffer(ibv_pd* pd,
+                                               const RdmaMemBlock& memblock,
+                                               ibv_qp* qp, int access,
+                                               RKeyMemmoryType memory_type) {
+    // Always enable local write on an MR since MR with remote write/atomics
+    // will also requrie local write. This should not have any impact on the
+    // test since R_KEY access does not care about local write access.
+    const int mr_access = memory_type == RKeyMemmoryType::kMemoryRegion
+                              ? access | IBV_ACCESS_LOCAL_WRITE
+                              : kMrAccessAll;
+    ibv_mr* mr = ibv_.RegMr(pd, memblock, mr_access);
+    if (mr == nullptr) {
+      return absl::InternalError("Failed to register MR.");
     }
-    ibv_qp* dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
-    if (!dst_qp) {
-      return absl::InternalError("Cannot create dst qp");
+    if (memory_type == RKeyMemmoryType::kMemoryRegion) {
+      return mr->rkey;
     }
-    RETURN_IF_ERROR(ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.port_attr));
-    return std::make_pair(src_qp, dst_qp);
-  }
-
-  absl::StatusOr<ibv_mw*> CreateAndBindMw(ibv_qp* dst_qp,
-                                          RdmaMemBlock dst_buffer,
-                                          ibv_mr* dst_mr, int access) {
-    static int type2_rkey = 17;
-    ibv_mw* mw = ibv_.AllocMw(dst_qp->pd, GetParam());
-    if (!mw) {
-      return absl::InternalError("Failed to allocate mw.");
+    ibv_mw_type mw_type = memory_type == RKeyMemmoryType::kMemoryWindowType1
+                              ? IBV_MW_TYPE_1
+                              : IBV_MW_TYPE_2;
+    ibv_mw* mw = ibv_.AllocMw(pd, mw_type);
+    if (mw == nullptr) {
+      return absl::InternalError("Failed to allocate MW.");
     }
-
-    switch (GetParam()) {
+    ibv_wc_status status = IBV_WC_SUCCESS;
+    switch (mw_type) {
       case IBV_MW_TYPE_1: {
-        ASSIGN_OR_RETURN(ibv_wc_status status,
-                         verbs_util::BindType1MwSync(
-                             dst_qp, mw, dst_buffer.span(), dst_mr, access));
-        if (status != IBV_WC_SUCCESS) {
-          return absl::InternalError(
-              absl::StrCat("Cannot bind mw (", status, ")."));
-        }
-      } break;
+        ASSIGN_OR_RETURN(status, verbs_util::ExecuteType1MwBind(
+                                     qp, mw, memblock.span(), mr, access));
+        break;
+      }
       case IBV_MW_TYPE_2: {
+        static uint32_t type2_rkey = 1024;
         ASSIGN_OR_RETURN(
-            ibv_wc_status status,
-            verbs_util::BindType2MwSync(dst_qp, mw, dst_buffer.span(),
-                                        ++type2_rkey, dst_mr, access));
-        if (status != IBV_WC_SUCCESS) {
-          return absl::InternalError(
-              absl::StrCat("Cannot bind mw (", status, ")."));
-        }
-      } break;
+            status, verbs_util::ExecuteType2MwBind(qp, mw, memblock.span(),
+                                                   ++type2_rkey, mr, access));
+        break;
+      }
       default:
-        LOG(FATAL) << "Unknown param";
+        LOG(FATAL) << "Unknown param";  // Crash OK
     }
-    return mw;
+    if (status != IBV_WC_SUCCESS) {
+      return absl::InternalError(
+          absl::StrCat("Cannot bind mw (", status, ")."));
+    }
+    return mw->rkey;
   }
 };
 
-TEST_P(AccessTest, AllAccess) {
+class MessagingAccessTest : public AccessTestFixture {
+ protected:
+  void ExecuteTest(BasicSetup setup, int src_mr_access, int dst_mr_access,
+                   ibv_wc_status src_status_expected,
+                   ibv_wc_status dst_status_expected) {
+    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
+    ibv_mr* dst_mr = ibv_.RegMr(setup.pd, setup.dst_buffer, dst_mr_access);
+    ASSERT_THAT(dst_mr, NotNull());
+    ibv_qp* src_qp = ibv_.CreateQp(setup.pd, setup.src_cq);
+    ASSERT_THAT(src_qp, NotNull());
+    ibv_qp* dst_qp = ibv_.CreateQp(setup.pd, setup.dst_cq);
+    ASSERT_THAT(dst_qp, NotNull());
+    ASSERT_THAT(ibv_.SetUpLoopbackRcQps(src_qp, dst_qp, setup.port_attr),
+                IsOk());
+    EXPECT_THAT(
+        verbs_util::ExecuteSendRecv(src_qp, dst_qp, setup.src_buffer.span(),
+                                    src_mr, setup.dst_buffer.span(), dst_mr),
+        IsOkAndHolds(Pair(src_status_expected, dst_status_expected)));
+  }
+};
+
+TEST_F(MessagingAccessTest, AllAccess) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+  ExecuteTest(setup, kMrAccessAll, kMrAccessAll, IBV_WC_SUCCESS,
+              IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingSrcLocalWrite) {
+TEST_F(MessagingAccessTest, MissingSrcLocalWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_LOC_PROT_ERR);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_LOC_PROT_ERR);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_LOC_PROT_ERR);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_LOC_PROT_ERR);
+  ExecuteTest(setup, IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ, kMrAccessAll,
+              IBV_WC_SUCCESS, IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstLocalWrite) {
+TEST_F(MessagingAccessTest, MissingDstLocalWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ;
-  const int kDstMwAccess = IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_REM_ACCESS_ERR);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_REM_ACCESS_ERR);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_REM_ACCESS_ERR);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_REM_ACCESS_ERR);
+  ExecuteTest(setup, kMrAccessAll, IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ,
+              IBV_WC_REM_OP_ERR, IBV_WC_LOC_PROT_ERR);
 }
 
-TEST_P(AccessTest, MissingDstMrRemoteWrite) {
+TEST_F(MessagingAccessTest, MissingDstRemoteWrite) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_REM_ACCESS_ERR);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+  ExecuteTest(setup, kMrAccessAll, kMrAccessAll & ~IBV_ACCESS_REMOTE_WRITE,
+              IBV_WC_SUCCESS, IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstMwRemoteWrite) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_REM_ACCESS_ERR);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+// The testsuite define a parameterized tests to test RDMA READ/WRITE access
+// to a memory buffer given by an RKEY.
+class RdmaAccessTest : public AccessTestFixture,
+                       public testing::WithParamInterface<
+                           std::tuple<RKeyMemmoryType, ibv_wr_opcode>> {
+ protected:
+  void SetUp() override {
+    AccessTestFixture::SetUp();
+    if (std::get<0>(GetParam()) == RKeyMemmoryType::kMemoryWindowType1 &&
+        !Introspection().SupportsType1()) {
+      GTEST_SKIP() << "NIC does not support type 1 MW.";
+    }
+    if (std::get<0>(GetParam()) == RKeyMemmoryType::kMemoryWindowType2 &&
+        !Introspection().SupportsType2()) {
+      GTEST_SKIP() << "NIC does not support type 2 MW.";
+    }
+  }
+
+  void ExecuteTest(int src_mr_access, int dst_remote_access,
+                   ibv_wc_status expected_status) {
+    ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+    RKeyMemmoryType memory_type = std::get<0>(GetParam());
+    ibv_wr_opcode opcode = std::get<1>(GetParam());
+    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
+    ASSERT_OK_AND_ASSIGN(
+        uint32_t rkey,
+        CreateRKeyForBuffer(setup.pd, setup.dst_buffer, setup.dst_qp,
+                            dst_remote_access, memory_type));
+    ibv_sge sge = verbs_util::CreateSge(setup.src_buffer.span(), src_mr);
+    ibv_send_wr wr =
+        verbs_util::CreateRdmaWr(opcode, /*wr_id=*/1, &sge, /*num_sge=*/1,
+                                 setup.dst_buffer.data(), rkey);
+    verbs_util::PostSend(setup.src_qp, wr);
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.src_cq));
+    EXPECT_EQ(completion.status, expected_status);
+    EXPECT_EQ(completion.wr_id, wr.wr_id);
+    EXPECT_EQ(completion.qp_num, setup.src_qp->qp_num);
+  }
+};
+
+TEST_P(RdmaAccessTest, AllAccess) {
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll,
+              /*expected_status=*/IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstMrRemoteAtomic) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_REM_ACCESS_ERR);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+TEST_P(RdmaAccessTest, MissingSrcLocalWrite) {
+  ibv_wr_opcode opcode = std::get<1>(GetParam());
+  ExecuteTest(/*src_mr_access=*/IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ,
+              /*dst_remote_access=*/kRemoteAccessAll,
+              /*expected_status=*/opcode == IBV_WR_RDMA_READ
+                  ? IBV_WC_LOC_PROT_ERR
+                  : IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstMwRemoteAtomic) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_REM_ACCESS_ERR);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+TEST_P(RdmaAccessTest, MissingDstRemoteWrite) {
+  ibv_wr_opcode opcode = std::get<1>(GetParam());
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_WRITE,
+              /*expected_status=*/opcode == IBV_WR_RDMA_WRITE
+                  ? IBV_WC_REM_ACCESS_ERR
+                  : IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstMrRemoteRead) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_REM_ACCESS_ERR);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_SUCCESS);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+TEST_P(RdmaAccessTest, MissingDstRemoteRead) {
+  ibv_wr_opcode opcode = std::get<1>(GetParam());
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_WRITE,
+              /*expected_status=*/opcode == IBV_WR_RDMA_WRITE
+                  ? IBV_WC_REM_ACCESS_ERR
+                  : IBV_WC_SUCCESS);
 }
 
-TEST_P(AccessTest, MissingDstMwRemoteRead) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  const int kSrcMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMrAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
-                           IBV_ACCESS_REMOTE_WRITE;
-  const int kDstMwAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND |
-                           IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_WRITE;
-  AttemptMrRead(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwRead(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                IBV_WC_REM_ACCESS_ERR);
-  AttemptMrWrite(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwWrite(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                 IBV_WC_SUCCESS);
-  AttemptMrAtomic(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
-  AttemptMwAtomic(setup, kSrcMrAccess, kDstMrAccess, kDstMwAccess,
-                  IBV_WC_SUCCESS);
-  AttemptMrSend(setup, kSrcMrAccess, kDstMrAccess, IBV_WC_SUCCESS);
+TEST_P(RdmaAccessTest, MissingDstRemoteAtomic) {
+  ExecuteTest(
+      /*src_mr_access=*/kMrAccessAll,
+      /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_ATOMIC,
+      /*expected_status=*/IBV_WC_SUCCESS);
 }
 
-INSTANTIATE_TEST_SUITE_P(AccessTestCase, AccessTest,
-                         ::testing::Values(IBV_MW_TYPE_1, IBV_MW_TYPE_2));
+INSTANTIATE_TEST_SUITE_P(
+    Rdma, RdmaAccessTest,
+    testing::Combine(testing::Values(RKeyMemmoryType::kMemoryRegion,
+                                     RKeyMemmoryType::kMemoryWindowType1,
+                                     RKeyMemmoryType::kMemoryWindowType2),
+                     testing::Values(IBV_WR_RDMA_READ, IBV_WR_RDMA_WRITE)),
+    [](const testing::TestParamInfo<RdmaAccessTest::ParamType>& info) {
+      std::string memory_type = "";
+      switch (std::get<0>(info.param)) {
+        case RKeyMemmoryType::kMemoryRegion: {
+          memory_type = "MemoryRegion";
+          break;
+        }
+        case RKeyMemmoryType::kMemoryWindowType1: {
+          memory_type = "MemoryWindowType1";
+          break;
+        }
+        case RKeyMemmoryType::kMemoryWindowType2: {
+          memory_type = "MemoryWindowType2";
+          break;
+        }
+      }
+      ibv_wr_opcode opcode = std::get<1>(info.param);
+      std::string optype = "";
+      switch (opcode) {
+        case IBV_WR_RDMA_READ: {
+          optype = "RdmaRead";
+          break;
+        }
+        case IBV_WR_RDMA_WRITE: {
+          optype = "RdmaWrite";
+          break;
+        }
+        default: {
+          optype = "Unsupported";
+        }
+      }
+      return memory_type + optype;
+    });
 
+class AtomicAccessTest : public AccessTestFixture,
+                         public testing::WithParamInterface<
+                             std::tuple<RKeyMemmoryType, ibv_wr_opcode>> {
+ protected:
+  static constexpr uint64_t kCompareAdd = 0xADD;
+  static constexpr uint64_t kSwap = 0xBEE;
+
+  void SetUp() override {
+    AccessTestFixture::SetUp();
+    if (std::get<0>(GetParam()) == RKeyMemmoryType::kMemoryWindowType1 &&
+        !Introspection().SupportsType1()) {
+      GTEST_SKIP() << "NIC does not support type 1 MW.";
+    }
+    if (std::get<0>(GetParam()) == RKeyMemmoryType::kMemoryWindowType2 &&
+        !Introspection().SupportsType2()) {
+      GTEST_SKIP() << "NIC does not support type 2 MW.";
+    }
+  }
+
+  void ExecuteTest(int src_mr_access, int dst_remote_access,
+                   ibv_wc_status expected_status) {
+    ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+    RKeyMemmoryType memory_type = std::get<0>(GetParam());
+    ibv_wr_opcode opcode = std::get<1>(GetParam());
+    ibv_mr* src_mr = ibv_.RegMr(setup.pd, setup.src_buffer, src_mr_access);
+    ASSERT_THAT(src_mr, NotNull());
+    ASSERT_OK_AND_ASSIGN(
+        uint32_t rkey,
+        CreateRKeyForBuffer(setup.pd, setup.dst_buffer, setup.dst_qp,
+                            dst_remote_access, memory_type));
+    ibv_sge sge = verbs_util::CreateAtomicSge(setup.src_buffer.data(), src_mr);
+    ibv_send_wr wr = verbs_util::CreateAtomicWr(
+        opcode, /*wr_id=*/1, &sge, /*num_sge=*/1, setup.dst_buffer.data(), rkey,
+        kCompareAdd, kSwap);
+    verbs_util::PostSend(setup.src_qp, wr);
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.src_cq));
+    EXPECT_EQ(completion.status, expected_status);
+    EXPECT_EQ(completion.wr_id, wr.wr_id);
+    EXPECT_EQ(completion.qp_num, setup.src_qp->qp_num);
+  }
+};
+
+TEST_P(AtomicAccessTest, AllAccess) {
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll,
+              /*expected_status=*/IBV_WC_SUCCESS);
+}
+
+TEST_P(AtomicAccessTest, MissingSrcLocalWrite) {
+  ExecuteTest(/*src_mr_access=*/IBV_ACCESS_MW_BIND | IBV_ACCESS_REMOTE_READ,
+              /*dst_remote_access=*/kRemoteAccessAll,
+              /*expected_status=*/IBV_WC_LOC_PROT_ERR);
+}
+
+TEST_P(AtomicAccessTest, MissingDstRemoteWrite) {
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_WRITE,
+              /*expected_status=*/IBV_WC_SUCCESS);
+}
+
+TEST_P(AtomicAccessTest, MissingDstRemoteRead) {
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_READ,
+              /*expected_status=*/IBV_WC_SUCCESS);
+}
+
+TEST_P(AtomicAccessTest, MissingDstRemoteAtomic) {
+  ExecuteTest(
+      /*src_mr_access=*/kMrAccessAll,
+      /*dst_remote_access=*/kRemoteAccessAll & ~IBV_ACCESS_REMOTE_ATOMIC,
+      /*expected_status=*/IBV_WC_REM_ACCESS_ERR);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Atomic, AtomicAccessTest,
+    testing::Combine(testing::Values(RKeyMemmoryType::kMemoryRegion,
+                                     RKeyMemmoryType::kMemoryWindowType1,
+                                     RKeyMemmoryType::kMemoryWindowType2),
+                     testing::Values(IBV_WR_ATOMIC_FETCH_AND_ADD,
+                                     IBV_WR_ATOMIC_CMP_AND_SWP)),
+    [](const testing::TestParamInfo<RdmaAccessTest::ParamType>& info) {
+      std::string memory_type = "";
+      switch (std::get<0>(info.param)) {
+        case RKeyMemmoryType::kMemoryRegion: {
+          memory_type = "MemoryRegion";
+          break;
+        }
+        case RKeyMemmoryType::kMemoryWindowType1: {
+          memory_type = "MemoryWindowType1";
+          break;
+        }
+        case RKeyMemmoryType::kMemoryWindowType2: {
+          memory_type = "MemoryWindowType2";
+          break;
+        }
+      }
+      ibv_wr_opcode opcode = std::get<1>(info.param);
+      std::string optype = "";
+      switch (opcode) {
+        case IBV_WR_ATOMIC_FETCH_AND_ADD: {
+          optype = "FetchAndAdd";
+          break;
+        }
+        case IBV_WR_ATOMIC_CMP_AND_SWP: {
+          optype = "CompareAndSwap";
+          break;
+        }
+        default: {
+          optype = "Unsupported";
+        }
+      }
+      return memory_type + optype;
+    });
+
+}  // namespace
 }  // namespace rdma_unit_test

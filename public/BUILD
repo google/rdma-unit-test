@@ -96,6 +96,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@libibverbs",
+        "@magic_enum",
     ],
 )
 
@@ -104,15 +105,9 @@ cc_library(
     srcs = ["basic_fixture.cc"],
     hdrs = ["basic_fixture.h"],
     deps = [
-        ":flags",
         ":introspection",
-        ":rdma_memblock",
-        ":verbs_helper_suite",
-        ":verbs_util",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/flags:flag",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
 )
 

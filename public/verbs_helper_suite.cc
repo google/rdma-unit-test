@@ -99,7 +99,7 @@ int VerbsHelperSuite::ModifyRcQpInitToRtr(ibv_qp* qp,
   ibv_qp_attr mod_rtr = qp_attr.GetRcInitToRtrAttr(local.port, local.gid_index,
                                                    remote_gid, remote_qpn);
   int mask = qp_attr.GetRcInitToRtrMask();
-  LOG_IF(WARNING, mod_rtr.path_mtu > local.attr.active_mtu)
+  LOG_IF(DFATAL, mod_rtr.path_mtu > local.attr.active_mtu)  // Crash OK
       << absl::StrFormat("Path mtu %d bigger than port active mtu %d.",
                          128 << mod_rtr.path_mtu, 128 << local.attr.active_mtu);
   int result_code = extension().ModifyRcQpInitToRtr(qp, mod_rtr, mask);

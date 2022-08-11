@@ -150,10 +150,7 @@ cc_library(
     name = "op_profiles",
     srcs = ["op_profiles.cc"],
     hdrs = ["op_profiles.h"],
-    deps = [
-        ":config_cc_proto",
-        "@com_google_absl//absl/flags:flag",
-    ],
+    deps = [":config_cc_proto"],
 )
 
 cc_library(
@@ -184,9 +181,6 @@ cc_library(
 cc_test(
     name = "simple_rdma_test",
     srcs = ["simple_rdma_test.cc"],
-    args = [
-        "--test_provider=bump",
-    ],
     linkstatic = 1,
     shard_count = 2,
     deps = [
@@ -204,9 +198,6 @@ cc_test(
 cc_test(
     name = "rdma_stability_test",
     srcs = ["rdma_stability_test.cc"],
-    args = [
-        "--test_provider=bump",
-    ],
     linkstatic = 1,
     shard_count = 2,
     deps = [
@@ -229,10 +220,6 @@ cc_test(
     name = "basic_rc_test",
     timeout = "long",
     srcs = ["basic_rc_test.cc"],
-    args = [
-        "--test_provider=bump",
-        "--total_ops=100",
-    ],
     linkstatic = 1,
     deps = [
         ":op_profiles",
@@ -242,10 +229,163 @@ cc_test(
         "//public:status_matchers",
         "//unit:gunit_main",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "basic_ud_test",
+    timeout = "long",
+    srcs = ["basic_ud_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":op_profiles",
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings:str_format",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "cq_overrun_test",
+    srcs = ["cq_overrun_test.cc"],
+    linkstatic = 1,
+    shard_count = 2,
+    deps = [
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "mixed_qp_mode_test",
+    timeout = "long",
+    srcs = ["mixed_qp_mode_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_profiles",
+        ":op_types",
+        ":operation_generator",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings:str_format",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "qp_oversubscription_test",
+    timeout = "long",
+    srcs = ["qp_oversubscription_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":rdma_stress_fixture",
+        ":test_op",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "ud_burst_test",
+    srcs = ["ud_burst_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_types",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "vary_mtu_test",
+    timeout = "long",
+    srcs = ["vary_mtu_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//internal:verbs_attribute",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "//unit:gunit_main",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "event_driven_completion_test",
+    timeout = "long",
+    srcs = ["event_driven_completion_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/time",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "rnr_nack_test",
+    srcs = ["rnr_nack_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":client",
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//internal:verbs_attribute",
+        "//public:status_matchers",
+        "//unit:gunit_main",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
         "@libibverbs",
     ],
 )
@@ -255,17 +395,31 @@ cc_library(
     testonly = 1,
     srcs = [
         "basic_rc_test.cc",
+        "basic_ud_test.cc",
+        "cq_overrun_test.cc",
+        "event_driven_completion_test.cc",
+        "mixed_qp_mode_test.cc",
+        "qp_oversubscription_test.cc",
         "rdma_stability_test.cc",
+        "rnr_nack_test.cc",
         "simple_rdma_test.cc",
+        "ud_burst_test.cc",
+        "vary_mtu_test.cc",
     ],
     deps = [
+        ":client",
         ":config_cc_proto",
         ":op_profiles",
         ":op_types",
         ":operation_generator",
+        ":qp_state",
         ":rdma_stress_fixture",
+        ":test_op",
+        "//internal:verbs_attribute",
         "//public:status_matchers",
+        "//public:verbs_util",
         "@com_glog_glog//:glog",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

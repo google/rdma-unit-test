@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <sched.h>
 #include <sys/socket.h>
 
@@ -28,13 +31,13 @@
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
-#include "public/introspection.h"
 #include "public/rdma_memblock.h"
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
@@ -70,6 +73,17 @@ class LoopbackUdQpTest : public LoopbackFixture {
     RETURN_IF_ERROR(ibv_.ModifyUdQpResetToRts(local.qp, kQKey));
     RETURN_IF_ERROR(ibv_.ModifyUdQpResetToRts(remote.qp, kQKey));
     return std::make_pair(local, remote);
+  }
+
+  // In ROCE2.0, the GRH is replaced by IP headers.
+  // ipv4: the first 20 bytes of the GRH buffer is undefined and last 20 bytes
+  // are the ipv4 headers.
+  // ipv6: the whole GRH is replaced by an ipv6 header.
+  iphdr ExtractIp4Header(void* buffer) {
+    // TODO(author2): Verify checksum.
+    iphdr iphdr;
+    memcpy(&iphdr, static_cast<uint8_t*>(buffer) + 20, sizeof(iphdr));
+    return iphdr;
   }
 };
 
@@ -173,9 +187,6 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
    it should be correctly reflected in GRH, and should be the same on both
    ends. */
 TEST_F(LoopbackUdQpTest, SendTrafficClass) {
-  if (!Introspection().SupportsTrafficClass()) {
-    GTEST_SKIP() << "Nic does not support setting tclass.";
-  }
   constexpr int kPayloadLength = 1000;
   constexpr uint8_t traffic_class = 0xff;
   Client local, remote;
@@ -206,23 +217,26 @@ TEST_F(LoopbackUdQpTest, SendTrafficClass) {
                        verbs_util::WaitForCompletion(remote.cq));
   EXPECT_EQ(send_completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(recv_completion.status, IBV_WC_SUCCESS);
-  // Get GRH header
-  auto recv_payload = remote.buffer.span().subspan(0, sizeof(ibv_grh));
   int ip_family = verbs_util::GetIpAddressType(local.port_attr.gid);
-  EXPECT_NE(ip_family, -1);
+  ASSERT_NE(ip_family, -1);
+  // On RoCE 2.0, the GRH (global routing header) is replaced by the IP header.
   if (ip_family == AF_INET) {
+    // The ipv4 header is located at the lower bytes bits of the GRH. The higher
+    // 20 bytes are undefined.
     // According to IPV4 header format and ROCEV2 Annex A17.4.5.2
     // Last 2 bits might be used for ECN
-    EXPECT_EQ(static_cast<uint8_t>(recv_payload[21]) & 0xfc,
-              traffic_class & 0xfc);
-  } else {
-    // According to IPV6 header format and ROCEV2 Annex A17.4.5.2
-    // Last 2 bits might be used for ECN
-    uint8_t actual_traffic_class =
-        (static_cast<uint8_t>(recv_payload[0]) << 4) +
-        (static_cast<uint8_t>(recv_payload[1]) >> 4);
+    iphdr ipv4_hdr = ExtractIp4Header(remote.buffer.data());
+    uint8_t actual_traffic_class = ipv4_hdr.tos;
     EXPECT_EQ(actual_traffic_class & 0xfc, traffic_class & 0xfc);
+    return;
   }
+  // According to IPV6 header format and ROCEV2 Annex A17.4.5.2
+  // Last 2 bits might be used for ECN
+  ibv_grh* grh = reinterpret_cast<ibv_grh*>(remote.buffer.data());
+  // 4 bits version, 8 bits traffic class, 20 bits flow label.
+  uint32_t version_tclass_flow = ntohl(grh->version_tclass_flow);
+  uint8_t actual_traffic_class = version_tclass_flow >> 20 & 0xfc;
+  EXPECT_EQ(actual_traffic_class & 0xfc, traffic_class & 0xfc);
 }
 
 TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
