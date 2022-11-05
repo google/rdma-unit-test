@@ -426,6 +426,17 @@ TEST_F(MwType2Test, UnsignaledBind) {
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
 }
 
+TEST_F(MwType2Test, BindZeroLengthMw) {
+  // Type 2 MW forbid zero length bind.
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
+  ASSERT_THAT(mw, NotNull());
+  EXPECT_THAT(verbs_util::ExecuteType2MwBind(
+                  setup.local_qp, mw, setup.buffer.subspan(0, 0), kRKey, mr),
+              IsOkAndHolds(IBV_WC_MW_BIND_ERR));
+}
+
 TEST_F(MwType2Test, BindRKeyReuse) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw1 = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
@@ -442,6 +453,33 @@ TEST_F(MwType2Test, BindRKeyReuse) {
                   setup.remote_qp, mw2, setup.buffer.span(), kRKey, setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   EXPECT_NE(mw1->rkey, mw2->rkey);
+}
+
+// The following tests that rkeys assigned to memory windows are distinct.
+// An rkey is 32 bit in length - 8 (least significant) bits is the
+// user-supplied key and the rest 24 bits, called index, is assigned by the HCA.
+// The user is free to pass the same 8 bits for each memory window bind, hence
+// the index must be distinct.
+TEST_F(MwType2Test, DistinctRKeys) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  absl::flat_hash_set<uint32_t> used;
+  // Create as many memory windows as possible, but less than 4096.
+  // 4096 memory windows gives us a 40% chance of rkey collision,
+  // assuming that a buggy implementation assigns rkeys randomly.
+  const uint32_t kNumMws = std::min(4096, Introspection().device_attr().max_mw);
+  for (uint32_t i = 0; i < kNumMws; ++i) {
+    ibv_mw* mw = ibv_.AllocMw(setup.pd, IBV_MW_TYPE_2);
+    ASSERT_THAT(mw, NotNull()) << "mw is null. iteration number = " << i;
+    EXPECT_THAT(verbs_util::ExecuteType2MwBind(
+                    setup.remote_qp, mw, setup.buffer.span(), kRKey, setup.mr),
+                IsOkAndHolds(IBV_WC_SUCCESS));
+    EXPECT_EQ(kRKey & 0xff, mw->rkey & 0xff);
+    // The following call to insert will only return true if
+    // the memory window key has not been assigned before.
+    // Note that because the last 8 user-supplied bits are the same,
+    // verifying this is equivalent to verifying that the index is distinct.
+    EXPECT_TRUE(used.insert(mw->rkey).second) << "duplicate key: " << mw->rkey;
+  }
 }
 
 TEST_F(MwType2Test, UnsignaledBindError) {

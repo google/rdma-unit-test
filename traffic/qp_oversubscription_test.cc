@@ -96,12 +96,12 @@ TEST_P(QpOversubscriptionTest, StressTest) {
                          kMaxInflightOps, kMaxInflightOps * total_qps);
 
     HaltExecution(initiator);
+    HaltExecution(target);
     CollectClientLatencyStats(initiator);
   } while (total_qps < kMaxQps);
 
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
   CheckLatencies();
+  EXPECT_OK(validation_->PostTestValidation());
 }
 
 INSTANTIATE_TEST_SUITE_P(

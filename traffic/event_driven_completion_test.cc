@@ -50,12 +50,12 @@ class EventDrivenCompletionsTest
  protected:
   void SetUp() override { ConfigureLatencyMeasurements(OpTypes::kSend); }
 
-  void FinalizeStateAndCheckLatencies(Client& initiator) {
+  void FinalizeStateAndCheckLatencies(Client& initiator, Client& target) {
     HaltExecution(initiator);
+    HaltExecution(target);
     CollectClientLatencyStats(initiator);
-    DumpState(initiator);
-    EXPECT_OK(validation_->PostTestValidation());
     CheckLatencies();
+    EXPECT_OK(validation_->PostTestValidation());
   }
 };
 
@@ -109,7 +109,7 @@ TEST_P(EventDrivenCompletionsTest, OneOpIsSuccessful) {
   EXPECT_EQ(initiator_completed, 1);
   EXPECT_EQ(target_completed, 1);
 
-  FinalizeStateAndCheckLatencies(initiator);
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 // This test creates multiple qps, and issues multiple ops on them. It verifies
@@ -124,6 +124,9 @@ TEST_P(EventDrivenCompletionsTest, ManyOpsAreSuccessful) {
       target(/*client_id=*/1, context(), port_attr(), config);
 
   CreateSetUpOneToOneUdQps(initiator, target, kTestCase.num_qps);
+  initiator.PrepareSendCompletionChannel(kTestCase.completion_method);
+  target.PrepareRecvCompletionChannel(kTestCase.completion_method);
+
   ConstantUdOperationGenerator op_generator =
       ConstantUdOperationGenerator(kTestCase.op_size_bytes);
   for (uint32_t qp_id = 0; qp_id < initiator.num_qps(); ++qp_id) {
@@ -135,7 +138,7 @@ TEST_P(EventDrivenCompletionsTest, ManyOpsAreSuccessful) {
                        kMaxInflightOps * kTestCase.num_qps,
                        kTestCase.completion_method);
 
-  FinalizeStateAndCheckLatencies(initiator);
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 INSTANTIATE_TEST_SUITE_P(

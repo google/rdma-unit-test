@@ -98,8 +98,10 @@ class SrqTest : public RdmaVerbsFixture {
     if (!setup.recv_cq) {
       return absl::InternalError("Failed to create recv cq.");
     }
-    setup.srq_init_attr = ibv_srq_init_attr{
-        .attr = ibv_srq_attr{.max_wr = max_outstanding, .max_sge = 1}};
+    setup.srq_init_attr = ibv_srq_init_attr{.attr = ibv_srq_attr{
+                                                .max_wr = max_outstanding,
+                                                .max_sge = 1,
+                                            }};
     setup.srq = ibv_.CreateSrq(setup.pd, setup.srq_init_attr);
     if (!setup.srq) {
       return absl::InternalError("Failed to create srq.");
@@ -326,6 +328,69 @@ TEST_F(SrqTest, Send) {
   EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
 }
 
+TEST_F(SrqTest, SrqLimit) {
+  constexpr uint32_t kWrCount = 100;
+  constexpr uint32_t kSrqLimit = 50;  // Must be smaller than kWrCount.
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kWrCount));
+
+  // Post some number of WRs to SRQ.
+  for (int i = 0; i < kWrCount; ++i) {
+    ibv_sge rsge =
+        verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+    ibv_recv_wr recv =
+        verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+    verbs_util::PostSrqRecv(setup.srq, recv);
+  }
+
+  // Arm the SRQ with srq_limit after posting to SRQ.
+  ibv_srq_attr attr{.srq_limit = kSrqLimit};
+  ASSERT_EQ(ibv_modify_srq(setup.srq, &attr, IBV_SRQ_LIMIT), 0);
+
+  // Post some number of send so that the number of outstanding WR on SRQ is
+  // exactly kSrqLimit.
+  for (int i = 0; i < kWrCount - kSrqLimit; ++i) {
+    ibv_sge ssge =
+        verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
+    ibv_send_wr send =
+        verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
+    verbs_util::PostSend(setup.send_qp, send);
+  }
+
+  for (int i = 0; i < kWrCount - kSrqLimit; ++i) {
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.send_cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.wr_id, 1);
+    ASSERT_OK_AND_ASSIGN(completion,
+                         verbs_util::WaitForCompletion(setup.recv_cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.wr_id, 0);
+    EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
+  }
+
+  auto event_or =
+      verbs_util::WaitForAsyncEvent(setup.context, absl::Seconds(10));
+  EXPECT_EQ(event_or.status().code(), absl::StatusCode::kDeadlineExceeded);
+
+  ibv_sge ssge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
+  verbs_util::PostSend(setup.send_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.send_cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
+  ASSERT_OK_AND_ASSIGN(completion,
+                       verbs_util::WaitForCompletion(setup.recv_cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
+
+  ASSERT_OK_AND_ASSIGN(ibv_async_event event,
+                       verbs_util::WaitForAsyncEvent(setup.context));
+  EXPECT_EQ(event.event_type, IBV_EVENT_SRQ_LIMIT_REACHED);
+}
+
 TEST_F(SrqTest, SendRnr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
@@ -333,7 +398,10 @@ TEST_F(SrqTest, SendRnr) {
   verbs_util::PostSend(setup.send_qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.send_cq));
-  EXPECT_EQ(completion.status, IBV_WC_RNR_RETRY_EXC_ERR);
+  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
+                                    ? IBV_WC_RNR_RETRY_EXC_ERR
+                                    : IBV_WC_RETRY_EXC_ERR;
+  EXPECT_EQ(completion.status, expected);
   EXPECT_THAT(setup.recv_buffer.span(), Each(kRecvContent));
 }
 
@@ -618,7 +686,10 @@ TEST_F(SrqMultiThreadTest, MultiThreadedSrqLoopback) {
   }
   // The last send_wr should get an RnR.
   ASSERT_OK_AND_ASSIGN(ibv_wc wc, verbs_util::WaitForCompletion(setup.send_cq));
-  EXPECT_EQ(wc.status, IBV_WC_RNR_RETRY_EXC_ERR) << "too many rr in srq";
+  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
+                                    ? IBV_WC_RNR_RETRY_EXC_ERR
+                                    : IBV_WC_RETRY_EXC_ERR;
+  EXPECT_EQ(wc.status, expected) << "too many rr in srq";
 
   std::vector<bool> succeeded(kTotalWr, false);
   for (int i = 0; i < kTotalWr; i++) {

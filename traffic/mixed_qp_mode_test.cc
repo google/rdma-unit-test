@@ -69,8 +69,7 @@ TEST_P(MixedQpModeTest, BasicTest) {
                        kMaxInflightOps, kMaxInflightOps * 2);
 
   HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
+  HaltExecution(target);
   EXPECT_OK(validation_->PostTestValidation());
 }
 
@@ -92,12 +91,16 @@ TEST_P(MixedQpModeTest, StressTest) {
   const int kNumOps = GetParam();
 
   // Create two clients for the test.
-  const Client::Config kClientConfig{
+  const Client::Config kInitiatorConfig{
       .max_op_size = max_op_bytes,
       .max_outstanding_ops_per_qp = kMaxInflightOps,
       .max_qps = kTotalQps};
-  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
-      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
+  const Client::Config kTargetConfig{
+      .max_op_size = max_op_bytes,
+      .max_outstanding_ops_per_qp = kMaxInflightOps * kNumUdQps,
+      .max_qps = kTotalQps};
+  Client initiator(/*client_id=*/0, context(), port_attr(), kInitiatorConfig),
+      target(/*client_id=*/1, context(), port_attr(), kTargetConfig);
   LOG(INFO) << "initiator id: " << initiator.client_id()
             << ", target id: " << target.client_id();
 
@@ -118,8 +121,7 @@ TEST_P(MixedQpModeTest, StressTest) {
                        kMaxInflightOps, kMaxInflightOps * kTotalQps);
 
   HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
+  HaltExecution(target);
   EXPECT_OK(validation_->PostTestValidation());
 }
 

@@ -292,6 +292,8 @@ ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
   if (ah) {
     VLOG(1) << "Created AH " << ah;
     cleanup_.AddCleanup(ah);
+  } else {
+    VLOG(1) << "Failed to create AH: " << std::strerror(errno);
   }
   return ah;
 }
@@ -301,6 +303,8 @@ int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
   if (result == 0) {
     VLOG(1) << "Destroyed AH " << ah;
     cleanup_.ReleaseCleanup(ah);
+  } else {
+    VLOG(1) << "Failed to destroy AH: " << std::strerror(errno);
   }
   return result;
 }
@@ -310,6 +314,8 @@ ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
   if (pd) {
     VLOG(1) << "Allocated PD " << pd;
     cleanup_.AddCleanup(pd);
+  } else {
+    VLOG(1) << "Failed to allocate PD: " << std::strerror(errno);
   }
   return pd;
 }
@@ -319,6 +325,8 @@ int VerbsHelperSuite::DeallocPd(ibv_pd* pd) {
   if (result == 0) {
     VLOG(1) << "Deallocated PD " << pd;
     cleanup_.ReleaseCleanup(pd);
+  } else {
+    VLOG(1) << "Failed to deallocate PD: " << std::strerror(errno);
   }
   return result;
 }
@@ -329,6 +337,8 @@ ibv_mr* VerbsHelperSuite::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
   if (mr) {
     VLOG(1) << "Registered MR " << mr;
     cleanup_.AddCleanup(mr);
+  } else {
+    VLOG(1) << "Failed to register MR: " << std::strerror(errno);
   }
   return mr;
 }
@@ -338,6 +348,8 @@ int VerbsHelperSuite::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
   int result = extension().ReregMr(mr, flags, pd, memblock, access);
   if (result == 0) {
     VLOG(1) << "Reregistered MR " << mr;
+  } else {
+    VLOG(1) << "Failed to reregister MR: " << std::strerror(errno);
   }
   return result;
 }
@@ -347,6 +359,8 @@ int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
   if (result == 0) {
     VLOG(1) << "Deregistered MR " << mr;
     cleanup_.ReleaseCleanup(mr);
+  } else {
+    VLOG(1) << "Failed to deregister MR: " << std::strerror(errno);
   }
   return result;
 }
@@ -356,6 +370,8 @@ ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
   if (mw) {
     VLOG(1) << "Allocated MW " << mw;
     cleanup_.AddCleanup(mw);
+  } else {
+    VLOG(1) << "Failed to allocate MW: " << std::strerror(errno);
   }
   return mw;
 }
@@ -365,6 +381,8 @@ int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
   if (result == 0) {
     VLOG(1) << "Deallocated MW " << mw;
     cleanup_.ReleaseCleanup(mw);
+  } else {
+    VLOG(1) << "Failed to deallocate MW: " << std::strerror(errno);
   }
   return result;
 }
@@ -374,6 +392,8 @@ ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
   if (channel) {
     VLOG(1) << "Created channel " << channel;
     cleanup_.AddCleanup(channel);
+  } else {
+    VLOG(1) << "Failed to create comp channel: " << std::strerror(errno);
   }
   return channel;
 }
@@ -383,6 +403,8 @@ int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
   if (result == 0) {
     VLOG(1) << "Destroyed channel " << channel;
     cleanup_.ReleaseCleanup(channel);
+  } else {
+    VLOG(1) << "Failed to destroy comp channel: " << std::strerror(errno);
   }
   return result;
 }
@@ -394,6 +416,8 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
   if (cq) {
     VLOG(1) << "Created CQ " << cq;
     cleanup_.AddCleanup(cq);
+  } else {
+    VLOG(1) << "Failed to create CQ: " << std::strerror(errno);
   }
   return cq;
 }
@@ -403,6 +427,8 @@ int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
   if (result == 0) {
     VLOG(1) << "Destroyed CQ " << cq;
     cleanup_.ReleaseCleanup(cq);
+  } else {
+    VLOG(1) << "Failed to destroy CQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -413,6 +439,8 @@ ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
   if (cq) {
     VLOG(1) << "Created CQ " << cq;
     cleanup_.AddCleanup(cq);
+  } else {
+    VLOG(1) << "Failed to create extended CQ: " << std::strerror(errno);
   }
   return cq;
 }
@@ -429,6 +457,8 @@ int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {
   if (result == 0) {
     VLOG(1) << "Destroyed CQ " << cq;
     cleanup_.ReleaseCleanup(cq_ex);
+  } else {
+    VLOG(1) << "Failed to destroy extended CQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -444,6 +474,8 @@ ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
   if (srq) {
     VLOG(1) << "Created SRQ " << srq;
     cleanup_.AddCleanup(srq);
+  } else {
+    VLOG(1) << "Failed to create SRQ: " << std::strerror(errno);
   }
   return srq;
 }
@@ -453,6 +485,8 @@ int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
   if (result == 0) {
     VLOG(1) << "Destroyed SRQ " << srq;
     cleanup_.ReleaseCleanup(srq);
+  } else {
+    VLOG(1) << "Failed to destroy SRQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -481,6 +515,8 @@ ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
   if (qp) {
     VLOG(1) << "Created QP " << qp;
     cleanup_.AddCleanup(qp);
+  } else {
+    VLOG(1) << "Failed to create QP: " << std::strerror(errno);
   }
   return qp;
 }
@@ -490,6 +526,8 @@ int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   if (result == 0) {
     VLOG(1) << "Destroyed QP " << qp;
     cleanup_.ReleaseCleanup(qp);
+  } else {
+    VLOG(1) << "Failed to destroy QP: " << std::strerror(errno);
   }
   return result;
 }

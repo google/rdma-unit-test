@@ -23,9 +23,9 @@ http_archive(
 # glog
 http_archive(
     name = "com_glog_glog",
-    sha256 = "f28359aeba12f30d73d9e4711ef356dc842886968112162bc73002645139c39c",
-    strip_prefix = "glog-0.4.0",
-    url = "https://github.com/google/glog/archive/v0.4.0.tar.gz",
+    sha256 = "8a83bf982f37bb70825df71a9709fa90ea9f4447fb3c099e1d720a439d88bad6",
+    strip_prefix = "glog-0.6.0",
+    url = "https://github.com/google/glog/archive/v0.6.0.tar.gz",
 )
 
 # gflags(required by glog)
@@ -45,6 +45,8 @@ http_archive(
 )
 load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 grpc_deps()
+load("@com_github_grpc_grpc//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
+grpc_extra_deps()
 
 # Needed for gRPC.
 http_archive(

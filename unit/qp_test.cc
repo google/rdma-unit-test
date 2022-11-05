@@ -14,13 +14,16 @@
 
 #include <errno.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
 #include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
@@ -30,6 +33,7 @@
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
+#include "unit/loopback_fixture.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {
@@ -41,8 +45,10 @@ using ::testing::NotNull;
 class QpTest : public RdmaVerbsFixture {
  public:
   int InitRcQP(ibv_qp* qp) const {
-    ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
-    return ibv_modify_qp(qp, &mod_init, kRcQpInitMask);
+    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
+    ibv_qp_attr mod_init = QpAttribute().GetRcResetToInitAttr(port_attr.port);
+    int mask = QpAttribute().GetRcResetToInitMask();
+    return ibv_modify_qp(qp, &mod_init, mask);
   }
 
   int InitUdQP(ibv_qp* qp, uint32_t qkey) const {
@@ -58,15 +64,6 @@ class QpTest : public RdmaVerbsFixture {
   }
 
  protected:
-  static constexpr int kRcQpInitMask =
-      IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-  static constexpr int kRcQpRtrMask =
-      IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-      IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-  static constexpr int kRcQpRtsMask =
-      IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-      IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC;
-
   static constexpr ibv_qp_cap kBasicQpCap = {.max_send_wr = 10,
                                              .max_recv_wr = 1,
                                              .max_send_sge = 1,
@@ -75,6 +72,7 @@ class QpTest : public RdmaVerbsFixture {
 
   struct BasicSetup {
     ibv_context* context;
+    PortAttribute port_attr;
     ibv_pd* pd;
     ibv_cq* cq;
     ibv_qp_init_attr basic_attr;
@@ -83,6 +81,7 @@ class QpTest : public RdmaVerbsFixture {
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
     BasicSetup setup;
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
+    setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
     if (!setup.pd) {
       return absl::InternalError("Failed to allocate pd.");
@@ -91,63 +90,9 @@ class QpTest : public RdmaVerbsFixture {
     if (!setup.cq) {
       return absl::InternalError("Failed to create cq.");
     }
-    setup.basic_attr = CreateBasicInitAttr(setup.cq);
+    setup.basic_attr =
+        QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
     return setup;
-  }
-
-  ibv_qp_init_attr CreateBasicInitAttr(ibv_cq* cq) const {
-    // Set up a sensible default attr.
-    ibv_qp_init_attr basic_attr{};
-    basic_attr.send_cq = cq;
-    basic_attr.recv_cq = cq;
-    basic_attr.srq = nullptr;
-    basic_attr.cap = kBasicQpCap;
-    basic_attr.qp_type = IBV_QPT_RC;
-    basic_attr.sq_sig_all = 0;
-    return basic_attr;
-  }
-
-  ibv_qp_attr CreateBasicRcQpInitAttr(ibv_qp* qp) const {
-    static constexpr int kRemoteAccessAll = IBV_ACCESS_REMOTE_WRITE |
-                                            IBV_ACCESS_REMOTE_READ |
-                                            IBV_ACCESS_REMOTE_ATOMIC;
-    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
-    ibv_qp_attr mod_init = {};
-    mod_init.qp_state = IBV_QPS_INIT;
-    mod_init.pkey_index = 0;
-    mod_init.port_num = port_attr.port;
-    mod_init.qp_access_flags = kRemoteAccessAll;
-    return mod_init;
-  }
-
-  ibv_qp_attr CreateBasicRcQpRtrAttr(ibv_qp* qp) const {
-    PortAttribute port_attr = ibv_.GetPortAttribute(qp->context);
-    ibv_qp_attr mod_rtr = {};
-    mod_rtr.qp_state = IBV_QPS_RTR;
-    // Small enough MTU that should be supported everywhere.
-    mod_rtr.path_mtu = IBV_MTU_1024;
-    mod_rtr.dest_qp_num = qp->qp_num;
-    mod_rtr.rq_psn = 24;
-    mod_rtr.max_dest_rd_atomic = 10;
-    mod_rtr.min_rnr_timer = 26;  // 82us delay
-    mod_rtr.ah_attr.grh.dgid = port_attr.gid;
-    mod_rtr.ah_attr.grh.sgid_index = port_attr.gid_index;
-    mod_rtr.ah_attr.grh.hop_limit = 127;
-    mod_rtr.ah_attr.is_global = 1;
-    mod_rtr.ah_attr.sl = 5;
-    mod_rtr.ah_attr.port_num = 1;
-    return mod_rtr;
-  }
-
-  ibv_qp_attr CreateBasicRcQpRtsAttr() const {
-    ibv_qp_attr mod_rts = {};
-    mod_rts.qp_state = IBV_QPS_RTS;
-    mod_rts.sq_psn = 1225;
-    mod_rts.timeout = 17;  // ~500 ms
-    mod_rts.retry_cnt = 7;
-    mod_rts.rnr_retry = 5;
-    mod_rts.max_rd_atomic = 5;
-    return mod_rts;
   }
 
   // Takes a bit-mask of arbitrary qp attributes and returns a vector with
@@ -185,7 +130,8 @@ TEST_F(QpTest, CreateWithInlineMax) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   // Some arbitrary values. max_inline_data is rarely over 1k.
   for (uint32_t max_inline : {36, 96, 216, 580, 1000}) {
-    ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+    ibv_qp_init_attr attr =
+        QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
     attr.cap.max_inline_data = max_inline;
     ibv_qp* qp = ibv_.CreateQp(setup.pd, attr);
     if (qp != nullptr) {
@@ -204,7 +150,8 @@ TEST_F(QpTest, CreateWithInvalidSendCq) {
   ibv_cq* cq = ibv_.CreateCq(setup.context);
   ASSERT_THAT(cq, NotNull());
   HandleGarble garble(cq->handle);
-  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  ibv_qp_init_attr attr =
+      QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
   attr.send_cq = cq;
   EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
@@ -214,7 +161,8 @@ TEST_F(QpTest, CreateWithInvalidRecvCq) {
   ibv_cq* cq = ibv_.CreateCq(setup.context);
   ASSERT_THAT(cq, NotNull());
   HandleGarble garble(cq->handle);
-  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  ibv_qp_init_attr attr =
+      QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
   attr.recv_cq = cq;
   EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
@@ -224,7 +172,8 @@ TEST_F(QpTest, CreateWithInvalidSrq) {
   ibv_srq* srq = ibv_.CreateSrq(setup.pd);
   ASSERT_THAT(srq, NotNull());
   HandleGarble garble(srq->handle);
-  ibv_qp_init_attr attr = CreateBasicInitAttr(setup.cq);
+  ibv_qp_init_attr attr =
+      QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
   attr.srq = srq;
   EXPECT_THAT(ibv_.CreateQp(setup.pd, attr), IsNull());
 }
@@ -323,11 +272,15 @@ TEST_F(QpTest, Modify) {
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
   // Init -> Ready to receive.
-  ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
-  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  ibv_qp_attr mod_rtr = QpAttribute().GetRcInitToRtrAttr(
+      setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid,
+      qp->qp_num);
+  int mask_rtr = QpAttribute().GetRcInitToRtrMask();
+  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
   // Ready to receive -> Ready to send.
-  ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
-  EXPECT_EQ(ibv_modify_qp(qp, &mod_rts, kRcQpRtsMask), 0);
+  ibv_qp_attr mod_rts = QpAttribute().GetRcRtrToRtsAttr();
+  int mask_rts = QpAttribute().GetRcRtrToRtsMask();
+  EXPECT_EQ(ibv_modify_qp(qp, &mod_rts, mask_rts), 0);
 }
 
 TEST_F(QpTest, ModifyInvalidResetToRtrTransition) {
@@ -335,8 +288,11 @@ TEST_F(QpTest, ModifyInvalidResetToRtrTransition) {
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
 
-  ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
-  EXPECT_NE(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  ibv_qp_attr mod_rtr = QpAttribute().GetRcInitToRtrAttr(
+      setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid,
+      qp->qp_num);
+  int mask_rtr = QpAttribute().GetRcInitToRtrMask();
+  EXPECT_NE(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
 }
 
 TEST_F(QpTest, ModifyInvalidInitToRtsTransition) {
@@ -346,8 +302,9 @@ TEST_F(QpTest, ModifyInvalidInitToRtsTransition) {
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
   // Init -> Ready to send.
-  ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
-  EXPECT_NE(ibv_modify_qp(qp, &mod_rts, kRcQpRtsMask), 0);
+  ibv_qp_attr mod_rts = QpAttribute().GetRcRtrToRtsAttr();
+  int mask_rts = QpAttribute().GetRcRtrToRtsMask();
+  EXPECT_NE(ibv_modify_qp(qp, &mod_rts, mask_rts), 0);
 }
 
 TEST_F(QpTest, ModifyInvalidRtsToRtrTransition) {
@@ -357,13 +314,17 @@ TEST_F(QpTest, ModifyInvalidRtsToRtrTransition) {
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
   // Init -> Ready to receive.
-  ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
-  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  ibv_qp_attr mod_rtr = QpAttribute().GetRcInitToRtrAttr(
+      setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid,
+      qp->qp_num);
+  int mask_rtr = QpAttribute().GetRcInitToRtrMask();
+  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
   // Ready to receive -> Ready to send.
-  ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
-  ASSERT_EQ(ibv_modify_qp(qp, &mod_rts, kRcQpRtsMask), 0);
+  ibv_qp_attr mod_rts = QpAttribute().GetRcRtrToRtsAttr();
+  int mask_rts = QpAttribute().GetRcRtrToRtsMask();
+  ASSERT_EQ(ibv_modify_qp(qp, &mod_rts, mask_rts), 0);
   // Ready to send -> Ready to receive.
-  EXPECT_NE(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  EXPECT_NE(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
 }
 
 TEST_F(QpTest, ModifyBadResetToInitStateTransition) {
@@ -371,11 +332,13 @@ TEST_F(QpTest, ModifyBadResetToInitStateTransition) {
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
 
-  ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
-  for (auto mask : CreateMaskCombinations(kRcQpInitMask)) {
+  ibv_qp_attr mod_init =
+      QpAttribute().GetRcResetToInitAttr(setup.port_attr.port);
+  int mod_init_mask = QpAttribute().GetRcResetToInitMask();
+  for (auto mask : CreateMaskCombinations(mod_init_mask)) {
     EXPECT_NE(ibv_modify_qp(qp, &mod_init, mask), 0);
   }
-  EXPECT_EQ(ibv_modify_qp(qp, &mod_init, kRcQpInitMask), 0);
+  EXPECT_EQ(ibv_modify_qp(qp, &mod_init, mod_init_mask), 0);
 }
 
 TEST_F(QpTest, ModifyBadInitToRtrStateTransition) {
@@ -386,11 +349,14 @@ TEST_F(QpTest, ModifyBadInitToRtrStateTransition) {
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
   // Init -> Ready to receive
-  ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
-  for (auto mask : CreateMaskCombinations(kRcQpRtrMask)) {
+  ibv_qp_attr mod_rtr = QpAttribute().GetRcInitToRtrAttr(
+      setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid,
+      qp->qp_num);
+  int mask_rtr = QpAttribute().GetRcInitToRtrMask();
+  for (auto mask : CreateMaskCombinations(mask_rtr)) {
     EXPECT_NE(ibv_modify_qp(qp, &mod_rtr, mask), 0);
   }
-  EXPECT_EQ(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  EXPECT_EQ(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
 }
 
 TEST_F(QpTest, ModifyBadRtrToRtsStateTransition) {
@@ -401,16 +367,20 @@ TEST_F(QpTest, ModifyBadRtrToRtsStateTransition) {
   // Reset -> Init.
   ASSERT_EQ(InitRcQP(qp), 0);
   // Init -> Ready to receive.
-  ibv_qp_attr mod_rtr = CreateBasicRcQpRtrAttr(qp);
-  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, kRcQpRtrMask), 0);
+  ibv_qp_attr mod_rtr = QpAttribute().GetRcInitToRtrAttr(
+      setup.port_attr.port, setup.port_attr.gid_index, setup.port_attr.gid,
+      qp->qp_num);
+  int mask_rtr = QpAttribute().GetRcInitToRtrMask();
+  ASSERT_EQ(ibv_modify_qp(qp, &mod_rtr, mask_rtr), 0);
 
   // Ready to receive -> Ready to send.
-  ibv_qp_attr mod_rts = CreateBasicRcQpRtsAttr();
-  for (auto mask : CreateMaskCombinations(kRcQpRtsMask)) {
+  ibv_qp_attr mod_rts = QpAttribute().GetRcRtrToRtsAttr();
+  int mask_rts = QpAttribute().GetRcRtrToRtsMask();
+  for (auto mask : CreateMaskCombinations(mask_rts)) {
     int result = ibv_modify_qp(qp, &mod_rts, mask);
     EXPECT_NE(result, 0);
   }
-  EXPECT_EQ(ibv_modify_qp(qp, &mod_rts, kRcQpRtsMask), 0);
+  EXPECT_EQ(ibv_modify_qp(qp, &mod_rts, mask_rts), 0);
 }
 
 TEST_F(QpTest, UdModify) {
@@ -450,8 +420,10 @@ TEST_F(QpTest, ModifyInvalidQp) {
   ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.basic_attr);
   ASSERT_THAT(qp, NotNull());
   HandleGarble garble(qp->handle);
-  ibv_qp_attr mod_init = CreateBasicRcQpInitAttr(qp);
-  EXPECT_THAT(ibv_modify_qp(qp, &mod_init, kRcQpInitMask),
+  ibv_qp_attr mod_init =
+      QpAttribute().GetRcResetToInitAttr(setup.port_attr.port);
+  int mod_init_mask = QpAttribute().GetRcResetToInitMask();
+  EXPECT_THAT(ibv_modify_qp(qp, &mod_init, mod_init_mask),
               AnyOf(ENOENT, EINVAL));
 }
 
@@ -858,6 +830,128 @@ TEST_F(QpPostTest, OverflowSendWr) {
   EXPECT_EQ(ibv_post_send(setup.qp, wqes.data(), &bad_wr), ENOMEM);
   EXPECT_EQ(bad_wr, &wqes[max_send_wr]);
 }
+
+class ResponderQpStateTest : public LoopbackFixture,
+                             public testing::WithParamInterface<
+                                 std::tuple<ibv_qp_state, ibv_wr_opcode>> {
+ protected:
+  void BringClientQpToState(Client& client, ibv_gid remote_gid,
+                            uint32_t remote_qpn, ibv_qp_state target_state) {
+    ASSERT_EQ(verbs_util::GetQpState(client.qp), IBV_QPS_RESET);
+    if (target_state == IBV_QPS_RESET) {
+      return;
+    }
+    ASSERT_EQ(ibv_.ModifyRcQpResetToInit(client.qp, client.port_attr.port), 0);
+    if (target_state == IBV_QPS_INIT) {
+      return;
+    }
+    ASSERT_EQ(ibv_.ModifyRcQpInitToRtr(client.qp, client.port_attr, remote_gid,
+                                       remote_qpn),
+              0);
+    if (target_state == IBV_QPS_RTR) {
+      return;
+    }
+    ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(client.qp), 0);
+  }
+
+  void BringClientQpToRts(Client& client, ibv_gid remote_gid,
+                          uint32_t remote_qpn) {
+    ibv_qp_state current_state = verbs_util::GetQpState(client.qp);
+    if (current_state == IBV_QPS_RESET) {
+      ASSERT_EQ(ibv_.ModifyRcQpResetToInit(client.qp, client.port_attr.port),
+                0);
+      current_state = IBV_QPS_INIT;
+    }
+    if (current_state == IBV_QPS_INIT) {
+      ASSERT_EQ(ibv_.ModifyRcQpInitToRtr(client.qp, client.port_attr,
+                                         remote_gid, remote_qpn),
+                0);
+      current_state = IBV_QPS_RTR;
+    }
+    if (current_state == IBV_QPS_RTR) {
+      ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(client.qp), 0);
+    }
+  }
+};
+
+TEST_P(ResponderQpStateTest, ResponderNotReadyToReceive) {
+  ASSERT_OK_AND_ASSIGN(Client requestor, CreateClient());
+  ASSERT_OK_AND_ASSIGN(Client responder, CreateClient());
+  ibv_qp_state responder_state = std::get<0>(GetParam());
+  ibv_wr_opcode opcode = std::get<1>(GetParam());
+
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(requestor.qp, requestor.port_attr,
+                                      responder.port_attr.gid,
+                                      responder.qp->qp_num,
+                                      QpAttribute()
+                                          .set_timeout(absl::Seconds(1))
+                                          .set_retry_cnt(5)
+                                          .set_rnr_retry(5)));
+  ASSERT_NO_FATAL_FAILURE(
+      BringClientQpToState(responder, requestor.port_attr.gid,
+                           requestor.qp->qp_num, responder_state));
+  ASSERT_EQ(verbs_util::GetQpState(requestor.qp), IBV_QPS_RTS);
+  ASSERT_EQ(verbs_util::GetQpState(responder.qp), responder_state);
+
+  ibv_sge sge = verbs_util::CreateSge(requestor.buffer.span(), requestor.mr);
+  ibv_send_wr wr =
+      verbs_util::CreateRdmaWr(opcode, /*wr_id=*/0, &sge, /*num_sge=*/1,
+                               responder.buffer.data(), responder.mr->rkey);
+  verbs_util::PostSend(requestor.qp, wr);
+  EXPECT_EQ(verbs_util::GetQpState(requestor.qp), IBV_QPS_RTS);
+  EXPECT_EQ(verbs_util::GetQpState(responder.qp), responder_state);
+
+  if (!Introspection().BuffersMessagesWhenNotReadyToReceive()) {
+    LOG(INFO) << "Provider does not buffer incoming messages. Expecting "
+                 "unsuccessful completions.";
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(requestor.cq));
+    EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+    EXPECT_EQ(completion.wr_id, wr.wr_id);
+    EXPECT_EQ(completion.qp_num, requestor.qp->qp_num);
+  }
+
+  ASSERT_NO_FATAL_FAILURE(BringClientQpToRts(responder, requestor.port_attr.gid,
+                                             requestor.qp->qp_num));
+
+  if (Introspection().BuffersMessagesWhenNotReadyToReceive()) {
+    LOG(INFO) << "Provider buffers incoming messages. Expecting "
+                 "successful completions.";
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(requestor.cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.wr_id, wr.wr_id);
+    EXPECT_EQ(completion.qp_num, requestor.qp->qp_num);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ResponderQpStateTest, ResponderQpStateTest,
+    testing::Combine(testing::Values(IBV_QPS_RESET, IBV_QPS_INIT),
+                     testing::Values(IBV_WR_RDMA_READ, IBV_WR_RDMA_WRITE)),
+    [](const testing::TestParamInfo<ResponderQpStateTest::ParamType>& param) {
+      std::string state = [param]() {
+        switch (std::get<0>(param.param)) {
+          case IBV_QPS_RESET:
+            return "Reset";
+          case IBV_QPS_INIT:
+            return "Init";
+          default:
+            return "Unknown";
+        }
+      }();
+      std::string opcode = [param]() {
+        switch (std::get<1>(param.param)) {
+          case IBV_WR_RDMA_READ:
+            return "Read";
+          case IBV_WR_RDMA_WRITE:
+            return "Write";
+          default:
+            return "Unknown";
+        }
+      }();
+      return absl::StrCat("Service", opcode, "In", state, "State");
+    });
 
 // TODO(author1): Test larger MTU than the device allows
 

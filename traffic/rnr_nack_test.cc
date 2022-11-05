@@ -96,7 +96,9 @@ TEST_F(RnrNackTest, RetryFailure) {
   EXPECT_FALSE(initiator.PollSendCompletions(16).ok());
   EXPECT_FALSE(target.PollRecvCompletions(1).ok());
 
-  EXPECT_OK(validation_->PostTestValidation());
+  HaltExecution(initiator);
+  HaltExecution(target);
+  EXPECT_OK(validation_->TransportSnapshot());
 }
 
 // Test for exercising RNR NACK retry success. It uses two clients, initiator
@@ -146,7 +148,9 @@ TEST_F(RnrNackTest, RetrySuccess) {
   EXPECT_THAT(initiator.PollSendCompletions(16), IsOkAndHolds(16));
   EXPECT_THAT(target.PollRecvCompletions(16), IsOkAndHolds(16));
 
-  EXPECT_OK(validation_->PostTestValidation());
+  HaltExecution(initiator);
+  HaltExecution(target);
+  EXPECT_OK(validation_->TransportSnapshot());
 }
 
 }  // namespace

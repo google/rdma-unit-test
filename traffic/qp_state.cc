@@ -304,20 +304,24 @@ void QpState::CheckDataLanded() {
   LOG(INFO) << "client " << local_client_id_ << " qp_id " << qp_id() << ", has "
             << outstanding_ops().size() << " outstanding_ops:";
 
-  for (const auto& op_ptr_iter : outstanding_ops()) {
-    if (std::memcmp(op_ptr_iter.second->src_addr, op_ptr_iter.second->dest_addr,
-                    op_ptr_iter.second->length) == 0) {
-      LOG(INFO) << "op_id " << op_ptr_iter.second->op_id
-                << " LANDED successfully.";
+  for (const auto& [op_id, op_ptr] : outstanding_ops()) {
+    if (op_ptr == nullptr) {
+      LOG(INFO) << "op_id " << op_id
+                << " completion received, but is pending validation.";
+      continue;
+    }
+    if (op_ptr->src_addr && op_ptr->dest_addr &&
+        std::memcmp(op_ptr->src_addr, op_ptr->dest_addr, op_ptr->length) == 0) {
+      LOG(INFO) << "op_id " << op_ptr->op_id << " LANDED successfully.";
     } else {
-      LOG(INFO) << "op_id " << op_ptr_iter.second->op_id
+      LOG(INFO) << "op_id " << op_ptr->op_id
                 << " ---------DID NOT LAND successfully-------";
-      LOG(INFO) << absl::StrFormat("op_id: %lu, src after operation: ",
-                                   op_ptr_iter.second->op_id)
-                << op_ptr_iter.second->SrcBuffer();
-      LOG(INFO) << absl::StrFormat("op_id: %lu, dest after operation: ",
-                                   op_ptr_iter.second->op_id)
-                << op_ptr_iter.second->DestBuffer();
+      VLOG(2) << absl::StrFormat("op_id: %lu, src after operation: ",
+                                 op_ptr->op_id)
+              << op_ptr->SrcBuffer();
+      VLOG(2) << absl::StrFormat("op_id: %lu, dest after operation: ",
+                                 op_ptr->op_id)
+              << op_ptr->DestBuffer();
     }
   }
 }
@@ -372,8 +376,16 @@ std::optional<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
 
 std::string QpState::DumpState() const {
   std::stringstream out;
-  out << " qp_ptr: " << qp() << ",\n"
-      << " qp_id: " << qp_id() << ",\n"
+  out << " qp_id: " << qp_id() << ",\n"
+      << " qp_ptr: " << qp() << ",\n"
+      << absl::StrFormat(" src_buffer: base: %p, length: %lu, offset: %lu\n",
+                         src_buffer().base_addr, src_buffer().length,
+                         src_buffer().next_op_offset)
+      << absl::StrFormat(" dest_buffer: base: %p, length: %lu, offset: %lu\n",
+                         dest_buffer().base_addr, dest_buffer().length,
+                         dest_buffer().next_op_offset)
+      << " src_lkey: " << src_lkey() << ",\n"
+      << " dest_lkey: " << dest_lkey() << ",\n"
       << " write_bytes_completed: " << BytesCompleted(OpTypes::kWrite) << ",\n"
       << " write_ops_completed: " << OpsCompleted(OpTypes::kWrite) << ",\n"
       << " read_bytes_completed: " << BytesCompleted(OpTypes::kRead) << ",\n"
@@ -382,14 +394,10 @@ std::string QpState::DumpState() const {
       << " send_ops_completed: " << OpsCompleted(OpTypes::kSend) << ",\n"
       << " receive_bytes_completed: " << BytesCompleted(OpTypes::kRecv) << ",\n"
       << " receive_ops_completed: " << OpsCompleted(OpTypes::kRecv) << ",\n"
-      << " src_lkey: " << src_lkey() << ",\n"
-      << " dest_lkey: " << dest_lkey() << ",\n"
-      << absl::StrFormat(" src_buffer: base: %p, length: %lu, offset: %lu\n",
-                         src_buffer().base_addr, src_buffer().length,
-                         src_buffer().next_op_offset)
-      << absl::StrFormat(" dest_buffer: base: %p, length: %lu, offset: %lu\n",
-                         dest_buffer().base_addr, dest_buffer().length,
-                         dest_buffer().next_op_offset);
+      << " total_ops_completed: " << TotalOpsCompleted() << ",\n"
+      << " total_ops_pending: " << outstanding_ops_count() << ",\n"
+      << " unchecked_initiate_ops: " << unchecked_initiated_ops_.size() << ",\n"
+      << " unchecked_receive_ops: " << unchecked_received_ops_.size() << ",\n";
   return out.str();
 }
 

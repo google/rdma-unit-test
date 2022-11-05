@@ -42,6 +42,8 @@ class IntrospectionMlx5 : public NicIntrospection {
 
   bool SupportsRcRemoteMwAtomic() const override { return false; }
 
+  bool BuffersMessagesWhenNotReadyToReceive() const override { return true; }
+
  protected:
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {

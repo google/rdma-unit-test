@@ -4,7 +4,7 @@ go/rdma-random-walker
 
 <!--*
 # Document freshness: For more information, see go/fresh-source.
-freshness: { owner: 'daweihuang' reviewed: '2022-4-15' }
+freshness: { owner: 'daweihuang' reviewed: '2022-10-12' }
 *-->
 
 [TOC]

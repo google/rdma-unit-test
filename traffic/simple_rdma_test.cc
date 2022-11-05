@@ -72,7 +72,8 @@ TEST_F(SimpleRdmaTest, Write) {
     EXPECT_EQ(kDefaultSmallOpsPerQp * kDefaultSmallQpsPerClient, *completions);
     EXPECT_THAT(initiator.ValidateCompletions(*completions), IsOk());
   }
-  initiator.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, Read) {
@@ -102,7 +103,8 @@ TEST_F(SimpleRdmaTest, Read) {
     EXPECT_EQ(kDefaultSmallOpsPerQp * kDefaultSmallQpsPerClient, *completions);
     EXPECT_THAT(initiator.ValidateCompletions(*completions), IsOk());
   }
-  initiator.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, Batching) {
@@ -128,7 +130,8 @@ TEST_F(SimpleRdmaTest, Batching) {
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
 
-  initiator.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, MixedOpType) {
@@ -174,7 +177,8 @@ TEST_F(SimpleRdmaTest, MixedOpType) {
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
 
-  initiator.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, MixedOpSize) {
@@ -217,7 +221,8 @@ TEST_F(SimpleRdmaTest, MixedOpSize) {
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
 
-  initiator.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, RcSend) {
@@ -275,8 +280,8 @@ TEST_F(SimpleRdmaTest, RcSend) {
   }
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
-  initiator.CheckAllDataLanded();
-  target.CheckAllDataLanded();
+  HaltExecution(initiator);
+  HaltExecution(target);
 }
 
 TEST_F(SimpleRdmaTest, UdSend) {

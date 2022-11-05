@@ -61,6 +61,9 @@
 #include "traffic/qp_op_interface.h"
 #include "traffic/qp_state.h"
 
+ABSL_FLAG(bool, huge_page_buffers, false,
+          "When true, each client allocates huge page buffers. If huge page is"
+          "enabled, --page_align_buffer flag is ignored.");
 ABSL_FLAG(bool, page_align_buffers, false,
           "When true, each client allocates page aligned source and "
           "destination buffers. If you need each qp's buffer to be "
@@ -73,10 +76,6 @@ ABSL_FLAG(
     " this number of seconds passes but no new completion has arrived. In a"
     " well-working non-faulty test, we expect consecutive completions to arrive"
     " much less than this timeout apart.");
-ABSL_FLAG(
-    bool, arm_cq_before_poll, true,
-    "When true, issues redundant completion notification requests when using "
-    "event driven completions in case the CQM misses notifications.");
 
 namespace rdma_unit_test {
 namespace {
@@ -209,17 +208,26 @@ Client::Client(int client_id, ibv_context* context, PortAttribute port_attr,
       max_qps_(config.max_qps) {
   // Buffer size is equal 'max_qps * buffer_per_qp',
   // rounded up to the nearest multiple integer of page size.
-  uint64_t buffer_pages = ceil((max_qps_ * buffer_per_qp_ * 1.0) / kPageSize);
-  if (absl::GetFlag(FLAGS_page_align_buffers)) {
+  if (absl::GetFlag(FLAGS_huge_page_buffers)) {
+    uint64_t buffer_pages =
+        ceil((max_qps_ * buffer_per_qp_ * 1.0) / kHugepageSize);
     src_buffer_ =
-        std::make_unique<RdmaMemBlock>(ibv_.AllocAlignedBuffer(buffer_pages));
+        std::make_unique<RdmaMemBlock>(ibv_.AllocHugepageBuffer(buffer_pages));
     dest_buffer_ =
-        std::make_unique<RdmaMemBlock>(ibv_.AllocAlignedBuffer(buffer_pages));
+        std::make_unique<RdmaMemBlock>(ibv_.AllocHugepageBuffer(buffer_pages));
   } else {
-    src_buffer_ =
-        std::make_unique<RdmaMemBlock>(ibv_.AllocBuffer(buffer_pages));
-    dest_buffer_ =
-        std::make_unique<RdmaMemBlock>(ibv_.AllocBuffer(buffer_pages));
+    uint64_t buffer_pages = ceil((max_qps_ * buffer_per_qp_ * 1.0) / kPageSize);
+    if (absl::GetFlag(FLAGS_page_align_buffers)) {
+      src_buffer_ =
+          std::make_unique<RdmaMemBlock>(ibv_.AllocAlignedBuffer(buffer_pages));
+      dest_buffer_ =
+          std::make_unique<RdmaMemBlock>(ibv_.AllocAlignedBuffer(buffer_pages));
+    } else {
+      src_buffer_ =
+          std::make_unique<RdmaMemBlock>(ibv_.AllocBuffer(buffer_pages));
+      dest_buffer_ =
+          std::make_unique<RdmaMemBlock>(ibv_.AllocBuffer(buffer_pages));
+    }
   }
 
   // Init src buffer content to corresponding qp_id % 8 + 1.
@@ -247,7 +255,6 @@ Client::Client(int client_id, ibv_context* context, PortAttribute port_attr,
   CHECK_EQ(0, ibv_query_device(context_, &dev_attr));  // Crash OK
   int cq_slots = std::min(dev_attr.max_cqe, cq_size);
   send_cc_ = ibv_.CreateChannel(context_);
-  VLOG(2) << "Create send completion queue.";
   send_cq_ = ibv_.CreateCq(context_,
                            config.send_cq_size > 0
                                ? std::min(dev_attr.max_cqe, config.send_cq_size)
@@ -255,7 +262,6 @@ Client::Client(int client_id, ibv_context* context, PortAttribute port_attr,
                            send_cc_);
   CHECK(send_cq_);  // Crash OK
   recv_cc_ = ibv_.CreateChannel(context_);
-  VLOG(2) << "Create receive completion queue.";
   recv_cq_ = ibv_.CreateCq(context_,
                            config.recv_cq_size > 0
                                ? std::min(dev_attr.max_cqe, config.recv_cq_size)
@@ -639,9 +645,9 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
       if (next_qp_id == next_qp_id_old) {
         // We searched all qps once.
         std::unique_ptr<QpState>& qp_selected = qps_[next_qp_id];
-        LOG(WARNING) << "Searched over all qps. Issuing new op(s) on qp "
-                     << qp_selected->qp_id() << ", with "
-                     << qp_new_ops(qp_selected) << " on it.";
+        VLOG(2) << "Searched over all qps. Issuing new op(s) on qp "
+                << qp_selected->qp_id() << ", with " << qp_new_ops(qp_selected)
+                << " on it.";
         break;
       }
     }
@@ -804,7 +810,9 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
       HandleAsyncEvents();
     }
   }
-  VLOG_EVERY_N(2, 1000) << "Received " << num_completed << " completions.";
+  total_completions_ += num_completed;
+  LOG_EVERY_T(INFO, 10)
+      << "Received " << total_completions_ << " completions.";
   return num_completed;
 }
 absl::StatusOr<int> Client::PollSendCompletions(
@@ -912,9 +920,6 @@ int Client::TryPollRecvCompletionsEventDriven() {
 }
 
 int Client::TryPollCompletionsEventDriven(const int epoll_fd, ibv_cq* cq) {
-  if (absl::GetFlag(FLAGS_arm_cq_before_poll)) {
-    EXPECT_EQ(ibv_req_notify_cq(cq, /*solicited_only=*/0), 0);
-  }
 
   int num_completed = 0;
 
@@ -1015,7 +1020,22 @@ int Client::ValidateOrDeferCompletions() {
              *reinterpret_cast<uint64_t*>(src_addr) ==
                  *reinterpret_cast<uint64_t*>(dest_addr)));
       } else {
-        EXPECT_EQ(std::memcmp(src_addr, dest_addr, op_uptr->length), 0);
+        int buffer_content_compare =
+            std::memcmp(src_addr, dest_addr, op_uptr->length);
+        EXPECT_EQ(buffer_content_compare, 0);
+        if (buffer_content_compare != 0) {
+          VLOG(2) << "Buffer mis-match:";
+          VLOG(2) << absl::StrFormat(
+                         "client %lu, qp_id %d, op_id %lu, src after %s: ",
+                         client_id(), op_uptr->qp_id, op_uptr->op_id,
+                         op_type_str)
+                  << " " << op_uptr->SrcBuffer();
+          VLOG(2) << absl::StrFormat(
+                         "client %lu, qp_id %d, op_id %lu, dest after %s: ",
+                         client_id(), op_uptr->qp_id, op_uptr->op_id,
+                         op_type_str)
+                  << " " << op_uptr->DestBuffer();
+        }
       }
       if (qp_state->is_rc()) {
         // This op's buffer was generated with op_id = op_ptr->op_id, but it
@@ -1098,7 +1118,7 @@ void Client::DumpPendingOps() {
               << ", #Completed: " << qp->TotalOpsCompleted()
               << ", #Pending: " << qp->outstanding_ops_count();
     for (auto& [op_id, op] : qp->outstanding_ops()) {
-      LOG(INFO) << op_id;
+      VLOG(2) << op_id;
     }
   }
 }

@@ -15,7 +15,9 @@
 #include "public/verbs_util.h"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <resolv.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 
 #include <array>
@@ -425,6 +427,45 @@ void PrintCompletion(const ibv_wc& completion) {
     LOG(INFO) << "  opcode = " << magic_enum::enum_name(completion.opcode);
   }
   LOG(INFO) << "  qp_num = " << completion.qp_num;
+}
+
+absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
+                                                  absl::Duration timeout) {
+  if (context->async_fd < 0) {
+    return absl::FailedPreconditionError(
+        absl::StrCat("Invalid context async_fd: ", context->async_fd));
+  }
+
+  int flags = fcntl(context->async_fd, F_GETFL);
+  if (flags < 0) {
+    return absl::InternalError(absl::StrCat(
+        "Internal error while getting fd flags: ", strerror(errno)));
+  }
+  int result = fcntl(context->async_fd, F_SETFL, flags | O_NONBLOCK);
+  if (result < 0) {
+    return absl::InternalError(absl::StrCat(
+        "Internal error while getting fd flags: ", strerror(errno)));
+  }
+
+  pollfd poll_fd{
+      .fd = context->async_fd,
+      .events = POLLIN,
+      .revents = 0,
+  };
+  int poll_result = poll(&poll_fd, 1, absl::ToInt64Milliseconds(timeout));
+  if (poll_result < 0) {
+    return absl::InternalError(absl::StrCat("Poll error: ", strerror(errno)));
+  } else if (poll_result == 0) {
+    return absl::DeadlineExceededError("Poll timed out");
+  }
+  ibv_async_event event;
+  int get_event_result = ibv_get_async_event(context, &event);
+  if (get_event_result != 0) {
+    return absl::InternalError(
+        absl::StrFormat("Failed to get async event (%d).", get_event_result));
+  }
+  ibv_ack_async_event(&event);
+  return event;
 }
 
 absl::StatusOr<ibv_wc_status> ExecuteType1MwBind(ibv_qp* qp, ibv_mw* mw,

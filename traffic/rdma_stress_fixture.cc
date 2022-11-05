@@ -182,15 +182,21 @@ void RdmaStressFixture::CreateSetUpMultiplexedUdQps(
   }
 }
 
-void RdmaStressFixture::HaltExecution(Client& initiator) {
+void RdmaStressFixture::HaltExecution(Client& client) {
   // Log the operations in flight, for debugging purposes.
-  initiator.DumpPendingOps();
+  client.DumpPendingOps();
+  client.CheckAllDataLanded();
 
-  // Keep polling async event for possible errors until no more events are
-  // there.
+  // Log a summary of all qps.
+  for (uint32_t qp_id = 0; qp_id < client.num_qps(); ++qp_id) {
+    VLOG(2) << client.qp_state(qp_id)->ToString();
+  }
+
+  // Keep polling async events for possible errors until no more events exist.
   while (true) {
     auto async_event_status = PollAndAckAsyncEvents();
-    if (async_event_status.ok()) break;
+    if (async_event_status.ok() || absl::IsUnavailable(async_event_status))
+      break;
     LOG(ERROR) << async_event_status.message();
   }
 }
@@ -235,11 +241,5 @@ void RdmaStressFixture::CollectClientLatencyStats(const Client& client) {
 }
 
 void RdmaStressFixture::CheckLatencies() { latency_measure_->CheckLatencies(); }
-
-void RdmaStressFixture::DumpState(Client& initiator) {
-  for (uint32_t qp_id = 0; qp_id < initiator.num_qps(); ++qp_id) {
-    VLOG(2) << initiator.qp_state(qp_id);
-  }
-}
 
 }  // namespace rdma_unit_test

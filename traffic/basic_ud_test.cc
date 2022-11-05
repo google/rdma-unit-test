@@ -41,6 +41,13 @@ class BasicUdTest : public RdmaStressFixture {
   void SetUp() override { ConfigureLatencyMeasurements(OpTypes::kSend); }
 
  protected:
+  void FinalizeStateAndCheckLatencies(Client &initiator, Client &target) {
+    HaltExecution(initiator);
+    HaltExecution(target);
+    CollectClientLatencyStats(initiator);
+    CheckLatencies();
+    EXPECT_OK(validation_->PostTestValidation());
+  }
 };
 
 class UdConstantOpTest
@@ -70,15 +77,10 @@ TEST_P(UdConstantOpTest, OneToOne) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  int ops_per_qp = kNumOps / kNumQps;
+  int ops_per_qp = std::max(1, kNumOps / kNumQps);
   initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
                        kMaxInflightOps, kMaxInflightOps * kNumQps);
-
-  HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
-  CheckLatencies();
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -120,15 +122,10 @@ TEST_P(UdMixedOpTest, OneToOne) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  int ops_per_qp = kNumOps / kNumQps;
+  int ops_per_qp = std::max(1, kNumOps / kNumQps);
   initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
                        kMaxInflightOps, kMaxInflightOps * kNumQps);
-
-  HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
-  CheckLatencies();
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -179,7 +176,8 @@ TEST_P(MultiplexedUdTest, FixedOpSize) {
       target(/*client_id=*/1, context(), port_attr(),
              Client::Config{
                  .max_op_size = static_cast<int>(op_generator.MaxOpSize()),
-                 .max_outstanding_ops_per_qp = kMaxInflightOps,
+                 .max_outstanding_ops_per_qp =
+                     kMaxInflightOps * test_case.initiator_qps,
                  .max_qps = test_case.target_qps});
 
   CreateSetUpMultiplexedUdQps(
@@ -195,12 +193,7 @@ TEST_P(MultiplexedUdTest, FixedOpSize) {
   initiator.ExecuteOps(target, test_case.initiator_qps, ops_per_qp, kBatchPerQp,
                        kMaxInflightOps,
                        kMaxInflightOps * test_case.initiator_qps);
-
-  HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
-  CheckLatencies();
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -230,13 +223,17 @@ class UdMultiplexedMixedOpsTest
 TEST_P(UdMultiplexedMixedOpsTest, MultiplexedMixedOpsShared) {
   const int kNumQps = 10;
   const int kNumOps = GetParam();
-  const Client::Config client_config = {
+  const Client::Config kInitiatorConfig = {
       .max_op_size = VerbsMtuToInt(port_attr().attr.active_mtu),
       .max_outstanding_ops_per_qp = kMaxInflightOps,
       .max_qps = kNumQps};
+  const Client::Config kTargetConfig = {
+      .max_op_size = VerbsMtuToInt(port_attr().attr.active_mtu),
+      .max_outstanding_ops_per_qp = kMaxInflightOps * kNumQps,
+      .max_qps = kNumQps};
 
-  Client initiator(/*client_id=*/0, context(), port_attr(), client_config),
-      target(/*client_id=*/1, context(), port_attr(), client_config);
+  Client initiator(/*client_id=*/0, context(), port_attr(), kInitiatorConfig),
+      target(/*client_id=*/1, context(), port_attr(), kTargetConfig);
 
   CreateSetUpMultiplexedUdQps(initiator, target, kNumQps, kNumQps,
                               AddressHandleMapping::kShared);
@@ -249,12 +246,7 @@ TEST_P(UdMultiplexedMixedOpsTest, MultiplexedMixedOpsShared) {
   int ops_per_qp = kNumOps / kNumQps;
   initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
                        kMaxInflightOps, kMaxInflightOps * kNumQps);
-
-  HaltExecution(initiator);
-  CollectClientLatencyStats(initiator);
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
-  CheckLatencies();
+  FinalizeStateAndCheckLatencies(initiator, target);
 }
 
 INSTANTIATE_TEST_SUITE_P(

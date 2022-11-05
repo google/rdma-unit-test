@@ -178,256 +178,314 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "simple_rdma_test_cc",
+    srcs = ["simple_rdma_test.cc"],
+    deps = [
+        ":config_cc_proto",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest",
+        "@libibverbs",
+    ],
+    alwayslink = 1,
+)
+
 cc_test(
     name = "simple_rdma_test",
-    srcs = ["simple_rdma_test.cc"],
     linkstatic = 1,
     shard_count = 2,
     deps = [
-        ":config_cc_proto",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
+        ":simple_rdma_test_cc",
         "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status:statusor",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "rdma_stability_test",
-    srcs = ["rdma_stability_test.cc"],
-    linkstatic = 1,
-    shard_count = 2,
-    deps = [
-        ":config_cc_proto",
-        ":op_types",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "basic_rc_test",
-    timeout = "long",
-    srcs = ["basic_rc_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":op_profiles",
-        ":op_types",
-        ":operation_generator",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/strings:str_format",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "basic_ud_test",
-    timeout = "long",
-    srcs = ["basic_ud_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":op_profiles",
-        ":op_types",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//public:verbs_util",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings:str_format",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "cq_overrun_test",
-    srcs = ["cq_overrun_test.cc"],
-    linkstatic = 1,
-    shard_count = 2,
-    deps = [
-        ":op_types",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/time",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "mixed_qp_mode_test",
-    timeout = "long",
-    srcs = ["mixed_qp_mode_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_profiles",
-        ":op_types",
-        ":operation_generator",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/strings:str_format",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "qp_oversubscription_test",
-    timeout = "long",
-    srcs = ["qp_oversubscription_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_types",
-        ":operation_generator",
-        ":rdma_stress_fixture",
-        ":test_op",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_googletest//:gtest",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "ud_burst_test",
-    srcs = ["ud_burst_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_types",
-        ":qp_state",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "vary_mtu_test",
-    timeout = "long",
-    srcs = ["vary_mtu_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_types",
-        ":operation_generator",
-        ":qp_state",
-        ":rdma_stress_fixture",
-        "//internal:verbs_attribute",
-        "//public:status_matchers",
-        "//public:verbs_util",
-        "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:str_format",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "event_driven_completion_test",
-    timeout = "long",
-    srcs = ["event_driven_completion_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_types",
-        ":operation_generator",
-        ":qp_state",
-        ":rdma_stress_fixture",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/time",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
-    name = "rnr_nack_test",
-    srcs = ["rnr_nack_test.cc"],
-    linkstatic = 1,
-    deps = [
-        ":client",
-        ":op_types",
-        ":rdma_stress_fixture",
-        "//internal:verbs_attribute",
-        "//public:status_matchers",
-        "//unit:gunit_main",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
         "@libibverbs",
     ],
 )
 
 cc_library(
-    name = "test_collection",
-    testonly = 1,
-    srcs = [
-        "basic_rc_test.cc",
-        "basic_ud_test.cc",
-        "cq_overrun_test.cc",
-        "event_driven_completion_test.cc",
-        "mixed_qp_mode_test.cc",
-        "qp_oversubscription_test.cc",
-        "rdma_stability_test.cc",
-        "rnr_nack_test.cc",
-        "simple_rdma_test.cc",
-        "ud_burst_test.cc",
-        "vary_mtu_test.cc",
-    ],
+    name = "rdma_stability_test_cc",
+    srcs = ["rdma_stability_test.cc"],
     deps = [
-        ":client",
         ":config_cc_proto",
-        ":op_profiles",
         ":op_types",
-        ":operation_generator",
-        ":qp_state",
         ":rdma_stress_fixture",
-        ":test_op",
-        "//internal:verbs_attribute",
         "//public:status_matchers",
-        "//public:verbs_util",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
         "@libibverbs",
     ],
     alwayslink = 1,
+)
+
+cc_test(
+    name = "rdma_stability_test",
+    linkstatic = 1,
+    shard_count = 2,
+    deps = [
+        ":rdma_stability_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "basic_rc_test_cc",
+    srcs = ["basic_rc_test.cc"],
+    deps = [
+        ":op_profiles",
+        ":op_types",
+        ":operation_generator",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "basic_rc_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":basic_rc_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "basic_ud_test_cc",
+    srcs = ["basic_ud_test.cc"],
+    deps = [
+        ":op_profiles",
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "basic_ud_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":basic_ud_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "cq_overrun_test_cc",
+    srcs = ["cq_overrun_test.cc"],
+    deps = [
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "cq_overrun_test",
+    linkstatic = 1,
+    shard_count = 2,
+    deps = [
+        ":cq_overrun_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "mixed_qp_mode_test_cc",
+    srcs = ["mixed_qp_mode_test.cc"],
+    deps = [
+        ":client",
+        ":op_profiles",
+        ":op_types",
+        ":operation_generator",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "mixed_qp_mode_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":mixed_qp_mode_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "qp_oversubscription_test_cc",
+    srcs = ["qp_oversubscription_test.cc"],
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":rdma_stress_fixture",
+        ":test_op",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "qp_oversubscription_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":qp_oversubscription_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "ud_burst_test_cc",
+    srcs = ["ud_burst_test.cc"],
+    deps = [
+        ":client",
+        ":op_types",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "ud_burst_test",
+    linkstatic = 1,
+    deps = [
+        ":ud_burst_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "vary_mtu_test_cc",
+    srcs = ["vary_mtu_test.cc"],
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//internal:verbs_attribute",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+        "@libibverbs",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "vary_mtu_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":vary_mtu_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "event_driven_completion_test_cc",
+    srcs = ["event_driven_completion_test.cc"],
+    deps = [
+        ":client",
+        ":op_types",
+        ":operation_generator",
+        ":qp_state",
+        ":rdma_stress_fixture",
+        "//public:status_matchers",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "event_driven_completion_test",
+    timeout = "long",
+    linkstatic = 1,
+    deps = [
+        ":event_driven_completion_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
+)
+
+cc_library(
+    name = "rnr_nack_test_cc",
+    srcs = ["rnr_nack_test.cc"],
+    deps = [
+        ":client",
+        ":op_types",
+        ":rdma_stress_fixture",
+        "//internal:verbs_attribute",
+        "//public:status_matchers",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+    alwayslink = 1,
+)
+
+cc_test(
+    name = "rnr_nack_test",
+    linkstatic = 1,
+    deps = [
+        ":rnr_nack_test_cc",
+        "//unit:gunit_main",
+        "@libibverbs",
+    ],
 )

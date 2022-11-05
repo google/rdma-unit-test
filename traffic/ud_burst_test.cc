@@ -104,11 +104,16 @@ TEST_P(UdBurstTest, TrafficOkAfterBurst) {
   const int kOpSize = 1024;
   const int kOpsPerQpPostBurst = 10;
 
-  const Client::Config config = {.max_op_size = kOpSize,
-                                 .max_outstanding_ops_per_qp = kOpsPerQp,
-                                 .max_qps = kNumQps};
-  Client initiator(/*client_id=*/0, context(), port_attr(), config),
-      target(/*client_id=*/1, context(), port_attr(), config);
+  const Client::Config kInitiatorConfig = {
+      .max_op_size = kOpSize,
+      .max_outstanding_ops_per_qp = kOpsPerQp,
+      .max_qps = kNumQps};
+  const Client::Config kTargetConfig = {
+      .max_op_size = kOpSize,
+      .max_outstanding_ops_per_qp = kBurstSize,
+      .max_qps = kNumQps};
+  Client initiator(/*client_id=*/0, context(), port_attr(), kInitiatorConfig),
+      target(/*client_id=*/1, context(), port_attr(), kTargetConfig);
 
   CreateSetUpMultiplexedUdQps(initiator, target, kNumQps, kNumQps,
                               AddressHandleMapping::kShared);
@@ -154,8 +159,8 @@ TEST_P(UdBurstTest, TrafficOkAfterBurst) {
   EXPECT_OK(initiator.ValidateCompletions(kTotalOpsPostBurst));
 
   HaltExecution(initiator);
-  DumpState(initiator);
-  EXPECT_OK(validation_->PostTestValidation());
+  HaltExecution(target);
+  EXPECT_OK(validation_->TransportSnapshot());
 }
 
 INSTANTIATE_TEST_SUITE_P(

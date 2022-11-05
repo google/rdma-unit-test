@@ -141,6 +141,11 @@ class NicIntrospection {
   // Returns a boolean indicating if the NIC supports extended CQs.
   virtual bool SupportsExtendedCqs() const { return true; }
 
+  // Returns a boolean indicating if the NIC supports the following:
+  // 1. Generate a RnR NAK response
+  // 2. Respects the RnR timeout value and retry thresholds set by RDMA.
+  virtual bool SupportsRnrRetries() const { return true; }
+
   // Returns true if the provider requires the use of file backed shared
   // memory.
   virtual bool RequiresSharedMemory() const { return false; }
@@ -151,6 +156,12 @@ class NicIntrospection {
   // the provider will silently drop the WR or keep the WR in the SQ to be
   // processsed when the QP is in RTS.
   virtual bool SilentlyDropSendWrWhenResetInitRtr() const { return true; }
+
+  // When a queue pair receive an incoming message but is not in RTR or RTS
+  // state, some providers (such as Mellanox) will buffer the message
+  // to be processed after the QP is in RTS. IB spec indicates in this case
+  // the message should be dropped.
+  virtual bool BuffersMessagesWhenNotReadyToReceive() const { return false; }
 
   // Returns if the providers provides a hardware counter (in sysfs).
   bool HasCounter(HardwareCounter counter) const;

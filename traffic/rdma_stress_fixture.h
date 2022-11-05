@@ -74,7 +74,7 @@ class RdmaStressFixture : public BasicFixture {
   // Halt execution of ops by:
   // 1. Dumps the pending ops.
   // 2. Check whether all async events have completed.
-  void HaltExecution(Client& initiator);
+  void HaltExecution(Client& client);
 
   // Best effort attempt to poll async event queue and log results to stderr.
   // Polls the event queue once in non-blocking mode (the fixture's constructor
@@ -92,9 +92,6 @@ class RdmaStressFixture : public BasicFixture {
   // Makes sure that the latency measurements in each stats set are within
   // a certain percentage of one another.
   void CheckLatencies();
-
-  // Logs the qp state for the initiator qps.
-  void DumpState(Client& initiator);
 
   ibv_context* context() const { return context_; }
 

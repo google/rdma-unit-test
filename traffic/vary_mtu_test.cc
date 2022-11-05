@@ -68,7 +68,7 @@ TEST_P(VaryMtuTest, VaryMtuTest) {
                        kMaxInflightOps, kMaxInflightOps);
 
   HaltExecution(initiator);
-  DumpState(initiator);
+  HaltExecution(target);
   EXPECT_OK(validation_->PostTestValidation());
 }
 

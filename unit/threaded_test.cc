@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <thread>  // NOLINT
 #include <utility>
@@ -94,12 +93,16 @@ class ThreadedTest : public RdmaVerbsFixture {
 TEST_F(ThreadedTest, CreateDestroyAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kAhPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_ah / kThreadCount);
+  LOG(INFO) << "Creating " << kAhPerThread << " AHs per thread on "
+            << kThreadCount << "threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kAhPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([this, setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([this, setup, thread_id, &results, kAhPerThread]() {
+      for (int i = 0; i < kAhPerThread; ++i) {
         ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
             setup.port_attr.port, setup.port_attr.gid_index,
             setup.port_attr.gid);
@@ -119,14 +122,18 @@ TEST_F(ThreadedTest, CreateDestroyAh) {
 }
 
 TEST_F(ThreadedTest, CreateDestroyCq) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  const size_t kCqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_cq / kThreadCount);
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  LOG(INFO) << "Creating " << kCqPerThread << " Cqs per thread on "
+            << kThreadCount << "threads.";
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kCqPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &results, kCqPerThread]() {
+      for (int i = 0; i < kCqPerThread; ++i) {
         ibv_cq* cq = ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
         ASSERT_THAT(cq, NotNull());
         results[thread_id][i] = ibv_destroy_cq(cq);
@@ -148,12 +155,16 @@ TEST_F(ThreadedTest, CreateDestroyCqEx) {
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kCqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_cq / kThreadCount);
+  LOG(INFO) << "Creating " << kCqPerThread << " Extended Cqs per thread on "
+            << kThreadCount << "threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kCqPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &results, kCqPerThread]() {
+      for (int i = 0; i < kCqPerThread; ++i) {
         ibv_cq_init_attr_ex cq_attr{.cqe = 10};
         ibv_cq_ex* cq = ibv_create_cq_ex(setup.context, &cq_attr);
         ASSERT_THAT(cq, NotNull());
@@ -173,12 +184,16 @@ TEST_F(ThreadedTest, CreateDestroyCqEx) {
 TEST_F(ThreadedTest, AllocDeallocPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kPdPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_pd / kThreadCount);
+  LOG(INFO) << "Allocating " << kPdPerThread << " PDs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kPdPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &results, kPdPerThread]() {
+      for (int i = 0; i < kPdPerThread; ++i) {
         ibv_pd* pd = ibv_alloc_pd(setup.context);
         ASSERT_THAT(pd, NotNull());
         results[thread_id][i] = ibv_dealloc_pd(pd);
@@ -197,12 +212,16 @@ TEST_F(ThreadedTest, AllocDeallocPd) {
 TEST_F(ThreadedTest, RegDeregMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kMrPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_mr / kThreadCount);
+  LOG(INFO) << "Registering " << kMrPerThread << " Mrs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kMrPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([this, setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([this, setup, thread_id, &results, kMrPerThread]() {
+      for (int i = 0; i < kMrPerThread; ++i) {
         ibv_mr* mr = ibv_.extension().RegMr(
             setup.pd, setup.buffer,
             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
@@ -225,12 +244,16 @@ TEST_F(ThreadedTest, RegDeregMr) {
 TEST_F(ThreadedTest, AllocDeallocMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kMwPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_mw / kThreadCount);
+  LOG(INFO) << "Allocating " << kMwPerThread << " MWs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kMwPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &results, kMwPerThread]() {
+      for (int i = 0; i < kMwPerThread; ++i) {
         ibv_mw_type type = IBV_MW_TYPE_1;
         if (Introspection().SupportsType2() && (i % 2 == 0)) {
           type = IBV_MW_TYPE_2;
@@ -253,12 +276,16 @@ TEST_F(ThreadedTest, AllocDeallocMw) {
 TEST_F(ThreadedTest, CreateDestroyQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kQpPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_qp / kThreadCount);
+  LOG(INFO) << "Creating " << kQpPerThread << " Qps per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kQpPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([this, setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([this, setup, thread_id, &results, kQpPerThread]() {
+      for (int i = 0; i < kQpPerThread; ++i) {
         ibv_qp_init_attr attr =
             QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
         ibv_qp* qp = ibv_.extension().CreateQp(setup.pd, attr);
@@ -279,12 +306,14 @@ TEST_F(ThreadedTest, CreateDestroyQp) {
 TEST_F(ThreadedTest, CreateDestroySrq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<int, kResourcePerThread>, kThreadCount> results;
-  std::fill(results.front().begin(), results.back().end(), 1);
+  const size_t kSrqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_srq / kThreadCount);
+  std::vector<std::vector<int>> results(kThreadCount,
+                                        std::vector<int>(kSrqPerThread, 1));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &results]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &results, kSrqPerThread]() {
+      for (int i = 0; i < kSrqPerThread; ++i) {
         ibv_srq_init_attr init_attr{.attr = verbs_util::DefaultSrqAttr()};
         ibv_srq* srq = ibv_create_srq(setup.pd, &init_attr);
         ASSERT_THAT(srq, NotNull());
@@ -304,12 +333,16 @@ TEST_F(ThreadedTest, CreateDestroySrq) {
 TEST_F(ThreadedTest, CreateAh) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_ah*, kResourcePerThread>, kThreadCount> ahs;
-  std::fill(ahs.front().begin(), ahs.back().end(), nullptr);
+  const size_t kAhPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_ah / kThreadCount);
+  LOG(INFO) << "Creating " << kAhPerThread << " AHs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_ah*>> ahs(
+      kThreadCount, std::vector<ibv_ah*>(kAhPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([this, setup, thread_id, &ahs]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([this, setup, thread_id, &ahs, kAhPerThread]() {
+      for (int i = 0; i < kAhPerThread; ++i) {
         ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
             setup.port_attr.port, setup.port_attr.gid_index,
             setup.port_attr.gid);
@@ -330,12 +363,16 @@ TEST_F(ThreadedTest, CreateAh) {
 TEST_F(ThreadedTest, CreateCq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_cq*, kResourcePerThread>, kThreadCount> cqs;
-  std::fill(cqs.front().begin(), cqs.back().end(), nullptr);
+  const size_t kCqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_cq / kThreadCount);
+  LOG(INFO) << "Creating " << kCqPerThread << " Cqs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_cq*>> cqs(
+      kThreadCount, std::vector<ibv_cq*>(kCqPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &cqs]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &cqs, kCqPerThread]() {
+      for (int i = 0; i < kCqPerThread; ++i) {
         cqs[thread_id][i] =
             ibv_create_cq(setup.context, 10, nullptr, nullptr, 0);
       }
@@ -357,12 +394,16 @@ TEST_F(ThreadedTest, CreateCqEx) {
   }
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_cq_ex*, kResourcePerThread>, kThreadCount> cqs_ex;
-  std::fill(cqs_ex.front().begin(), cqs_ex.back().end(), nullptr);
+  const size_t kCqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_cq / kThreadCount);
+  LOG(INFO) << "Creating " << kCqPerThread << " Extended Cqs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_cq_ex*>> cqs_ex(
+      kThreadCount, std::vector<ibv_cq_ex*>(kCqPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &cqs_ex]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &cqs_ex, kCqPerThread]() {
+      for (int i = 0; i < kCqPerThread; ++i) {
         ibv_cq_init_attr_ex cq_attr{.cqe = 10};
         cqs_ex[thread_id][i] = ibv_create_cq_ex(setup.context, &cq_attr);
       }
@@ -381,12 +422,16 @@ TEST_F(ThreadedTest, CreateCqEx) {
 TEST_F(ThreadedTest, AllocPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_pd*, kResourcePerThread>, kThreadCount> pds;
-  std::fill(pds.front().begin(), pds.back().end(), nullptr);
+  const size_t kPdPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_pd / kThreadCount);
+  LOG(INFO) << "Allocating " << kPdPerThread << " PDs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_pd*>> pds(
+      kThreadCount, std::vector<ibv_pd*>(kPdPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &pds]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &pds, kPdPerThread]() {
+      for (int i = 0; i < kPdPerThread; ++i) {
         pds[thread_id][i] = ibv_alloc_pd(setup.context);
       }
     });
@@ -404,8 +449,12 @@ TEST_F(ThreadedTest, AllocPd) {
 TEST_F(ThreadedTest, RegMr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_mr*, kResourcePerThread>, kThreadCount> mrs;
-  std::fill(mrs.front().begin(), mrs.back().end(), nullptr);
+  const size_t kMrPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_mr / kThreadCount);
+  LOG(INFO) << "Creating " << kMrPerThread << " MRs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_mr*>> mrs(
+      kThreadCount, std::vector<ibv_mr*>(kMrPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
     pool.Add([this, setup, thread_id, &mrs]() {
@@ -431,12 +480,16 @@ TEST_F(ThreadedTest, RegMr) {
 TEST_F(ThreadedTest, AllocMw) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_mw*, kResourcePerThread>, kThreadCount> mws;
-  std::fill(mws.front().begin(), mws.back().end(), nullptr);
+  const size_t kMwPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_mw / kThreadCount);
+  LOG(INFO) << "Allocating " << kMwPerThread << " MWs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_mw*>> mws(
+      kThreadCount, std::vector<ibv_mw*>(kMwPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &mws]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &mws, kMwPerThread]() {
+      for (int i = 0; i < kMwPerThread; ++i) {
         ibv_mw_type type = IBV_MW_TYPE_1;
         if (Introspection().SupportsType2() && (i % 2 == 0)) {
           type = IBV_MW_TYPE_2;
@@ -458,12 +511,16 @@ TEST_F(ThreadedTest, AllocMw) {
 TEST_F(ThreadedTest, CreateQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_qp*, kResourcePerThread>, kThreadCount> qps;
-  std::fill(qps.front().begin(), qps.back().end(), nullptr);
+  const size_t kQpPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_qp / kThreadCount);
+  LOG(INFO) << "Creating " << kQpPerThread << " Qps per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_qp*>> qps(
+      kThreadCount, std::vector<ibv_qp*>(kQpPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([this, setup, thread_id, &qps]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([this, setup, thread_id, &qps, kQpPerThread]() {
+      for (int i = 0; i < kQpPerThread; ++i) {
         ibv_qp_init_attr attr =
             QpInitAttribute().GetAttribute(setup.cq, setup.cq, IBV_QPT_RC);
         qps[thread_id][i] = ibv_.extension().CreateQp(setup.pd, attr);
@@ -483,12 +540,16 @@ TEST_F(ThreadedTest, CreateQp) {
 TEST_F(ThreadedTest, CreateSrq) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ThreadPool pool;
-  std::array<std::array<ibv_srq*, kResourcePerThread>, kThreadCount> srqs;
-  std::fill(srqs.front().begin(), srqs.back().end(), nullptr);
+  const size_t kSrqPerThread = std::min(
+      kResourcePerThread, Introspection().device_attr().max_srq / kThreadCount);
+  LOG(INFO) << "Creating " << kSrqPerThread << " Srqs per thread on "
+            << kThreadCount << " threads.";
+  std::vector<std::vector<ibv_srq*>> srqs(
+      kThreadCount, std::vector<ibv_srq*>(kSrqPerThread, nullptr));
 
   for (int thread_id = 0; thread_id < kThreadCount; ++thread_id) {
-    pool.Add([setup, thread_id, &srqs]() {
-      for (int i = 0; i < kResourcePerThread; ++i) {
+    pool.Add([setup, thread_id, &srqs, kSrqPerThread]() {
+      for (int i = 0; i < kSrqPerThread; ++i) {
         ibv_srq_init_attr init_attr{.attr = verbs_util::DefaultSrqAttr()};
         srqs[thread_id][i] = ibv_create_srq(setup.pd, &init_attr);
       }

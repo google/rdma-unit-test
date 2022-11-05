@@ -89,6 +89,7 @@ class LoopbackUdQpTest : public LoopbackFixture {
 
 TEST_F(LoopbackUdQpTest, Send) {
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
+  constexpr int kGrhHeaderBytes = 40;
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
 
@@ -119,6 +120,7 @@ TEST_F(LoopbackUdQpTest, Send) {
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(completion.byte_len, (kGrhHeaderBytes + kPayloadLength));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
   absl::Span<uint8_t> recv_payload =

@@ -283,6 +283,7 @@ cc_library(
     name = "qp_test_cc",
     srcs = ["qp_test.cc"],
     deps = [
+        ":loopback_fixture",
         ":rdma_verbs_fixture",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
@@ -292,37 +293,10 @@ cc_library(
         "//public:verbs_helper_suite",
         "//public:verbs_util",
         "@com_glog_glog//:glog",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest",
-        "@libibverbs",
-    ],
-    alwayslink = 1,
-)
-
-cc_library(
-    name = "rendezvous_test_cc",
-    srcs = ["rendezvous_test.cc"],
-    deps = [
-        ":rdma_verbs_fixture",
-        "//internal:verbs_attribute",
-        "//public:introspection",
-        "//public:page_size",
-        "//public:rdma_memblock",
-        "//public:status_matchers",
-        "//public:verbs_helper_suite",
-        "//public:verbs_util",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:fixed_array",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@libibverbs",
     ],
@@ -363,6 +337,7 @@ cc_library(
         "//public:status_matchers",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
+        "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
@@ -413,6 +388,22 @@ cc_library(
     alwayslink = 1,
 )
 
+cc_library(
+    name = "async_event_test_cc",
+    srcs = ["async_event_test.cc"],
+    deps = [
+        ":loopback_fixture",
+        "//public:status_matchers",
+        "//public:verbs_util",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+        "@libibverbs",
+    ],
+    alwayslink = 1,
+)
+
 # The gunit_main is linked into the opensource version of the tests below.  rdma_unit_test depends
 # on the following libraries: glog/gflag/gtest
 # The standard opensource gunit_main does not initialize gflags or glog.  This target contains a
@@ -450,7 +441,6 @@ cc_binary(
         ":pd_test_cc",
         ":qp_test_cc",
         ":rc_test_cc",
-        ":rendezvous_test_cc",
         ":srq_test_cc",
         ":stress_test_cc",
         ":threaded_test_cc",
@@ -563,27 +553,11 @@ cc_test(
 
 cc_test(
     name = "cq_test",
-    srcs = ["cq_test.cc"],
+    srcs = [],
     linkstatic = 1,
     deps = [
-        ":ah_test_cc",
-        ":batch_op_fixture",
+        ":cq_test_cc",
         ":gunit_main",
-        ":rdma_verbs_fixture",
-        "//internal:handle_garble",
-        "//public:introspection",
-        "//public:rdma_memblock",
-        "//public:status_matchers",
-        "//public:verbs_helper_suite",
-        "//public:verbs_util",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
         "@libibverbs",
     ],
 )
@@ -678,18 +652,6 @@ cc_test(
 )
 
 cc_test(
-    name = "rendezvous_test",
-    srcs = [],
-    linkstatic = 1,
-    shard_count = 3,
-    deps = [
-        ":gunit_main",
-        ":rendezvous_test_cc",
-        "@libibverbs",
-    ],
-)
-
-cc_test(
     name = "srq_test",
     srcs = [],
     linkstatic = 1,
@@ -730,6 +692,17 @@ cc_test(
     deps = [
         ":gunit_main",
         ":stress_test_cc",
+        "@libibverbs",
+    ],
+)
+
+cc_test(
+    name = "async_event_test",
+    srcs = [],
+    linkstatic = 1,
+    deps = [
+        ":async_event_test_cc",
+        ":gunit_main",
         "@libibverbs",
     ],
 )

@@ -31,7 +31,6 @@
 
 namespace rdma_unit_test {
 
-using ::testing::AnyOf;
 using ::testing::NotNull;
 using ::testing::Pair;
 
@@ -261,11 +260,11 @@ TEST_F(BufferMrTest, ReadZeroByteInvalidRKey) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  ASSERT_OK_AND_ASSIGN(ibv_wc_status result,
-                       verbs_util::ExecuteRdmaRead(
-                           setup.send_qp, local_buffer, setup.mr,
-                           remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-  EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
+  ASSERT_OK_AND_ASSIGN(
+      ibv_wc_status result,
+      verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
+                                  remote_buffer.data(), 0xDEADBEEF));
+  EXPECT_EQ(result, IBV_WC_SUCCESS);
 }
 
 TEST_F(BufferMrTest, WriteExceedFront) {
@@ -358,11 +357,11 @@ TEST_F(BufferMrTest, WriteZeroByteInvalidRKey) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   absl::Span<uint8_t> local_buffer = setup.mr_buffer.subspan(0, 0);
   absl::Span<uint8_t> remote_buffer = setup.mr_buffer.subspan(0, 0);
-  ASSERT_OK_AND_ASSIGN(ibv_wc_status result,
-                       verbs_util::ExecuteRdmaWrite(
-                           setup.send_qp, local_buffer, setup.mr,
-                           remote_buffer.data(), (setup.mr->rkey + 10) * 10));
-  EXPECT_THAT(result, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_ACCESS_ERR));
+  ASSERT_OK_AND_ASSIGN(
+      ibv_wc_status result,
+      verbs_util::ExecuteRdmaWrite(setup.send_qp, local_buffer, setup.mr,
+                                   remote_buffer.data(), 0xDEADBEEF));
+  EXPECT_EQ(result, IBV_WC_SUCCESS);
 }
 
 class BufferMwTest : public BufferMrTest,

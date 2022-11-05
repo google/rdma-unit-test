@@ -39,7 +39,6 @@
 ABSL_DECLARE_FLAG(bool, page_align_buffers);
 ABSL_DECLARE_FLAG(absl::Duration, inter_op_delay_us);
 ABSL_DECLARE_FLAG(absl::Duration, completion_timeout_s);
-ABSL_DECLARE_FLAG(bool, arm_cq_before_poll);
 
 namespace rdma_unit_test {
 
@@ -311,6 +310,7 @@ class Client {
   ibv_comp_channel* recv_cc_ = nullptr;
   ibv_cq* send_cq_ = nullptr;
   ibv_cq* recv_cq_ = nullptr;
+  int total_completions_ = 0;
   absl::flat_hash_map<uint32_t, std::unique_ptr<QpState>> qps_;
   std::vector<ibv_ah*> ahs_;
   const int client_id_ = 0;

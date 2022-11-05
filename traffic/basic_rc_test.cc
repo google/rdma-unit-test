@@ -72,10 +72,10 @@ class BasicRcTest : public RdmaStressFixture {
         config.ops_in_flight, config.ops_in_flight * config.num_qps);
 
     HaltExecution(initiator);
+    HaltExecution(target);
     CollectClientLatencyStats(initiator);
-    DumpState(initiator);
-    EXPECT_THAT(validation_->PostTestValidation(), IsOk());
     CheckLatencies();
+    EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   }
 };
 
