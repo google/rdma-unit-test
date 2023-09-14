@@ -183,9 +183,12 @@ TEST_F(BufferMrTest, ReadExceedFront) {
       setup.buffer.subspan(kMrMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
                                           remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+              IsOkAndHolds(expected));
 }
 
 TEST_F(BufferMrTest, ReadExceedRear) {
@@ -199,9 +202,12 @@ TEST_F(BufferMrTest, ReadExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.buffer.subspan(kMrMemoryOffset, kReadBufferLength);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
                                           remote_buffer.data(), setup.mr->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+              IsOkAndHolds(expected));
 }
 
 TEST_F(BufferMrTest, ReadZeroByte) {
@@ -442,9 +448,12 @@ TEST_P(BufferMwTest, ReadExceedFront) {
       kMwMemoryOffset - kExceedLength, kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
                                           remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+              IsOkAndHolds(expected));
 }
 
 TEST_P(BufferMwTest, ReadExceedRear) {
@@ -465,9 +474,12 @@ TEST_P(BufferMwTest, ReadExceedRear) {
       kReadBufferLength);
   absl::Span<uint8_t> local_buffer =
       setup.mr_buffer.subspan(0, kReadBufferLength);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(verbs_util::ExecuteRdmaRead(setup.send_qp, local_buffer, setup.mr,
                                           remote_buffer.data(), mw->rkey),
-              IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+              IsOkAndHolds(expected));
 }
 
 TEST_P(BufferMwTest, ReadZeroByte) {

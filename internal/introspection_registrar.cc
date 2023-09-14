@@ -40,7 +40,6 @@ IntrospectionRegistrar::Factory IntrospectionRegistrar::GetFactory(
 
 void IntrospectionRegistrar::Register(std::string_view device,
                                       Factory factory) {
-  LOG(INFO) << "IntrospectionRegistrar::Register - " << device;
   devices_.push_back({device, factory});
 }
 

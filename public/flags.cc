@@ -21,12 +21,18 @@
 #include "absl/strings/string_view.h"
 
 ABSL_FLAG(bool, ipv4_only, false,
-          "Force use of IPv4. IPv6 ports will be ignored.");
+          "Force use of IPv4. IPv6 GIDs will be ignored.");
 ABSL_FLAG(std::string, device_name, "",
-          "RDMA device name as returned by ibv_devices(). If --device_name is "
-          "empty, chooses the device at index zero as returned by "
-          "ibv_get_device_list().");
+          "One or more RDMA device names as returned by ibv_devices(), "
+          "split by comma. If --device_name is empty, chooses the device at "
+          "index zero as returned by ibv_get_device_list().");
 ABSL_FLAG(uint64_t, completion_wait_multiplier, 1,
           "The multiplier applies to completion timeouts. Setting this flag "
           "higher than 1 will increase all timeout thresholds proportionally. "
           "Increase if tests are timing out due to slow RDMA devices.");
+ABSL_FLAG(uint32_t, port_num, 0,
+          "The port number used for connection establishment. Default: 0 "
+          "(first available port)");
+ABSL_FLAG(int, gid_index, -1,
+          "The GID index used for connection establishment. Ignore ipv4_only "
+          "when assigned. Default: -1 (first available GID)");

@@ -166,15 +166,15 @@ class Client {
   absl::Status PostOps(const OpAttributes& attributes);
 
   // Issues a pre-specified number of ops on num_qps of qps, round-robin'ing
-  // between qps to issue the ops. It waits for all ops to complete. If ops
-  // don't complete in a timely manner, the function eventually times out and
-  // returns an error status. To avoid a deadlock when `batch_per_qp > 1`, make
-  // sure that batch_per_qp*num_qps >= max_inflight_ops_total.
-  void ExecuteOps(Client& target, size_t num_qps, size_t ops_per_qp,
-                  size_t batch_per_qp, size_t max_inflight_per_qp,
-                  size_t max_inflight_ops_total,
-                  Client::CompletionMethod completion_method =
-                      Client::CompletionMethod::kPolling);
+  // between qps to issue the ops. If ops don't complete in a timely manner, the
+  // function eventually times out and returns the number of ops completed. To
+  // avoid a deadlock when `batch_per_qp > 1`, make sure that
+  // batch_per_qp * num_qps >= max_inflight_ops_total.
+  int ExecuteOps(Client& target, size_t num_qps, size_t ops_per_qp,
+                 size_t batch_per_qp, size_t max_inflight_per_qp,
+                 size_t max_inflight_ops_total,
+                 Client::CompletionMethod completion_method =
+                     Client::CompletionMethod::kPolling);
 
   // Tries poll count completions, returns a lower number if fewer completions
   // are available. Also see TryPollCompletions() below.
@@ -281,16 +281,13 @@ class Client {
     return dest_buffer_->subblock(buffer_per_qp_ * qp_id, buffer_per_qp_);
   }
 
+  ibv_context* GetContext() { return context_; }
+
  protected:
-  inline void InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                    uint64_t id);
-  // Initializes the buffer with random bits. If the buffer is large enough to
-  // hold the op id of the corresponding remote receive operation, it is placed
-  // at the beginning of the buffer.
-  inline void InitializeUdSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                    uint64_t remote_op_id);
-  inline absl::Status ValidateDstBufferOrder(uint8_t* dst_addr, uint32_t length,
-                                             uint64_t id);
+  inline void InitializeSrcBuffer(uint8_t* src_addr, uint32_t length,
+                                  uint64_t id);
+  inline absl::Status ValidateDstBuffer(uint8_t* dst_addr, uint32_t length,
+                                        uint64_t id);
 
   // Stores the TestOp associated with the completion in
   // `unchecked_received_ops` if it was a Recv op, or `unchecked_initiated_ops`

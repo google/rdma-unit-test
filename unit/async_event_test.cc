@@ -25,6 +25,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
+#include "public/introspection.h"
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 #include "unit/loopback_fixture.h"
@@ -70,9 +71,12 @@ TEST_F(AsyncEventTest, ReadRKeyViolation) {
   read.wr.rdma.rkey = 0xDEADBEEF;
   verbs_util::PostSend(local.qp, read);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
   // Existing hardware does not set this on error.
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);

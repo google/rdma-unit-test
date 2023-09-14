@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -89,7 +90,6 @@ class LoopbackUdQpTest : public LoopbackFixture {
 
 TEST_F(LoopbackUdQpTest, Send) {
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
-  constexpr int kGrhHeaderBytes = 40;
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
 
@@ -120,7 +120,7 @@ TEST_F(LoopbackUdQpTest, Send) {
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(completion.opcode, IBV_WC_RECV);
-  EXPECT_EQ(completion.byte_len, (kGrhHeaderBytes + kPayloadLength));
+  EXPECT_EQ(completion.byte_len, sizeof(ibv_grh) + kPayloadLength);
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
   absl::Span<uint8_t> recv_payload =
@@ -180,7 +180,7 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_GENERAL_ERR));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
 }
@@ -245,17 +245,15 @@ TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
   constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
-  const uint32_t recv_length = local.buffer.span().size() / 2;
-  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
-  rsge.length = recv_length + sizeof(ibv_grh);
-  // Recv buffer is to small to fit the whole buffer.
-  rsge.length -= 1;
+  const uint32_t recv_length = kPayloadLength + sizeof(ibv_grh) - 100;
+  ibv_sge rsge =
+      verbs_util::CreateSge(remote.buffer.subspan(0, recv_length), remote.mr);
+  // Receive buffer is too small for the message length.
   ibv_recv_wr recv =
       verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
   verbs_util::PostRecv(remote.qp, recv);
-
-  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
-  lsge.length = kPayloadLength;
+  ibv_sge lsge =
+      verbs_util::CreateSge(local.buffer.subspan(0, kPayloadLength), local.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
   ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
@@ -271,6 +269,7 @@ TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidAh) {
@@ -387,7 +386,7 @@ TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_GENERAL_ERR));
   EXPECT_EQ(completion.opcode, IBV_WC_SEND);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);

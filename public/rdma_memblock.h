@@ -91,6 +91,13 @@ class RdmaMemBlock {
     // Defines the range of the allocated memory.
     absl::Span<uint8_t> buffer;
   };
+
+  // In several syscalls such as fallocate we have to retry an operation that
+  // receives EINTR, but this really shouldn't happen very often, so the failure
+  // becomes fatal after this many retries, so this constant should be large
+  // enough to avoid a fatal error except in pathological cases.
+  static constexpr size_t kMaxEinterRetry = 1000;
+
   RdmaMemBlock(const RdmaMemBlock& base, size_t offset, size_t size);
 
   // Creates the actual file backed shared memory of 'size'.

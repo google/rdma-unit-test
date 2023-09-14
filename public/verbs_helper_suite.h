@@ -114,6 +114,8 @@ class VerbsHelperSuite {
       size_t bytes, size_t alignment = __STDCPP_DEFAULT_NEW_ALIGNMENT__,
       bool huge_page = false);
   absl::StatusOr<ibv_context*> OpenDevice();
+  // Open all devices if available.
+  absl::Status OpenAllDevices(std::vector<ibv_context*>& contexts);
 
   // Creates an address handle.
   ibv_ah* CreateAh(ibv_pd* pd, uint8_t port, uint8_t sgid_index,

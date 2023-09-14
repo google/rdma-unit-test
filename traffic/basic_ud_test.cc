@@ -41,12 +41,15 @@ class BasicUdTest : public RdmaStressFixture {
   void SetUp() override { ConfigureLatencyMeasurements(OpTypes::kSend); }
 
  protected:
-  void FinalizeStateAndCheckLatencies(Client &initiator, Client &target) {
+  void FinalizeStateAndCheckLatencies(Client &initiator, Client &target,
+                                      int num_qps, int ops_expected,
+                                      int ops_completed) {
     HaltExecution(initiator);
     HaltExecution(target);
     CollectClientLatencyStats(initiator);
     CheckLatencies();
-    EXPECT_OK(validation_->PostTestValidation());
+    EXPECT_OK(validation_->PostTestValidation(
+        RdmaStressFixture::AllowRetxCheck(num_qps)));
   }
 };
 
@@ -61,7 +64,8 @@ TEST_P(UdConstantOpTest, OneToOne) {
   const int kNumQps = std::get<0>(GetParam());
   const int kOpSize = std::min(std::get<1>(GetParam()),
                                VerbsMtuToInt(port_attr().attr.active_mtu));
-  const int kNumOps = std::get<2>(GetParam());
+  const int kNumOps =
+      RdmaStressFixture::LimitNumOps(kOpSize, std::get<2>(GetParam()));
   const Client::Config client_config = {
       .max_op_size = kOpSize,
       .max_outstanding_ops_per_qp = kMaxInflightOps,
@@ -78,9 +82,12 @@ TEST_P(UdConstantOpTest, OneToOne) {
   }
 
   int ops_per_qp = std::max(1, kNumOps / kNumQps);
-  initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps, kMaxInflightOps * kNumQps);
-  FinalizeStateAndCheckLatencies(initiator, target);
+  int ops_completed =
+      initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
+                           kMaxInflightOps, kMaxInflightOps * kNumQps);
+  FinalizeStateAndCheckLatencies(initiator, target, kNumQps,
+                                 /*ops_expected=*/ops_per_qp * kNumQps,
+                                 ops_completed);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -117,15 +124,19 @@ TEST_P(UdMixedOpTest, OneToOne) {
 
   CreateSetUpOneToOneUdQps(initiator, target, kNumQps);
 
-  RandomizedOperationGenerator op_generator(MixedSizeUdOpProfile());
+  RandomizedOperationGenerator op_generator(
+      MixedSizeUdOpProfile(VerbsMtuToInt(port_attr().attr.active_mtu)));
   for (int qp_id = 0; qp_id < kNumQps; ++qp_id) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
   int ops_per_qp = std::max(1, kNumOps / kNumQps);
-  initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps, kMaxInflightOps * kNumQps);
-  FinalizeStateAndCheckLatencies(initiator, target);
+  int ops_completed =
+      initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
+                           kMaxInflightOps, kMaxInflightOps * kNumQps);
+  FinalizeStateAndCheckLatencies(initiator, target, kNumQps,
+                                 /*ops_expected=*/ops_per_qp * kNumQps,
+                                 ops_completed);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -190,10 +201,12 @@ TEST_P(MultiplexedUdTest, FixedOpSize) {
   }
 
   int ops_per_qp = kNumOps / test_case.initiator_qps;
-  initiator.ExecuteOps(target, test_case.initiator_qps, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps,
-                       kMaxInflightOps * test_case.initiator_qps);
-  FinalizeStateAndCheckLatencies(initiator, target);
+  int ops_completed = initiator.ExecuteOps(
+      target, test_case.initiator_qps, ops_per_qp, kBatchPerQp, kMaxInflightOps,
+      kMaxInflightOps * test_case.initiator_qps);
+  FinalizeStateAndCheckLatencies(
+      initiator, target, test_case.initiator_qps,
+      /*ops_expected=*/ops_per_qp * test_case.initiator_qps, ops_completed);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -238,15 +251,19 @@ TEST_P(UdMultiplexedMixedOpsTest, MultiplexedMixedOpsShared) {
   CreateSetUpMultiplexedUdQps(initiator, target, kNumQps, kNumQps,
                               AddressHandleMapping::kShared);
 
-  RandomizedOperationGenerator op_generator(MixedSizeUdOpProfile());
+  RandomizedOperationGenerator op_generator(
+      MixedSizeUdOpProfile(VerbsMtuToInt(port_attr().attr.active_mtu)));
   for (int qp_id = 0; qp_id < kNumQps; ++qp_id) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
   int ops_per_qp = kNumOps / kNumQps;
-  initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps, kMaxInflightOps * kNumQps);
-  FinalizeStateAndCheckLatencies(initiator, target);
+  int ops_completed =
+      initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
+                           kMaxInflightOps, kMaxInflightOps * kNumQps);
+  FinalizeStateAndCheckLatencies(initiator, target, kNumQps,
+                                 /*ops_expected=*/ops_per_qp * kNumQps,
+                                 ops_completed);
 }
 
 INSTANTIATE_TEST_SUITE_P(

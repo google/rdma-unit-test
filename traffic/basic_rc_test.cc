@@ -58,24 +58,29 @@ class BasicRcTest : public RdmaStressFixture {
               << ", target id: " << target.client_id();
     CreateSetUpRcQps(initiator, target, config.num_qps);
 
-    LOG(INFO) << "Executing " << config.num_ops << " " << config.op_size
-              << "B ops on " << config.num_qps << " qps.";
-
     for (int qp_id = 0; qp_id < config.num_qps; ++qp_id) {
       initiator.qp_state(qp_id)->set_op_generator(config.op_generator);
     }
 
     // Batch size must be smaller than the number of ops inflight.
     int batch_per_qp = std::max(1, config.ops_in_flight / 4);
-    initiator.ExecuteOps(
-        target, config.num_qps, config.num_ops / config.num_qps, batch_per_qp,
-        config.ops_in_flight, config.ops_in_flight * config.num_qps);
+    // Makes sure each qp issues at least 1 op.
+    int ops_per_qp = std::max(1, config.num_ops / config.num_qps);
+    int ops_expected = ops_per_qp * config.num_qps;
+    LOG(INFO) << "Executing " << ops_expected << " " << config.op_size
+              << "B ops on " << config.num_qps << " qps.";
+    int ops_completed = initiator.ExecuteOps(
+        target, config.num_qps, ops_per_qp, batch_per_qp, config.ops_in_flight,
+        config.ops_in_flight * config.num_qps);
+    EXPECT_EQ(ops_completed, ops_expected);
 
     HaltExecution(initiator);
     HaltExecution(target);
     CollectClientLatencyStats(initiator);
     CheckLatencies();
-    EXPECT_THAT(validation_->PostTestValidation(), IsOk());
+    EXPECT_THAT(validation_->PostTestValidation(
+                    RdmaStressFixture::AllowRetxCheck(config.num_qps)),
+                IsOk());
   }
 };
 
@@ -89,7 +94,8 @@ class ConstantOpTest : public BasicRcTest,
 TEST_P(ConstantOpTest, Basic) {
   const int kNumQps = std::get<0>(GetParam());
   const int kOpSize = std::get<1>(GetParam());
-  const int kNumOps = std::get<2>(GetParam());
+  const int kNumOps =
+      RdmaStressFixture::LimitNumOps(kOpSize, std::get<2>(GetParam()));
   const int kOpsInFlight = std::get<3>(GetParam());
   const OpTypes kOpType = std::get<4>(GetParam());
   ConstantRcOperationGenerator op_generator(kOpType, kOpSize);
@@ -114,7 +120,8 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<ConstantOpTest::ParamType>& info) {
       const int num_qps = std::get<0>(info.param);
       const int op_size = std::get<1>(info.param);
-      const int num_ops = std::get<2>(info.param);
+      const int num_ops =
+          RdmaStressFixture::LimitNumOps(op_size, std::get<2>(info.param));
       const int ops_in_flight = std::get<3>(info.param);
       const OpTypes op_type = std::get<4>(info.param);
       return absl::StrFormat("%dQps%dByteOp%dOps%dInflight%s", num_qps, op_size,

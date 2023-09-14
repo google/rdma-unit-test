@@ -141,10 +141,7 @@ class NicIntrospection {
   // Returns a boolean indicating if the NIC supports extended CQs.
   virtual bool SupportsExtendedCqs() const { return true; }
 
-  // Returns a boolean indicating if the NIC supports the following:
-  // 1. Generate a RnR NAK response
-  // 2. Respects the RnR timeout value and retry thresholds set by RDMA.
-  virtual bool SupportsRnrRetries() const { return true; }
+  virtual bool GeneratesRetryExcOnConnTimeout() const { return false; }
 
   // Returns true if the provider requires the use of file backed shared
   // memory.

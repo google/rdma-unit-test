@@ -104,19 +104,13 @@ TEST_P(UdBurstTest, TrafficOkAfterBurst) {
   const int kOpSize = 1024;
   const int kOpsPerQpPostBurst = 10;
 
-  const Client::Config kInitiatorConfig = {
-      .max_op_size = kOpSize,
-      .max_outstanding_ops_per_qp = kOpsPerQp,
-      .max_qps = kNumQps};
-  const Client::Config kTargetConfig = {
-      .max_op_size = kOpSize,
-      .max_outstanding_ops_per_qp = kBurstSize,
-      .max_qps = kNumQps};
-  Client initiator(/*client_id=*/0, context(), port_attr(), kInitiatorConfig),
-      target(/*client_id=*/1, context(), port_attr(), kTargetConfig);
+  const Client::Config kClientConfig = {.max_op_size = kOpSize,
+                                        .max_outstanding_ops_per_qp = kOpsPerQp,
+                                        .max_qps = kNumQps};
+  Client initiator(/*client_id=*/0, context(), port_attr(), kClientConfig),
+      target(/*client_id=*/1, context(), port_attr(), kClientConfig);
 
-  CreateSetUpMultiplexedUdQps(initiator, target, kNumQps, kNumQps,
-                              AddressHandleMapping::kShared);
+  CreateSetUpOneToOneUdQps(initiator, target, kNumQps);
 
   PostOps(initiator, target, kNumQps, kOpsPerQp, kOpSize);
 

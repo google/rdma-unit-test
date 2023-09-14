@@ -3,21 +3,21 @@ workspace(
 )
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-# Google Test. Official release 1.10.0.
+# Google Test. Official release 1.13.0.
 http_archive(
     name = "com_google_googletest",
-    sha256 = "9dc9157a9a1551ec7a7e43daea9a694a0bb5fb8bec81235d8a1e6ef64c716dcb",
-    strip_prefix = "googletest-release-1.10.0",
-    urls = ["https://github.com/google/googletest/archive/release-1.10.0.tar.gz"],
+    sha256 = "ad7fdba11ea011c1d925b3289cf4af2c66a352e18d4c7264392fead75e919363",
+    strip_prefix = "googletest-1.13.0",
+    urls = ["https://github.com/google/googletest/archive/refs/tags/v1.13.0.tar.gz"],
 )
 
 # Abseil. Latest feature not released yet(specifically absl::cleanup).
-# Picked up a commit from Sep 2, 2020
+# Picked up the latest stable version (date: Jun 29, 2023)
 http_archive(
     name = "com_google_absl",
-    sha256 = "5ec35586b685eea11f198bb6e75f870e37fde62d15b95a3897c37b2d0bbd9017",
-    strip_prefix = "abseil-cpp-143a27800eb35f4568b9be51647726281916aac9",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/143a27800eb35f4568b9be51647726281916aac9.zip"],
+    sha256 = "51d676b6846440210da48899e4df618a357e6e44ecde7106f1e44ea16ae8adc7",
+    strip_prefix = "abseil-cpp-20230125.3",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/20230125.3.zip"],
 )
 
 # glog
@@ -36,12 +36,12 @@ http_archive(
     url = "https://github.com/gflags/gflags/archive/v2.2.2.zip",
 )
 
-# gRPC-1.39.1
+# gRPC-1.56.1
 http_archive(
     name = "com_github_grpc_grpc",
-    sha256 = "024118069912358e60722a2b7e507e9c3b51eeaeee06e2dd9d95d9c16f6639ec",
-    strip_prefix = "grpc-1.39.1",
-    url = "https://github.com/grpc/grpc/archive/refs/tags/v1.39.1.tar.gz",
+    sha256 = "cc3e039aedd7b76f59cf922215adc7c308347a662be1e5e26711ffbc7fd3ce48",
+    strip_prefix = "grpc-1.56.1",
+    url = "https://github.com/grpc/grpc/archive/refs/tags/v1.56.1.tar.gz",
 )
 load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 grpc_deps()
@@ -63,6 +63,15 @@ http_archive(
     strip_prefix = "protobuf-3.17.3",
     url = "https://github.com/protocolbuffers/protobuf/releases/download/v3.17.3/protobuf-cpp-3.17.3.tar.gz",
 )
+
+# License dependency: rules_license
+http_archive(
+    name = "rules_license",
+    sha256 = "7626bea5473d3b11d44269c5b510a210f11a78bca1ed639b0f846af955b0fe31",
+    strip_prefix = "rules_license-0.0.7",
+    urls = ["https://github.com/bazelbuild/rules_license/archive/0.0.7.tar.gz"],
+)
+
 # Needed for protobuf.
 http_archive(
     name = "rules_python",
@@ -75,9 +84,9 @@ http_archive(
 # Magic_enum
 http_archive(
     name = "magic_enum",
-    strip_prefix = "magic_enum-3d1f6a5a2a3fbcba077e00ad0ccc2dd9fefc2ca7",
-    sha256 = "fba702de80a13be39667a2cabc4353885d82754c167dca727577e928107f9b8e",
-    urls = ["https://github.com/Neargye/magic_enum/archive/3d1f6a5a2a3fbcba077e00ad0ccc2dd9fefc2ca7.zip"],
+    strip_prefix = "magic_enum-0.9.3",
+    sha256 = "2ac5f5f0591c8f587b53b89c3ef64c85cc24ebaaa389a659c6bf36a0aa192fe6",
+    urls = ["https://github.com/Neargye/magic_enum/archive/v0.9.3.zip"],
 )
 
 # libibverbs

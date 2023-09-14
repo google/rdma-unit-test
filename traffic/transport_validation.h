@@ -28,7 +28,9 @@ class TransportValidation {
   // Runs at the beginning of the test.
   virtual absl::Status PreTestValidation() { return absl::OkStatus(); }
   // Runs at the end of the test.
-  virtual absl::Status PostTestValidation() { return absl::OkStatus(); }
+  virtual absl::Status PostTestValidation(bool check_retx = true) {
+    return absl::OkStatus();
+  }
   // Used to capture the intermediate details. We separate "dumping debug state"
   // from post-test validation.
   virtual absl::Status TransportSnapshot() { return absl::OkStatus(); }

@@ -16,6 +16,7 @@
 # Note: These are the target directly referenced by test fixtures and test cases.
 
 package(
+    default_applicable_licenses = ["//:package_license"],
     default_testonly = True,
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
@@ -48,6 +49,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
         "@libibverbs",
         "@magic_enum",
@@ -106,7 +108,6 @@ cc_library(
     hdrs = ["basic_fixture.h"],
     deps = [
         ":introspection",
-        "@com_glog_glog//:glog",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -130,6 +131,7 @@ cc_library(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@libibverbs",

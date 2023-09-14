@@ -18,10 +18,10 @@
 #include <tuple>
 
 #include "glog/logging.h"
-#include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
+#include "google/protobuf/text_format.h"
 #include "public/basic_fixture.h"
 #include "public/introspection.h"
 #include "random_walk/action_weights.h"

@@ -193,9 +193,13 @@ Client::Client(int client_id, ibv_context* context, PortAttribute port_attr,
       max_outstanding_ops_per_qp_(config.max_outstanding_ops_per_qp),
       buffer_per_qp_([config]() -> int {
         // Make sure that buffer is at least as large as necessary to hold the
-        // maximum number of outstanding ops per qp.
-        int min_buffer_size = (config.max_op_size + sizeof(ibv_grh)) *
-                              config.max_outstanding_ops_per_qp;
+        // maximum number of outstanding ops per qp plus ibv_grh header for UD
+        // ops. sizeof(uintptr_t) is added to keep extra buffer in case we need
+        // to align it to word size boundary.
+        int min_buffer_size =
+            (config.max_op_size + sizeof(ibv_grh) + sizeof(uintptr_t)) *
+                config.max_outstanding_ops_per_qp +
+            sizeof(uintptr_t);
         if (min_buffer_size > kDefaultBuffersPerQp) {
           LOG(INFO) << "Default buffer size (" << kDefaultBuffersPerQp
                     << "B) is not large enough to hold all outstanding ops. "
@@ -301,13 +305,15 @@ absl::StatusOr<uint32_t> Client::CreateQp(bool is_rc,
   absl::Span<uint8_t> qp_src_buf = GetQpSrcBuffer(qp_id).span();
   absl::Span<uint8_t> qp_dest_buf = GetQpDestBuffer(qp_id).span();
   if (is_rc) {
-    auto qp_state = std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc,
-                                                qp_src_buf, qp_dest_buf);
+    auto qp_state =
+        std::make_unique<RcQpState>(client_id_, qp, qp_id, is_rc, qp_src_buf,
+                                    qp_dest_buf, max_outstanding_ops_per_qp_);
     SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
     qps_[qp_id] = std::move(qp_state);
   } else {  // is UD
-    auto qp_state = std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc,
-                                                qp_src_buf, qp_dest_buf);
+    auto qp_state =
+        std::make_unique<UdQpState>(client_id_, qp, qp_id, is_rc, qp_src_buf,
+                                    qp_dest_buf, max_outstanding_ops_per_qp_);
     SetQpKeys(qp_state.get(), src_mr_[0], dest_mr_[0]);
     qps_[qp_id] = std::move(qp_state);
   }
@@ -415,11 +421,11 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
     sge->addr = reinterpret_cast<uint64_t>(initiator_op_addr);
     sge->length = op_bytes;
 
-    TestOp temp = {.op_id = op_id,
-                   .qp_id = attributes.initiator_qp_id,
-                   .length = sge->length,
-                   .op_type = op_type};
-    auto op = std::make_unique<TestOp>(temp);
+    auto op = std::make_unique<TestOp>();
+    op->op_id = op_id;
+    op->qp_id = attributes.initiator_qp_id;
+    op->length = sge->length;
+    op->op_type = op_type;
 
     if (initiator_buffer_type == BufferType::kSrcBuffer) {
       sge->lkey = initiator_qp_state->src_lkey();
@@ -502,7 +508,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
       }
 
       if (initiator_qp_state->is_rc()) {
-        InitializeRcSrcBuffer(op->src_addr, op->length, op->op_id);
+        InitializeSrcBuffer(op->src_addr, op->length, op->op_id);
         initiator_qp_state->BatchRcSendWqe(std::move(wqe_send), std::move(sge),
                                            op->op_id);
       } else {
@@ -515,9 +521,9 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
         uint32_t remote_qp_num = op->remote_qp->qp()->qp_num;
         wqe_send->wr.ud.remote_qpn = remote_qp_num;
         wqe_send->wr.ud.remote_qkey = kQKey;
+        InitializeSrcBuffer(op->src_addr, op->length,
+                            attributes.ud_send_attributes->remote_op_id);
 
-        InitializeUdSrcBuffer(op->src_addr, op->length,
-                              attributes.ud_send_attributes->remote_op_id);
         // Post the wqe.
         ibv_send_wr* bad_wr;
         EXPECT_EQ(0, ibv_post_send(initiator_qp_state->qp(), wqe_send.get(),
@@ -549,11 +555,11 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
   return absl::OkStatus();
 }
 
-void Client::ExecuteOps(Client& target, const size_t num_qps,
-                        const size_t ops_per_qp, const size_t batch_per_qp,
-                        const size_t max_inflight_per_qp,
-                        const size_t max_inflight_ops_total,
-                        const Client::CompletionMethod completion_method) {
+int Client::ExecuteOps(Client& target, const size_t num_qps,
+                       const size_t ops_per_qp, const size_t batch_per_qp,
+                       const size_t max_inflight_per_qp,
+                       const size_t max_inflight_ops_total,
+                       const Client::CompletionMethod completion_method) {
   absl::Duration kTimeout = absl::GetFlag(FLAGS_completion_timeout_s);
   absl::Time no_completion_timeout = absl::Now() + kTimeout;
 
@@ -605,8 +611,8 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
         }
       };
 
-  // Lambda function that selects a qp to issue an op on. If inflight_ops
-  // is less than max and we haven't issued all ops yet, then issue a new op.
+  // Lambda function that selects a qp to issue an op on. If inflight_ops is
+  // less than max and we haven't issued all ops yet, then issue a new op.
   // Selects the qps in round robin fashion.
   auto maybe_issue_next_op = [this, &target, total_expected_ops,
                               max_inflight_ops_total, ops_per_qp, batch_per_qp,
@@ -621,14 +627,13 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
       return;
 
     auto qp_new_ops = [&](const std::unique_ptr<QpState>& qp_state) {
-      return qp_state->TotalOpsCompleted() + qp_state->outstanding_ops_count() -
+      return qp_state->TotalOpsCompleted() +
+             qp_state->unchecked_initiated_ops().size() +
+             qp_state->outstanding_ops_count() -
              previously_completed_ops[qp_state->qp_id()];
     };
 
-    // Find the next qp that haven't had ops_per_qp posted on. The
-    // `issued_ops < total_expected_ops` condition guarantees that
-    // there's at least one qp with less than ops_per_qp posted on
-    // it, hence the while loop terminates.
+    // Find the next qp that has not ops_per_qp posted on.
     auto next_qp_id_old = next_qp_id;
     while (true) {
       std::unique_ptr<QpState>& qp_state = qps_[next_qp_id];
@@ -643,22 +648,31 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
 
       next_qp_id = (next_qp_id + 1) % num_qps;
       if (next_qp_id == next_qp_id_old) {
-        // We searched all qps once.
-        std::unique_ptr<QpState>& qp_selected = qps_[next_qp_id];
-        VLOG(2) << "Searched over all qps. Issuing new op(s) on qp "
-                << qp_selected->qp_id() << ", with " << qp_new_ops(qp_selected)
-                << " on it.";
-        break;
+        VLOG(2) << "Searched over all qps. Not issuing a new op.";
+        return;
       }
     }
 
     std::unique_ptr<QpState>& qp_state = qps_[next_qp_id];
-    size_t ops_to_post =
-        std::min(std::min<uint64_t>(
-                     batch_per_qp - qp_state->SendRcBatchCount(),
-                     max_inflight_per_qp - qp_state->outstanding_ops_count()),
-                 std::min<uint64_t>(ops_per_qp - qp_new_ops(qp_state),
-                                    max_inflight_ops_total - inflight_ops));
+    // Calculate how many ops we can post on the selected qp. This is the min of
+    // 1. Number of ops required to complete a batch of send WQEs.
+    // 2. Number of ops required to reach max inflight per qp.
+    // 3. Number of ops required to reach total ops to be posted per qp.
+    // 4. Number of ops required to reach total max inflight ops across all qps.
+    int ops_to_batch = batch_per_qp - qp_state->SendRcBatchCount();
+    int ops_to_max_inflight_per_qp = max_inflight_per_qp -
+                                     qp_state->outstanding_ops_count() -
+                                     qp_state->unchecked_initiated_ops().size();
+    int ops_to_total_ops_per_qp = ops_per_qp - qp_new_ops(qp_state);
+    int ops_to_total_inflight = max_inflight_ops_total - inflight_ops;
+
+    int ops_to_post =
+        std::min({ops_to_batch, ops_to_max_inflight_per_qp,
+                  ops_to_total_ops_per_qp, ops_to_total_inflight});
+    if (ops_to_post <= 0) {
+      return;
+    }
+
     for (size_t i = 0; i < ops_to_post; ++i) {
       // Determine the properties of the next operation
       const OperationGenerator::OpAttributes op_attributes =
@@ -729,7 +743,7 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
 
     inflight_ops += ops_to_post;
     issued_ops += ops_to_post;
-    VLOG(2) << " Batched " << ops_to_post
+    VLOG(2) << "Client " << client_id() << ": Batched " << ops_to_post
             << " new ops. All issued ops: " << issued_ops
             << ", Total outstanding_ops_count: " << inflight_ops;
 
@@ -745,7 +759,8 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
         << "Posted all requested OPs.";
   };
 
-  LOG(INFO) << "Issue " << ops_per_qp << " ops per qp.";
+  LOG(INFO) << "Client " << client_id() << ": Issue " << ops_per_qp
+            << " ops per qp.";
 
   PrepareSendCompletionChannel(completion_method);
   target.PrepareRecvCompletionChannel(completion_method);
@@ -765,7 +780,8 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
     maybe_issue_next_op(now);
   }
 
-  LOG(INFO) << "Asked for " << ops_per_qp << " ops per qp, on " << num_qps
+  LOG(INFO) << "Client " << client_id() << ": Asked for " << ops_per_qp
+            << " ops per qp, on " << num_qps
             << " qps, total of : " << ops_per_qp * num_qps << "ops, totalling "
             << total_bytes << " bytes. Issued " << issued_ops << ". Completed "
             << completed_ops << ".";
@@ -776,7 +792,7 @@ void Client::ExecuteOps(Client& target, const size_t num_qps,
               << " operations.";
   }
 
-  EXPECT_EQ(completed_ops, total_expected_ops);
+  return completed_ops;
 }
 
 int Client::TryPollSendCompletions(int count) {
@@ -794,7 +810,8 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
   if (returned == 0) return 0;
 
   if (returned < 0) {
-    LOG(ERROR) << "ERROR polling completion queue!";
+    LOG(ERROR) << "Client " << client_id()
+               << ": ERROR polling completion queue!";
     return 0;
   }
 
@@ -811,8 +828,8 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
     }
   }
   total_completions_ += num_completed;
-  LOG_EVERY_T(INFO, 10)
-      << "Received " << total_completions_ << " completions.";
+  LOG_EVERY_N_SEC(INFO, 1) << "Client " << client_id() << ": Received "
+                           << total_completions_ << " completions.";
   return num_completed;
 }
 absl::StatusOr<int> Client::PollSendCompletions(
@@ -842,8 +859,8 @@ absl::StatusOr<int> Client::PollCompletions(int count, ibv_cq* cq,
     }
 
     if (now >= timeout) {
-      VLOG(2) << "Expected " << count << " completions, polled "
-              << num_completed << " completions.";
+      VLOG(2) << "Client " << client_id() << ": Expected " << count
+              << " completions, polled " << num_completed << " completions.";
       return absl::DeadlineExceededError("Timeout when polling completions.");
     }
     absl::SleepFor(absl::Milliseconds(10));
@@ -920,7 +937,6 @@ int Client::TryPollRecvCompletionsEventDriven() {
 }
 
 int Client::TryPollCompletionsEventDriven(const int epoll_fd, ibv_cq* cq) {
-
   int num_completed = 0;
 
   // Poll for new CQ events.
@@ -933,7 +949,8 @@ int Client::TryPollCompletionsEventDriven(const int epoll_fd, ibv_cq* cq) {
     // res will be 0 when there are no new completions.
     // Check if poll return an error.
     if (pollret < 0) {
-      LOG(WARNING) << "Polling event driven completions failed with errno "
+      LOG(WARNING) << "Client " << client_id()
+                   << ": Polling event driven completions failed with errno "
                    << errno << ": " << std::strerror(errno);
     }
     return 0;
@@ -967,6 +984,7 @@ int Client::ValidateOrDeferCompletions() {
       // completion on the other side has arrived, then we can validate the data
       // landing. The expectation is that all Send/Recv ops on an RC qp
       // arrive in the order they've been issued.
+      std::unique_ptr<TestOp> recv_op_ptr;
       if (op_uptr->op_type == OpTypes::kSend) {
         QpOpInterface* target_qp;
         if (qp_state->is_rc()) {
@@ -976,8 +994,8 @@ int Client::ValidateOrDeferCompletions() {
           // stored in the TestOp struct.
           target_qp = op_uptr->remote_qp;
         }
-        auto recv_op_or = target_qp->TryValidateRecvOp(*op_uptr);
-        if (!recv_op_or) {
+        recv_op_ptr = target_qp->TryValidateRecvOp(*op_uptr);
+        if (recv_op_ptr == nullptr) {
           // Cannot find the corresponding recv op.
           if (qp_state->is_rc()) {
             break;
@@ -986,7 +1004,7 @@ int Client::ValidateOrDeferCompletions() {
             continue;
           }
         } else {
-          dest_addr = recv_op_or.value().dest_addr;
+          dest_addr = recv_op_ptr->dest_addr;
           if (!qp_state->is_rc()) {
             dest_addr += sizeof(ibv_grh);
           }
@@ -1005,6 +1023,7 @@ int Client::ValidateOrDeferCompletions() {
               "client %lu, qp_id %d, op_id: %lu, dest after %s: ", client_id(),
               op_uptr->qp_id, op_uptr->op_id, op_type_str),
           op_uptr->DestBuffer());
+
       if (op_uptr->op_type == OpTypes::kFetchAdd) {
         DCHECK(dest_addr);
         EXPECT_EQ(
@@ -1019,7 +1038,7 @@ int Client::ValidateOrDeferCompletions() {
             (op_uptr->compare_add != *reinterpret_cast<uint64_t*>(src_addr) &&
              *reinterpret_cast<uint64_t*>(src_addr) ==
                  *reinterpret_cast<uint64_t*>(dest_addr)));
-      } else {
+      } else if (qp_state->is_rc()) {
         int buffer_content_compare =
             std::memcmp(src_addr, dest_addr, op_uptr->length);
         EXPECT_EQ(buffer_content_compare, 0);
@@ -1036,17 +1055,15 @@ int Client::ValidateOrDeferCompletions() {
                          op_type_str)
                   << " " << op_uptr->DestBuffer();
         }
-      }
-      if (qp_state->is_rc()) {
         // This op's buffer was generated with op_id = op_ptr->op_id, but it
         // should match with ops_completed on this qp if the completion order is
         // correct.
         EXPECT_EQ(op_uptr->op_id, qp_state->TotalOpsCompleted());
         EXPECT_OK(
-            ValidateDstBufferOrder(dest_addr, op_uptr->length, op_uptr->op_id));
+            ValidateDstBuffer(dest_addr, op_uptr->length, op_uptr->op_id));
       }
+
       // Update qp state after verification of buffers.
-      qp_state->outstanding_ops().erase(op_uptr->op_id);
       qp_state->IncrCompletedBytes(op_uptr->length, op_uptr->op_type);
       qp_state->IncrCompletedOps(1, op_uptr->op_type);
       ++num_validated;
@@ -1123,8 +1140,8 @@ void Client::DumpPendingOps() {
   }
 }
 
-void Client::InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                   uint64_t id) {
+void Client::InitializeSrcBuffer(uint8_t* src_addr, uint32_t length,
+                                 uint64_t id) {
   constexpr int kOpIdGapInBuffer = 32;
 
   // Fill in the buffer with random bytes.
@@ -1148,20 +1165,8 @@ void Client::InitializeRcSrcBuffer(uint8_t* src_addr, uint32_t length,
   }
 }
 
-void Client::InitializeUdSrcBuffer(uint8_t* src_addr, uint32_t length,
-                                   uint64_t remote_op_id) {
-  // Fill in the buffer with random bytes.
-  std::generate_n(src_addr, length, std::ref(random));
-
-  // If the buffer is large enough to hold the remote op id, place it in the
-  // beginning of the buffer.
-  if (length >= sizeof(uint64_t)) {
-    *reinterpret_cast<uint64_t*>(src_addr) = remote_op_id;
-  }
-}
-
-absl::Status Client::ValidateDstBufferOrder(uint8_t* dst_addr, uint32_t length,
-                                            uint64_t id) {
+absl::Status Client::ValidateDstBuffer(uint8_t* dst_addr, uint32_t length,
+                                       uint64_t id) {
   constexpr uint32_t kOpIdGapInBuffer = 32;
   // Validates the sequence of bytes in the buffer as generated by the
   // InitializeRcSrcBuffer function.
@@ -1181,14 +1186,7 @@ bool Client::StoreCompletion(const ibv_wc* completion) {
   auto* op = reinterpret_cast<TestOp*>(completion->wr_id);
   op->status = completion->status;
   auto& qp_state = qps_[op->qp_id];
-
-  if (op->op_type == OpTypes::kRecv) {
-    qp_state->unchecked_received_ops().push_back(
-        std::move(qp_state->outstanding_ops().at(op->op_id)));
-  } else {
-    qp_state->unchecked_initiated_ops().push_back(
-        std::move(qp_state->outstanding_ops().at(op->op_id)));
-  }
+  qp_state->StoreOpForValidation(op);
   return true;
 }
 

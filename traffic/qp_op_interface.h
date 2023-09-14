@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -63,11 +64,16 @@ class QpOpInterface {
   virtual absl::StatusOr<std::vector<uint8_t*>> GetNextOpAddresses(
       const OpAddressesParams& op_params) = 0;
 
+  virtual void StoreOpForValidation(TestOp* op_ptr) = 0;
+
+  virtual void FreeBufferAddress(OpAddressesParams::BufferType buffer_type,
+                                 uint8_t* addr) = 0;
+
   virtual void IncrCompletedBytes(uint64_t bytes, OpTypes op_type) = 0;
 
   virtual void IncrCompletedOps(uint64_t op_cnt, OpTypes op_type) = 0;
 
-  virtual std::optional<TestOp> TryValidateRecvOp(const TestOp& send) = 0;
+  virtual std::unique_ptr<TestOp> TryValidateRecvOp(const TestOp& send) = 0;
 };
 
 }  // namespace rdma_unit_test

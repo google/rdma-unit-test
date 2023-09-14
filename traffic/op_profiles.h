@@ -21,7 +21,8 @@ namespace rdma_unit_test {
 
 // Returns an OperationProfile for UD queue pairs with an even mixture of
 // operations sizes that we most commonly test.
-Config::OperationProfile MixedSizeUdOpProfile();
+constexpr int kDefaultMtu = 4096;
+Config::OperationProfile MixedSizeUdOpProfile(int mtu = kDefaultMtu);
 
 // Returns an OperationProfile for RC queue pairs with an even mixture of all
 // data operation types and operation sizes that we most commonly test.

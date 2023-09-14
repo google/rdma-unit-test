@@ -133,10 +133,11 @@ TEST_P(EventDrivenCompletionsTest, ManyOpsAreSuccessful) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  initiator.ExecuteOps(target, kTestCase.num_qps, kTestCase.num_ops,
-                       kBatchPerQp, kMaxInflightOps,
-                       kMaxInflightOps * kTestCase.num_qps,
-                       kTestCase.completion_method);
+  int ops_completed = initiator.ExecuteOps(
+      target, kTestCase.num_qps, kTestCase.num_ops, kBatchPerQp,
+      kMaxInflightOps, kMaxInflightOps * kTestCase.num_qps,
+      kTestCase.completion_method);
+  EXPECT_EQ(ops_completed, kTestCase.num_qps * kTestCase.num_ops);
 
   FinalizeStateAndCheckLatencies(initiator, target);
 }

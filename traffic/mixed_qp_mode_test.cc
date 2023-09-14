@@ -65,8 +65,10 @@ TEST_P(MixedQpModeTest, BasicTest) {
   initiator.qp_state(1)->set_op_generator(&ud_op_generator);
 
   int ops_per_qp = GetParam();
-  initiator.ExecuteOps(target, /*num_qps=*/2, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps, kMaxInflightOps * 2);
+  int ops_completed =
+      initiator.ExecuteOps(target, /*num_qps=*/2, ops_per_qp, kBatchPerQp,
+                           kMaxInflightOps, kMaxInflightOps * 2);
+  EXPECT_EQ(ops_completed, /*num_qps*/ 2 * ops_per_qp);
 
   HaltExecution(initiator);
   HaltExecution(target);
@@ -77,7 +79,8 @@ TEST_P(MixedQpModeTest, BasicTest) {
 // mixture of op types and sizes.
 TEST_P(MixedQpModeTest, StressTest) {
   RandomizedOperationGenerator ud_op_generator =
-      RandomizedOperationGenerator(MixedSizeUdOpProfile());
+      RandomizedOperationGenerator(MixedSizeUdOpProfile(
+          verbs_util::VerbsMtuToInt(port_attr().attr.active_mtu)));
   RandomizedOperationGenerator rc_op_generator =
       RandomizedOperationGenerator(MixedRcOpProfile());
   const int max_op_bytes =
@@ -117,8 +120,10 @@ TEST_P(MixedQpModeTest, StressTest) {
   }
 
   const int ops_per_qp = kNumOps / kTotalQps;
-  initiator.ExecuteOps(target, kTotalQps, ops_per_qp, kBatchPerQp,
-                       kMaxInflightOps, kMaxInflightOps * kTotalQps);
+  int ops_completed =
+      initiator.ExecuteOps(target, kTotalQps, ops_per_qp, kBatchPerQp,
+                           kMaxInflightOps, kMaxInflightOps * kTotalQps);
+  EXPECT_EQ(ops_completed, kTotalQps * ops_per_qp);
 
   HaltExecution(initiator);
   HaltExecution(target);

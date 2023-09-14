@@ -351,6 +351,11 @@ class AtomicAccessTest : public AccessTestFixture,
         opcode, /*wr_id=*/1, &sge, /*num_sge=*/1, setup.dst_buffer.data(), rkey,
         kCompareAdd, kSwap);
     verbs_util::PostSend(setup.src_qp, wr);
+    if (expected_status == IBV_WC_REM_ACCESS_ERR) {
+      expected_status = Introspection().GeneratesRetryExcOnConnTimeout()
+                            ? IBV_WC_RETRY_EXC_ERR
+                            : expected_status;
+    }
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(setup.src_cq));
     EXPECT_EQ(completion.status, expected_status);

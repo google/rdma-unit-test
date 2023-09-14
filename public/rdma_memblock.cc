@@ -90,7 +90,6 @@ std::shared_ptr<RdmaMemBlock::MemBlock> RdmaMemBlock::Create(
   // Allocate space in 2MB chunks to reduce the number EINTR attempts.
   size_t remaining = size;
   constexpr size_t kChunkSize = 2 * 1024 * 1024;
-  constexpr int kMaximumFallocateEintrAttempts = 10;
   while (remaining > 0) {
     const off_t offset = size - remaining;
     const off_t length = std::min<off_t>(remaining, kChunkSize);
@@ -98,8 +97,7 @@ std::shared_ptr<RdmaMemBlock::MemBlock> RdmaMemBlock::Create(
     int result;
     do {
       result = fallocate(fd, /* mode */ 0, offset, length);
-    } while (result == -1 && errno == EINTR &&
-             ++attempts < kMaximumFallocateEintrAttempts);
+    } while (result == -1 && errno == EINTR && ++attempts < kMaxEinterRetry);
     CHECK_EQ(result, 0) << strerror(errno);  // Crash ok
     remaining -= length;
   }

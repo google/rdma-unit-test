@@ -27,6 +27,7 @@
 
 #include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/declare.h"
 #include "absl/memory/memory.h"
 #include "absl/status/statusor.h"
@@ -48,14 +49,16 @@ namespace rdma_unit_test {
 class QpState : public QpOpInterface {
  public:
   // Contains information about a contiguous range of memory, defined by
-  // base_add and length. It also keeps track of a offset at which new RDMA are
-  // issued on this range.
+  // base_addr and length. It also keeps track of a list of addresses on which
+  // ops are posted, and can either be free or pending.
   struct BufferInfo {
     uint8_t* base_addr = nullptr;
     uint64_t length = 0;
-    // An offset, circular in the range [0, length), used to compute the base
-    // memory address for the next op on this qp.
-    uint64_t next_op_offset = 0;
+    uint64_t max_op_size = 0;
+    // List of free and active address. An active address is one with a pending
+    // operation using it.
+    absl::flat_hash_set<uint8_t*> free_addresses;
+    absl::flat_hash_set<uint8_t*> active_addresses;
   };
 
   // Contains information that defines a UD op's destination, i.e. an address
@@ -66,7 +69,8 @@ class QpState : public QpOpInterface {
   };
 
   QpState(int local_client_id, ibv_qp* qp, uint32_t qp_id, bool is_rc,
-          absl::Span<uint8_t> src_buffer, absl::Span<uint8_t> dest_buffer);
+          absl::Span<uint8_t> src_buffer, absl::Span<uint8_t> dest_buffer,
+          int max_outstanding_ops);
   ~QpState() override = default;
   virtual bool is_rc() const = 0;
 
@@ -175,9 +179,15 @@ class QpState : public QpOpInterface {
   void CheckDataLanded();
 
   // Validate whether the recv end of a two-sided SEND/RECV op is successful.
-  // Return the corresponding RECV op as a TestOp struct if it can be found.
-  // Otherwise, return std::nullopt.
-  std::optional<TestOp> TryValidateRecvOp(const TestOp& send) override;
+  // Return the corresponding RECV op as a TestOp unique_ptr if it can be found.
+  // Otherwise, return nullptr.
+  std::unique_ptr<TestOp> TryValidateRecvOp(const TestOp& send) override;
+
+  // Stores the given TestOp for future validation upon receiving a completion
+  // for the TestOp. It moves the TestOp from outstanding_ops to unchecked_ops,
+  // makes a copy of the src/dst buffers and frees up the src/dst addresses to
+  // be used by subsequent ops.
+  void StoreOpForValidation(TestOp* op_ptr) override;
 
   // Dumps the QP's internal stats into a string.
   virtual std::string ToString() const = 0;
@@ -196,6 +206,12 @@ class QpState : public QpOpInterface {
   // Print buffers content if the flag print_op_buffers is true.
   static void MaybePrintBuffer(absl::string_view prefix_msg,
                                std::string op_buffer);
+
+  // Frees the given address from the specified buffer type (src/dst). This is
+  // called by StoreOpForValidation() function when a completion arrives for an
+  // op and it is stored for future validation.
+  void FreeBufferAddress(OpAddressesParams::BufferType buffer_type,
+                         uint8_t* addr) override;
 
   ibv_qp* qp_ = nullptr;
   BufferInfo src_buffer_;

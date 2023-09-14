@@ -47,16 +47,58 @@ namespace rdma_unit_test {
 
 QpState::QpState(int local_client_id, ibv_qp* qp, uint32_t qp_id, bool is_rc,
                  absl::Span<uint8_t> src_buffer,
-                 absl::Span<uint8_t> dest_buffer)
+                 absl::Span<uint8_t> dest_buffer, int max_outstanding_ops)
     : qp_{qp},
       src_buffer_{.base_addr = src_buffer.data(),
                   .length = src_buffer.size(),
-                  .next_op_offset = 0},
+                  .max_op_size = src_buffer.size() / max_outstanding_ops},
       dest_buffer_{.base_addr = dest_buffer.data(),
                    .length = dest_buffer.size(),
-                   .next_op_offset = 0},
+                   .max_op_size = dest_buffer.size() / max_outstanding_ops},
       local_client_id_{local_client_id},
-      qp_id_{qp_id} {}
+      qp_id_{qp_id} {
+  // Generate the list of aligned addresses (offsets) in the src and dst buffer
+  // to be used by ops posted on this qp. First, align *down* max_op_size. This
+  // is safe as we added an extra buffer of sizeof(uintptr_t) bytes when
+  // allocating the buffer. Next, align the src/dest buffer base addresses.
+  // Finally, calculate offsets as aligned_base_address + i * aligned_op_size.
+
+  src_buffer_.max_op_size -= src_buffer_.max_op_size % sizeof(uintptr_t);
+  dest_buffer_.max_op_size -= dest_buffer_.max_op_size % sizeof(uintptr_t);
+
+  void* aligned_src_buffer_base_addr = src_buffer_.base_addr;
+  std::size_t length = src_buffer_.length;
+  if (std::align(sizeof(uintptr_t),
+                 src_buffer_.max_op_size * max_outstanding_ops,
+                 aligned_src_buffer_base_addr, length) == nullptr) {
+    LOG(FATAL) << "Could not align qp src buffer address."  // Crash OK.
+               << " src_addr: " << aligned_src_buffer_base_addr
+               << " max_ops: " << max_outstanding_ops
+               << " max_op_size: " << src_buffer_.max_op_size
+               << " buffer_length: " << length;
+  }
+
+  void* aligned_dest_buffer_base_addr = dest_buffer_.base_addr;
+  length = dest_buffer_.length;
+  if (std::align(sizeof(uintptr_t),
+                 dest_buffer_.max_op_size * max_outstanding_ops,
+                 aligned_dest_buffer_base_addr, length) == nullptr) {
+    LOG(FATAL) << "Could not align qp dest buffer address."  // Crash OK.
+               << " dest_addr: " << aligned_dest_buffer_base_addr
+               << " max_ops: " << max_outstanding_ops
+               << " max_op_size: " << dest_buffer_.max_op_size
+               << " buffer_length: " << length;
+  }
+
+  for (int i = 0; i < max_outstanding_ops; ++i) {
+    src_buffer_.free_addresses.insert(
+        static_cast<uint8_t*>(aligned_src_buffer_base_addr) +
+        i * src_buffer_.max_op_size);
+    dest_buffer_.free_addresses.insert(
+        static_cast<uint8_t*>(aligned_dest_buffer_base_addr) +
+        i * dest_buffer_.max_op_size);
+  }
+}
 
 void QpState::IncrCompletedBytes(uint64_t bytes, OpTypes op_type) {
   switch (op_type) {
@@ -173,7 +215,7 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
           "Op buffer must be allocated on src_buffer_ or dest_buffer_.");
   }
 
-  if (op_bytes * num_ops > buffer->length) {
+  if (num_ops > buffer->free_addresses.size()) {
     return absl::OutOfRangeError(
         "Allocation request exceeds available buffer space!");
   }
@@ -181,44 +223,16 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
   std::vector<uint8_t*> op_addrs;
   op_addrs.reserve(num_ops);
 
-  uint64_t offset = buffer->next_op_offset;
-  uint64_t len = buffer->length;
-  uint8_t* base = buffer->base_addr;
-
-  if (op_type == OpTypes::kFetchAdd || op_type == OpTypes::kCompSwap) {
-    CHECK_EQ(op_bytes, TestOp::kAtomicWordSize)  // Crash OK
-        << "Invalid op_bytes: " << op_bytes << " for RDMA atomic.";
-    // RDMA atomic operations must always start at 8-bytes aligned addresses.
-    if (offset % op_bytes != 0) {
-      offset += op_bytes - (offset % op_bytes);
-    }
-
-    for (int i = 0; i < num_ops; ++i) {
-      if (offset + op_bytes >= len) offset = 0;
-      op_addrs.push_back(base + offset);
-      VLOG(2) << "New " << TestOp::ToString(op_type)
-              << " op allocated on client " << local_client_id_ << ", qp_id "
-              << qp_id() << ", offset: " << offset << ", op size: " << op_bytes
-              << ", buffer size: " << len;
-      offset += op_bytes;
-    }
-  } else {
-    // If num_ops don't fit in the remaining buffer (ie. len-offset), move the
-    // offset forward to allow an integer number of ops in the remaining buffer
-    // and then wrap the offset around.
-    if (len - offset < op_bytes * num_ops) {
-      offset = (((len - offset) % op_bytes) + offset) % len;
-    }
-    for (int i = 0; i < num_ops; ++i) {
-      VLOG(2) << "New " << TestOp::ToString(op_type)
-              << " op allocated on client " << local_client_id_ << ", qp_id "
-              << qp_id() << ", offset: " << offset << ", op size: " << op_bytes
-              << ", buffer size: " << len;
-      op_addrs.push_back(base + offset);
-      offset = (offset + op_bytes) % len;
-    }
+  for (int i = 0; i < num_ops; ++i) {
+    auto addr_iter = buffer->free_addresses.begin();
+    op_addrs.push_back(*addr_iter);
+    buffer->active_addresses.insert(*addr_iter);
+    buffer->free_addresses.erase(addr_iter);
+    VLOG(2) << "New " << TestOp::ToString(op_type) << " op allocated on client "
+            << local_client_id_ << ", qp_id " << qp_id()
+            << ", addr: " << static_cast<void*>(op_addrs.back())
+            << ", op size: " << op_bytes;
   }
-  buffer->next_op_offset = offset;
   return op_addrs;
 }
 
@@ -302,7 +316,9 @@ void QpState::CheckDataLanded() {
   }
 
   LOG(INFO) << "client " << local_client_id_ << " qp_id " << qp_id() << ", has "
-            << outstanding_ops().size() << " outstanding_ops:";
+            << outstanding_ops().size() << " outstanding_ops "
+            << unchecked_initiated_ops_.size() << " unchecked_initiated_ops_ "
+            << unchecked_received_ops_.size() << " unchecked_received_ops_";
 
   for (const auto& [op_id, op_ptr] : outstanding_ops()) {
     if (op_ptr == nullptr) {
@@ -324,9 +340,27 @@ void QpState::CheckDataLanded() {
               << op_ptr->DestBuffer();
     }
   }
+
+  LOG(INFO) << "Unchecked initiated ops:";
+  for (const auto& op_ptr : unchecked_initiated_ops_) {
+    LOG(INFO) << "op_id " << op_ptr->op_id << " "
+              << static_cast<void*>(op_ptr->src_addr) << " "
+              << static_cast<void*>(op_ptr->dest_addr);
+    VLOG(2) << "src: " << op_ptr->SrcBuffer();
+    VLOG(2) << "dst: " << op_ptr->DestBuffer();
+  }
+
+  LOG(INFO) << "Unchecked received ops:";
+  for (const auto& op_ptr : unchecked_received_ops_) {
+    LOG(INFO) << "op_id " << op_ptr->op_id << " "
+              << static_cast<void*>(op_ptr->src_addr) << " "
+              << static_cast<void*>(op_ptr->dest_addr);
+    VLOG(2) << "src: " << op_ptr->SrcBuffer();
+    VLOG(2) << "dst: " << op_ptr->DestBuffer();
+  }
 }
 
-std::optional<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
+std::unique_ptr<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
   std::unique_ptr<TestOp> target_op_uptr = nullptr;
   if (is_rc()) {
     if (!unchecked_received_ops_.empty()) {
@@ -334,17 +368,13 @@ std::optional<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
       unchecked_received_ops_.pop_front();
     }
   } else {  // is UD
-    // Because UD operations can arrive out of order, find the receive
-    // corresponding receive operation to this send.
+    // Because UD operations can arrive out of order, find the corresponding
+    // receive operation to this send by comparing op buffers directly.
     for (auto dest_it = unchecked_received_ops_.begin();
          dest_it != unchecked_received_ops_.end(); ++dest_it) {
-      // If the buffer is large enough to hold the remote op id, it will
-      // be stored in the beginning of the buffer and we only need to
-      // compare that.
-      int compare_length = std::min(send.length, sizeof(uint64_t));
       if (std::memcmp(send.src_addr,
                       (*dest_it)->dest_addr + sizeof(struct ibv_grh),
-                      compare_length) == 0) {
+                      send.length) == 0) {
         target_op_uptr = std::move(*dest_it);
         unchecked_received_ops_.erase(dest_it);
         break;
@@ -353,37 +383,116 @@ std::optional<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
   }
 
   if (target_op_uptr == nullptr) {
-    MaybePrintBuffer(
-        absl::StrFormat("Store SEND op for future validation! qp_id "
-                        "%d, op_id %lu, src after %s: ",
-                        send.qp_id, send.op_id, TestOp::ToString(send.op_type)),
-        send.SrcBuffer());
-    return absl::nullopt;
+    VLOG(2) << absl::StrFormat(
+        "Store SEND op for future validation! qp_id "
+        "%d, op_id %lu, src after %s: ",
+        send.qp_id, send.op_id, TestOp::ToString(send.op_type)),
+        send.SrcBuffer();
+  } else {
+    EXPECT_EQ(target_op_uptr->status, IBV_WC_SUCCESS);
+    IncrCompletedBytes(send.length, OpTypes::kRecv);
+    IncrCompletedOps(1, OpTypes::kRecv);
   }
 
-  EXPECT_EQ(target_op_uptr->status, IBV_WC_SUCCESS);
-  uint8_t* dest_addr = target_op_uptr->dest_addr;
-  // The beginning of the UD receive buffer will contain an ibv_grh
-  if (!is_rc()) {
-    dest_addr += sizeof(ibv_grh);
-  }
-  outstanding_ops().erase(target_op_uptr->op_id);
-  IncrCompletedBytes(send.length, OpTypes::kRecv);
-  IncrCompletedOps(1, OpTypes::kRecv);
+  return target_op_uptr;
+}
 
-  return *target_op_uptr;
+void QpState::StoreOpForValidation(TestOp* op_ptr) {
+  using BufferType = QpState::OpAddressesParams::BufferType;
+  auto iter = outstanding_ops_.find(op_ptr->op_id);
+  if (iter == outstanding_ops_.end()) {
+    LOG(FATAL) << "Trying to defer an op that is not pending.";  // Crash OK.
+  }
+
+  // Move the op from outstanding_ops to unchecked_ops.
+  if (op_ptr->op_type == OpTypes::kRecv) {
+    unchecked_received_ops().push_back(
+        std::move(outstanding_ops().at(op_ptr->op_id)));
+  } else {
+    unchecked_initiated_ops().push_back(
+        std::move(outstanding_ops().at(op_ptr->op_id)));
+  }
+  outstanding_ops().erase(op_ptr->op_id);
+
+  // Make a copy of op src/dest buffer in a separate variable.
+  if (op_ptr->src_addr != nullptr) {
+    op_ptr->src_buffer_copy = std::make_unique<std::vector<uint8_t>>(
+        op_ptr->src_addr, op_ptr->src_addr + src_buffer_.max_op_size);
+  }
+  if (op_ptr->dest_addr != nullptr) {
+    op_ptr->dest_buffer_copy = std::make_unique<std::vector<uint8_t>>(
+        op_ptr->dest_addr, op_ptr->dest_addr + dest_buffer_.max_op_size);
+  }
+
+  // Free up the initiator side buffer address.
+  switch (op_ptr->op_type) {
+    case OpTypes::kWrite:
+    case OpTypes::kSend:
+      FreeBufferAddress(BufferType::kSrcBuffer, op_ptr->src_addr);
+      break;
+    case OpTypes::kRead:
+    case OpTypes::kRecv:
+    case OpTypes::kCompSwap:
+    case OpTypes::kFetchAdd:
+      FreeBufferAddress(BufferType::kDestBuffer, op_ptr->dest_addr);
+      break;
+    case OpTypes::kInvalid:
+      LOG(FATAL) << "Invalid op_type.";  // Crash OK.
+  }
+  // If one-sided op, then free up the buffer address on the target side too.
+  if (op_ptr->op_type != OpTypes::kSend && op_ptr->op_type != OpTypes::kRecv) {
+    QpOpInterface* target_qp;
+    if (is_rc()) {
+      target_qp = remote_qp_state();
+    } else {  // is UD.
+      target_qp = op_ptr->remote_qp;
+    }
+    if (target_qp == nullptr) {
+      LOG(FATAL) << "Target QP cannot be null";  // Crash OK.
+    }
+    if (op_ptr->op_type == OpTypes::kWrite) {
+      target_qp->FreeBufferAddress(BufferType::kDestBuffer, op_ptr->dest_addr);
+    } else {
+      target_qp->FreeBufferAddress(BufferType::kSrcBuffer, op_ptr->src_addr);
+    }
+  }
+
+  // Set the src/dst addr to point to the copy data.
+  if (op_ptr->src_addr != nullptr) {
+    op_ptr->src_addr = op_ptr->src_buffer_copy->data();
+  }
+  if (op_ptr->dest_addr != nullptr) {
+    op_ptr->dest_addr = op_ptr->dest_buffer_copy->data();
+  }
+}
+
+void QpState::FreeBufferAddress(OpAddressesParams::BufferType buffer_type,
+                                uint8_t* addr) {
+  if (buffer_type == OpAddressesParams::BufferType::kSrcBuffer) {
+    auto iter = src_buffer_.active_addresses.find(addr);
+    if (iter == src_buffer_.active_addresses.end()) {
+      LOG(FATAL) << "Freeing src buffer addr that is not pending";  // Crash OK.
+    }
+    src_buffer_.free_addresses.insert(addr);
+    src_buffer_.active_addresses.erase(iter);
+  } else {
+    auto iter = dest_buffer_.active_addresses.find(addr);
+    if (iter == dest_buffer_.active_addresses.end()) {
+      LOG(FATAL) << "Freeing dst buffer addr that is not pending";  // Crash OK.
+    }
+    dest_buffer_.free_addresses.insert(addr);
+    dest_buffer_.active_addresses.erase(iter);
+  }
 }
 
 std::string QpState::DumpState() const {
   std::stringstream out;
   out << " qp_id: " << qp_id() << ",\n"
       << " qp_ptr: " << qp() << ",\n"
-      << absl::StrFormat(" src_buffer: base: %p, length: %lu, offset: %lu\n",
-                         src_buffer().base_addr, src_buffer().length,
-                         src_buffer().next_op_offset)
-      << absl::StrFormat(" dest_buffer: base: %p, length: %lu, offset: %lu\n",
-                         dest_buffer().base_addr, dest_buffer().length,
-                         dest_buffer().next_op_offset)
+      << absl::StrFormat(" src_buffer: base: %p, length: %lu\n",
+                         src_buffer().base_addr, src_buffer().length)
+      << absl::StrFormat(" dest_buffer: base: %p, length: %lu\n",
+                         dest_buffer().base_addr, dest_buffer().length)
       << " src_lkey: " << src_lkey() << ",\n"
       << " dest_lkey: " << dest_lkey() << ",\n"
       << " write_bytes_completed: " << BytesCompleted(OpTypes::kWrite) << ",\n"

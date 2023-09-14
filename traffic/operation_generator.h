@@ -21,9 +21,9 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/repeated_field.h"
 #include "absl/flags/declare.h"
 #include "absl/memory/memory.h"
+#include "google/protobuf/repeated_field.h"
 #include "traffic/config.pb.h"
 #include "traffic/op_types.h"
 
@@ -63,8 +63,7 @@ class RandomizedOperationGenerator : public OperationGenerator {
 
   // Returns the sum of the number of qps from all op_profiles.
   static int32_t TotalQps(
-      const google::protobuf::RepeatedPtrField<Config::OperationProfile>&
-          op_profiles) {
+      const google::protobuf::RepeatedPtrField<Config::OperationProfile>& op_profiles) {
     int32_t max_qps_per_client = 0;
     for (auto& profile : op_profiles) {
       if (profile.has_rc_op_profile()) {
@@ -84,8 +83,7 @@ class RandomizedOperationGenerator : public OperationGenerator {
 
   // Returns the maximum op size from any of the op_profiles.
   static int32_t MaxOpSize(
-      const google::protobuf::RepeatedPtrField<Config::OperationProfile>&
-          op_profiles) {
+      const google::protobuf::RepeatedPtrField<Config::OperationProfile>& op_profiles) {
     int32_t max = 0;
     for (auto& profile : op_profiles) {
       for (auto& elem : profile.op_size_proportions()) {

@@ -16,6 +16,7 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_TEST_OP_H_
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -57,6 +58,9 @@ struct TestOp {
   uint64_t compare_add = 0;
   // Relevant only for atomic "comp_swap" operation.
   uint64_t swap = 0;
+  // Copy of op buffers for deferred validation.
+  std::unique_ptr<std::vector<uint8_t>> src_buffer_copy = nullptr;
+  std::unique_ptr<std::vector<uint8_t>> dest_buffer_copy = nullptr;
 
   // Assigned when completion is polled.
   ibv_wc_status status;

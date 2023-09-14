@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "infiniband/verbs.h"
@@ -76,12 +77,17 @@ class RdmaStressFixture : public BasicFixture {
   // 2. Check whether all async events have completed.
   void HaltExecution(Client& client);
 
-  // Best effort attempt to poll async event queue and log results to stderr.
-  // Polls the event queue once in non-blocking mode (the fixture's constructor
-  // sets up the non-blocking mode) and acknowledges the events polled. Returns
-  // OkStatus if no events polled, returns Internal error if an event is polled
-  // and acknowledged, returns error if it fails on poll or event calls.
+  // Best effort attempt to poll async event queue and log results to stderr for
+  // all contexts.
   absl::Status PollAndAckAsyncEvents();
+
+  // Best effort attempt to poll async event queue and log results to stderr for
+  // a specific context. Polls the event queue once in non-blocking mode (the
+  // fixture's constructor sets up the non-blocking mode) and acknowledges the
+  // events polled. Returns OkStatus if no events polled, returns Internal error
+  // if an event is polled and acknowledged, returns error if it fails on poll
+  // or event calls.
+  absl::Status PollAndAckAsyncEvents(ibv_context* context);
 
   // Configures latencies measurement parameters for the given RDMA operations.
   void ConfigureLatencyMeasurements(OpTypes op_type);
@@ -93,13 +99,30 @@ class RdmaStressFixture : public BasicFixture {
   // a certain percentage of one another.
   void CheckLatencies();
 
-  ibv_context* context() const { return context_; }
+  // Limits the number of total ops issued in a test based on op_size.
+  static int LimitNumOps(int op_size, int num_ops);
 
-  PortAttribute port_attr() const { return port_attr_; }
+  // Returns true if the test checks whether retransmission happens based on
+  // number of queue pairs.
+  bool AllowRetxCheck(int num_qp);
+
+  // Return the context of index. Used for supporting running multiple
+  // functions in one test. Return nullptr if index is not valid.
+  ibv_context* context(uint index = 0) const {
+    if (index >= contexts_.size()) return nullptr;
+    return contexts_.at(index);
+  }
+
+  // Return the port_attr of index. Used for supporting running multiple
+  // functions in one test. Return empty PortAttribute is index is not valid.
+  PortAttribute port_attr(uint index = 0) const {
+    if (index >= port_attrs_.size()) return PortAttribute();
+    return port_attrs_.at(index);
+  }
 
  protected:
-  ibv_context* context_ = nullptr;
-  PortAttribute port_attr_;
+  std::vector<ibv_context*> contexts_ = {};
+  std::vector<PortAttribute> port_attrs_ = {};
   std::unique_ptr<TransportValidation> validation_ = nullptr;
   std::unique_ptr<LatencyMeasurement> latency_measure_;
   VerbsHelperSuite ibv_;

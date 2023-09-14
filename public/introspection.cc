@@ -29,8 +29,10 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
 #include <magic_enum.hpp>
 #include "infiniband/verbs.h"
@@ -108,15 +110,28 @@ std::string NicIntrospection::DumpHardwareCounters() const {
 
 const NicIntrospection& Introspection() {
   static NicIntrospection* introspection = []() {
+    // Introspection happens before the test happens and is used to examine
+    // whether the NIC type is supported/registered.
+    // In our current use case, we only test one NIC type at one time, so only
+    // the first device name is needed here.
+    std::string device_names = absl::GetFlag(FLAGS_device_name);
+    std::vector<std::string_view> devices = absl::StrSplit(device_names, ',');
+    std::string dev_name = std::string(devices.at(0));
     absl::StatusOr<ibv_context*> context_or =
-        rdma_unit_test::verbs_util::OpenUntrackedDevice(
-            absl::GetFlag(FLAGS_device_name));
+        rdma_unit_test::verbs_util::OpenUntrackedDevice(dev_name);
     CHECK_OK(context_or.status());  // Crash ok
     ibv_context* context = context_or.value();
     ibv_device_attr attr;
     int query_result = ibv_query_device(context, &attr);
     CHECK_EQ(0, query_result);  // Crash ok
     std::string device_name = context->device->name;
+    // roce device name is overridden as: roce[<vendor_id>:<vendor_part_id>]
+    // according to
+    // https://github.com/linux-rdma/rdma-core/blob/master/kernel-boot/rdma-persistent-naming.rules
+    if (absl::StartsWith(device_name, "roce")) {
+      device_name =
+          absl::StrFormat("roce[%x:%x]", attr.vendor_id, attr.vendor_part_id);
+    }
     CHECK_EQ(0, ibv_close_device(context));  // Crash ok
 
     IntrospectionRegistrar::Factory factory =

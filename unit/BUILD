@@ -17,6 +17,7 @@
 #
 # linkstatic = 1 is to facilitate running on real hardware.
 package(
+    default_applicable_licenses = ["//:package_license"],
     default_testonly = True,
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
@@ -393,6 +394,7 @@ cc_library(
     srcs = ["async_event_test.cc"],
     deps = [
         ":loopback_fixture",
+        "//public:introspection",
         "//public:status_matchers",
         "//public:verbs_util",
         "@com_google_absl//absl/status",
@@ -413,6 +415,7 @@ cc_library(
     testonly = 1,
     srcs = ["gunit_main.cc"],
     deps = [
+        "//internal:introspection_irdma",
         "//internal:introspection_mlx4",
         "//internal:introspection_mlx5",
         "//internal:introspection_rxe",
@@ -492,18 +495,6 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@libibverbs",
-    ],
-)
-
-cc_library(
-    name = "rdma_verbs_fixture_cc",
-    srcs = ["rdma_verbs_fixture.cc"],
-    hdrs = ["rdma_verbs_fixture.h"],
-    deps = [
-        "//public:basic_fixture",
-        "//public:introspection",
-        "//public:verbs_helper_suite",
-        "@com_glog_glog//:glog",
     ],
 )
 

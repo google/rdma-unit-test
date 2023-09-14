@@ -89,6 +89,7 @@ cc_library(
         ":test_op",
         "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
@@ -255,6 +256,8 @@ cc_library(
 cc_test(
     name = "basic_rc_test",
     timeout = "long",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":basic_rc_test_cc",
@@ -283,6 +286,8 @@ cc_library(
 cc_test(
     name = "basic_ud_test",
     timeout = "long",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":basic_ud_test_cc",
@@ -337,6 +342,8 @@ cc_library(
 cc_test(
     name = "mixed_qp_mode_test",
     timeout = "long",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":mixed_qp_mode_test_cc",
@@ -366,6 +373,8 @@ cc_library(
 cc_test(
     name = "qp_oversubscription_test",
     timeout = "long",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":qp_oversubscription_test_cc",
@@ -394,6 +403,8 @@ cc_library(
 
 cc_test(
     name = "ud_burst_test",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":ud_burst_test_cc",
@@ -482,6 +493,8 @@ cc_library(
 
 cc_test(
     name = "rnr_nack_test",
+    args = [
+    ],
     linkstatic = 1,
     deps = [
         ":rnr_nack_test_cc",

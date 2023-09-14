@@ -64,8 +64,10 @@ TEST_P(VaryMtuTest, VaryMtuTest) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  initiator.ExecuteOps(target, kNumQps, kOpsPerQp, /*batch_per_qp=*/1,
-                       kMaxInflightOps, kMaxInflightOps);
+  int ops_completed =
+      initiator.ExecuteOps(target, kNumQps, kOpsPerQp, /*batch_per_qp=*/1,
+                           kMaxInflightOps, kMaxInflightOps);
+  EXPECT_EQ(ops_completed, kNumQps * kOpsPerQp);
 
   HaltExecution(initiator);
   HaltExecution(target);

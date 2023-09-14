@@ -277,11 +277,14 @@ TEST_F(MrLoopbackTest, ReregMrChangeAccess) {
       /*wr_id=*/0, &sg, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
   verbs_util::PostSend(local.qp, read);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   // The remote_read request should fail since the remote side does not have
   // permission for remote_read.
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.wr_id, 0);
 }
 

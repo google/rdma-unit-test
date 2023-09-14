@@ -27,7 +27,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/internal/hash_function_defaults.h"
 #include "absl/random/random.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
@@ -70,11 +69,9 @@ class RandomWalkSampler {
   ~RandomWalkSampler() = default;
 
   // Returns a uniformly random element from an absl::flat_hash_set.
-  template <class Type,
-            class Hash = absl::container_internal::hash_default_hash<Type>,
-            class Eq = absl::container_internal::hash_default_eq<Type>>
+  template <class Type>
   absl::optional<Type> GetRandomSetElement(
-      const absl::flat_hash_set<Type, Hash, Eq>& set) const {
+      const absl::flat_hash_set<Type>& set) const {
     if (set.empty()) {
       return absl::nullopt;
     }

@@ -49,26 +49,26 @@ RdmaStressFixture::RdmaStressFixture() {
   validation_ = std::make_unique<TransportValidation>();
   latency_measure_ = std::make_unique<LatencyMeasurement>();
   // Open the verbs device available.
-  auto context = ibv_.OpenDevice();
-  CHECK_OK(context.status());  // Crash OK
-  context_ = *context;
-  port_attr_ = ibv_.GetPortAttribute(context_);
-
-  // Change the blocking mode of the async event queue.
-  VLOG(2) << "Allow getting asynchronous events in nonblocking mode.";
-  int flags = TEMP_FAILURE_RETRY(fcntl(context_->async_fd, F_GETFL));
-  if (flags < 0) {
-    LOG(ERROR) << "Failed reading async_fd file status flags on device "
-               << context_->device->name
-               << ". Calls to PollAndAckAsyncEvents will remain blocking.";
-    return;
+  absl::Status status = ibv_.OpenAllDevices(contexts_);
+  CHECK_OK(status);  // Crash OK
+  for (auto& context : contexts_) {
+    port_attrs_.push_back(ibv_.GetPortAttribute(context));
+    // Change the blocking mode of the async event queue.
+    VLOG(2) << "Allow getting asynchronous events in nonblocking mode.";
+    int flags = TEMP_FAILURE_RETRY(fcntl(context->async_fd, F_GETFL));
+    if (flags < 0) {
+      LOG(ERROR) << "Failed reading async_fd file status flags on device "
+                 << context->device->name
+                 << ". Calls to PollAndAckAsyncEvents will remain blocking.";
+      return;
+    }
+    int ret = TEMP_FAILURE_RETRY(
+        fcntl(context->async_fd, F_SETFL, flags | O_NONBLOCK));
+    LOG_IF(ERROR, ret < 0)
+        << "Failed setting async events queue to nonblocking"
+        << " mode on device " << context->device->name
+        << ". Calls to PollAndAckAsyncEvents will remain blocking.";
   }
-  int ret = TEMP_FAILURE_RETRY(
-      fcntl(context_->async_fd, F_SETFL, flags | O_NONBLOCK));
-  LOG_IF(ERROR, ret < 0)
-      << "Failed setting async events queue to nonblocking"
-      << " mode on device " << context_->device->name
-      << ". Calls to PollAndAckAsyncEvents will remain blocking.";
 }
 
 absl::Status RdmaStressFixture::SetUpRcClientsQPs(Client* local,
@@ -194,7 +194,7 @@ void RdmaStressFixture::HaltExecution(Client& client) {
 
   // Keep polling async events for possible errors until no more events exist.
   while (true) {
-    auto async_event_status = PollAndAckAsyncEvents();
+    auto async_event_status = PollAndAckAsyncEvents(client.GetContext());
     if (async_event_status.ok() || absl::IsUnavailable(async_event_status))
       break;
     LOG(ERROR) << async_event_status.message();
@@ -202,9 +202,18 @@ void RdmaStressFixture::HaltExecution(Client& client) {
 }
 
 absl::Status RdmaStressFixture::PollAndAckAsyncEvents() {
+  // Poll and Ack AE for all contexts in the fixture.
+  for (auto context : contexts_) {
+    auto status = PollAndAckAsyncEvents(context);
+    if (!status.ok()) return status;
+  }
+  return absl::OkStatus();
+}
+
+absl::Status RdmaStressFixture::PollAndAckAsyncEvents(ibv_context* context) {
   // Poll on the async fd of the RDMA context, check if an event is available.
   pollfd poll_fd{};
-  poll_fd.fd = context_->async_fd;
+  poll_fd.fd = context->async_fd;
   poll_fd.events = POLLIN;
   int millisec_timeout = 0;
   int ret = TEMP_FAILURE_RETRY(poll(&poll_fd, 1, millisec_timeout));
@@ -219,7 +228,7 @@ absl::Status RdmaStressFixture::PollAndAckAsyncEvents() {
 
   // Read the ready event.
   ibv_async_event event{};
-  ret = ibv_get_async_event(context_, &event);
+  ret = ibv_get_async_event(context, &event);
   if (ret) {
     return absl::UnavailableError("Async event doesn't exist.");
   }
@@ -230,6 +239,19 @@ absl::Status RdmaStressFixture::PollAndAckAsyncEvents() {
   // involving the received async event.
   ibv_ack_async_event(&event);
   return status;
+}
+
+int RdmaStressFixture::LimitNumOps(int op_size, int num_ops) {
+  // When testing large op_size (16k), limit the total number of ops no greater
+  // than 100k.
+  if (op_size >= 16384) {
+    return std::min(num_ops, 100000);
+  }
+  return num_ops;
+}
+
+bool RdmaStressFixture::AllowRetxCheck(int num_qp) {
+  return true;
 }
 
 void RdmaStressFixture::ConfigureLatencyMeasurements(OpTypes op_type) {

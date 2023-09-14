@@ -398,9 +398,9 @@ TEST_F(SrqTest, SendRnr) {
   verbs_util::PostSend(setup.send_qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.send_cq));
-  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
-                                    ? IBV_WC_RNR_RETRY_EXC_ERR
-                                    : IBV_WC_RETRY_EXC_ERR;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_RNR_RETRY_EXC_ERR;
   EXPECT_EQ(completion.status, expected);
   EXPECT_THAT(setup.recv_buffer.span(), Each(kRecvContent));
 }
@@ -686,9 +686,9 @@ TEST_F(SrqMultiThreadTest, MultiThreadedSrqLoopback) {
   }
   // The last send_wr should get an RnR.
   ASSERT_OK_AND_ASSIGN(ibv_wc wc, verbs_util::WaitForCompletion(setup.send_cq));
-  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
-                                    ? IBV_WC_RNR_RETRY_EXC_ERR
-                                    : IBV_WC_RETRY_EXC_ERR;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_RNR_RETRY_EXC_ERR;
   EXPECT_EQ(wc.status, expected) << "too many rr in srq";
 
   std::vector<bool> succeeded(kTotalWr, false);

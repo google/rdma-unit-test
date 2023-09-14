@@ -29,7 +29,9 @@
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_split.h"
 #include "absl/synchronization/mutex.h"
 #include <magic_enum.hpp>
 #include "infiniband/verbs.h"
@@ -271,6 +273,60 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice() {
   VLOG(1) << "Opened device " << context;
 
   return context;
+}
+
+absl::Status VerbsHelperSuite::OpenAllDevices(
+    std::vector<ibv_context*>& contexts) {
+  std::vector<std::string> device_names;
+  if (!absl::GetFlag(FLAGS_device_name).empty()) {
+    device_names = absl::StrSplit(absl::GetFlag(FLAGS_device_name), ',');
+  } else {
+    absl::StatusOr<std::vector<std::string>> enum_results =
+        verbs_util::EnumerateDeviceNames();
+    if (!enum_results.ok()) return enum_results.status();
+    device_names = enum_results.value();
+  }
+
+  ibv_context* context = nullptr;
+  std::vector<PortAttribute> port_attrs;
+  for (auto& device_name : device_names) {
+    absl::StatusOr<ibv_context*> context_or =
+        verbs_util::OpenUntrackedDevice(device_name);
+    LOG(INFO) << "Opening device: " << device_name;
+    if (!context_or.ok()) {
+      LOG(INFO) << "Failed to open device: " << device_name;
+      continue;
+    }
+    context = context_or.value();
+    absl::StatusOr<std::vector<PortAttribute>> enum_result =
+        EnumeratePorts(context);
+    if (enum_result.ok() && !enum_result.value().empty()) {
+      port_attrs = enum_result.value();
+      VLOG(1) << "Found (" << port_attrs.size()
+              << ") active ports for device: " << device_name;
+      contexts.push_back(context);
+    } else {
+      LOG(INFO) << "Failed to get ports for device: " << device_name;
+      LOG(INFO) << "Getting error" << enum_result.status().message();
+      int result = ibv_close_device(context);
+      LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
+    }
+    if (!context || port_attrs.empty()) {
+      return absl::InternalError(absl::StrCat("Failed to open device ",
+                                              context->device->name,
+                                              " with active ports."));
+    }
+    cleanup_.AddCleanup(context);
+    absl::MutexLock guard(&mtx_port_attrs_);
+    port_attrs_[context] = port_attrs;
+    VLOG(1) << "Opened device " << context;
+    context = nullptr;
+  }
+  if (contexts.empty()) {
+    return absl::InternalError("Failed to open any device with active ports.");
+  }
+
+  return absl::OkStatus();
 }
 
 ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, uint8_t port, uint8_t sgid_index,
@@ -559,6 +615,7 @@ std::string GidToString(const ibv_gid& gid) {
 absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
     ibv_context* context) {
   std::vector<PortAttribute> result;
+  ibv_port_attr port_attr = {};
   bool ipv4_only = absl::GetFlag(FLAGS_ipv4_only);
   LOG(INFO) << "Enumerating Ports for " << context
             << " ipv4_only: " << ipv4_only;
@@ -568,23 +625,43 @@ absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
     return absl::InternalError("Failed to query device ports.");
   }
 
-  // libibverbs port numbers start at 1.
-  for (uint8_t port = 1; port <= dev_attr.phys_port_cnt; ++port) {
-    ibv_port_attr port_attr = {};
+  int32_t port = absl::GetFlag(FLAGS_port_num);
+  int gid_index = absl::GetFlag(FLAGS_gid_index);
+  if (port) {
     query_result = ibv_query_port(context, port, &port_attr);
+  } else {
+    // libibverbs port numbers start at 1.
+    for (port = 1; port <= dev_attr.phys_port_cnt; ++port) {
+      port_attr = {};
+      query_result = ibv_query_port(context, port, &port_attr);
+      if (query_result != 0) {
+        return absl::InternalError("Failed to query port attributes.");
+      }
+      VLOG(1) << "Found port: " << static_cast<uint32_t>(port) << std::endl
+              << "\t"
+              << "state: " << port_attr.state << std::endl
+              << "\t"
+              << " mtu: " << (128 << port_attr.active_mtu) << std::endl
+              << "\t"
+              << "max_msg_sz: " << port_attr.max_msg_sz;
+      if (port_attr.state == IBV_PORT_ACTIVE) {
+        break;
+      }
+    }
+  }
+
+  if (gid_index >= 0) {
+    ibv_gid gid = {};
+    query_result = ibv_query_gid(context, port, gid_index, &gid);
     if (query_result != 0) {
-      return absl::InternalError("Failed to query port attributes.");
+      return absl::InternalError("Failed to query gid.");
     }
-    VLOG(1) << "Found port: " << static_cast<uint32_t>(port) << std::endl
-            << "\t"
-            << "state: " << port_attr.state << std::endl
-            << "\t"
-            << " mtu: " << (128 << port_attr.active_mtu) << std::endl
-            << "\t"
-            << "max_msg_sz: " << port_attr.max_msg_sz;
-    if (port_attr.state != IBV_PORT_ACTIVE) {
-      continue;
-    }
+    PortAttribute match{.port = static_cast<uint8_t>(port),
+                        .gid = gid,
+                        .gid_index = gid_index,
+                        .attr = port_attr};
+    result.push_back(match);
+  } else {
     for (int gid_index = 0; gid_index < port_attr.gid_tbl_len; ++gid_index) {
       ibv_gid gid = {};
       query_result = ibv_query_gid(context, port, gid_index, &gid);
@@ -598,11 +675,12 @@ absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
       if (ipv4_only && (ip_type == AF_INET6)) {
         continue;
       }
-
-      VLOG(2) << absl::StrFormat("Adding port %u with gid %s", port,
+      VLOG(2) << absl::StrFormat("Adding port %d with gid %s", port,
                                  GidToString(gid));
-      PortAttribute match{
-          .port = port, .gid = gid, .gid_index = gid_index, .attr = port_attr};
+      PortAttribute match{.port = static_cast<uint8_t>(port),
+                          .gid = gid,
+                          .gid_index = gid_index,
+                          .attr = port_attr};
       result.push_back(match);
     }
   }

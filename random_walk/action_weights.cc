@@ -85,8 +85,7 @@ ActionWeights SimpleRdmaActions() {
   )pb";
 
   ActionWeights weights;
-  bool result =
-      google::protobuf::TextFormat::ParseFromString(kWeights, &weights);
+  bool result = google::protobuf::TextFormat::ParseFromString(kWeights, &weights);
   CHECK_EQ(result, true) << "Failed to parse proto from string.";  // Crash ok
   return weights;
 }

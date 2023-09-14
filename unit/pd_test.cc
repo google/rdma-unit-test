@@ -320,7 +320,10 @@ TEST_F(PdRcLoopbackMrTest, BasicReadMrOtherPdRemote) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
+  EXPECT_EQ(completion.status, expected);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdLocal) {
@@ -390,9 +393,12 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
       kCompareAdd);
   verbs_util::PostSend(setup.local_qp, fetch_add);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 }
 
 TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
@@ -428,9 +434,12 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
       kCompareAdd, kSwap);
   verbs_util::PostSend(setup.local_qp, comp_swap);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.local_cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 }
 
 class PdUdLoopbackTest : public RdmaVerbsFixture {
@@ -580,7 +589,10 @@ TEST_F(PdType1MwTest, ReadMwOtherPd) {
   verbs_util::PostSend(setup.local_qp, read);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
+  EXPECT_EQ(completion.status, expected);
 }
 
 TEST_F(PdType1MwTest, WriteMwOtherPd) {
@@ -607,7 +619,10 @@ TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
   verbs_util::PostSend(setup.local_qp, fetch_add);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
+  EXPECT_EQ(completion.status, expected);
 }
 
 TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
@@ -620,9 +635,12 @@ TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, setup.buffer.data(), mw->rkey,
       kCompareAdd, kSwap);
   verbs_util::PostSend(setup.local_qp, comp_swap);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 }
 
 class PdSrqTest : public RdmaVerbsFixture {

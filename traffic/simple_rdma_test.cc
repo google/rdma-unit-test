@@ -124,8 +124,10 @@ TEST_F(SimpleRdmaTest, Batching) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
-                       kBatchPerQp, kMaxInflightPerQp, kMaxInflightOps);
+  int ops_completed = initiator.ExecuteOps(target, kDefaultLargeQpsPerClient,
+                                           kDefaultLargeOpsPerQp, kBatchPerQp,
+                                           kMaxInflightPerQp, kMaxInflightOps);
+  EXPECT_EQ(ops_completed, kDefaultLargeQpsPerClient * kDefaultLargeOpsPerQp);
 
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
@@ -170,9 +172,11 @@ TEST_F(SimpleRdmaTest, MixedOpType) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
-                       /*batch_per_qp=*/1, /*max_inflight_per_qp=*/INT_MAX,
-                       kDefaultMaxInflightOps);
+  int ops_completed = initiator.ExecuteOps(
+      target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
+      /*batch_per_qp=*/1, /*max_inflight_per_qp=*/INT_MAX,
+      kDefaultMaxInflightOps);
+  EXPECT_EQ(ops_completed, kDefaultLargeQpsPerClient * kDefaultLargeOpsPerQp);
 
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());
@@ -214,9 +218,10 @@ TEST_F(SimpleRdmaTest, MixedOpSize) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
-  initiator.ExecuteOps(target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
-                       /*batch_per_qp=*/1, kDefaultMaxInflightOps,
-                       kDefaultMaxInflightOps);
+  int ops_completed = initiator.ExecuteOps(
+      target, kDefaultLargeQpsPerClient, kDefaultLargeOpsPerQp,
+      /*batch_per_qp=*/1, kDefaultMaxInflightOps, kDefaultMaxInflightOps);
+  EXPECT_EQ(ops_completed, kDefaultLargeQpsPerClient * kDefaultLargeOpsPerQp);
 
   EXPECT_THAT(validation_->PostTestValidation(), IsOk());
   EXPECT_THAT(PollAndAckAsyncEvents(), IsOk());

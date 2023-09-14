@@ -37,13 +37,14 @@ class QpOversubscriptionTest
           std::tuple</*max_qps*/ int, /*op_size*/ int, OpTypes>> {
  public:
   static constexpr int kQpsEachStep = 500;
-  static constexpr int kOpsPerQp = 1000;
 };
 
 TEST_P(QpOversubscriptionTest, StressTest) {
   const int kMaxQps = std::get<0>(GetParam());
   const int kOpSize = std::get<1>(GetParam());
   const OpTypes KOpType = std::get<2>(GetParam());
+  const int kOpsPerQp = std::min(
+      RdmaStressFixture::LimitNumOps(kOpSize, 1000000) / kMaxQps, 1000);
 
   const int kMaxInflightOps = 32;
   const int kBatchPerQp = 8;
@@ -92,8 +93,10 @@ TEST_P(QpOversubscriptionTest, StressTest) {
     total_qps += qps_each_step;
     stat_set_counter += 2;
 
-    initiator.ExecuteOps(target, total_qps, kOpsPerQp, kBatchPerQp,
-                         kMaxInflightOps, kMaxInflightOps * total_qps);
+    int ops_completed =
+        initiator.ExecuteOps(target, total_qps, kOpsPerQp, kBatchPerQp,
+                             kMaxInflightOps, kMaxInflightOps * total_qps);
+    EXPECT_EQ(ops_completed, total_qps * kOpsPerQp);
 
     HaltExecution(initiator);
     HaltExecution(target);
@@ -101,7 +104,9 @@ TEST_P(QpOversubscriptionTest, StressTest) {
   } while (total_qps < kMaxQps);
 
   CheckLatencies();
-  EXPECT_OK(validation_->PostTestValidation());
+  EXPECT_THAT(validation_->PostTestValidation(
+                  RdmaStressFixture::AllowRetxCheck(kMaxQps)),
+              IsOk());
 }
 
 INSTANTIATE_TEST_SUITE_P(

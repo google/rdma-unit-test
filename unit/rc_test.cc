@@ -353,7 +353,8 @@ TEST_F(LoopbackRcQpTest, SendInlineDataInvalidOp) {
 
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(local.cq));
-    EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
+    EXPECT_THAT(completion.status,
+                AnyOf(IBV_WC_LOC_QP_OP_ERR, IBV_WC_LOC_PROT_ERR));
     EXPECT_EQ(completion.qp_num, local.qp->qp_num);
     EXPECT_EQ(completion.wr_id, 1);
   } else {
@@ -446,8 +447,11 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidate) {
                                               remote.buffer.data(), mw->rkey);
   read.wr_id = 2;
   verbs_util::PostSend(local.qp, read);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 2);
 }
@@ -527,9 +531,9 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateNoBuffer) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
-                                    ? IBV_WC_RNR_RETRY_EXC_ERR
-                                    : IBV_WC_RETRY_EXC_ERR;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_RNR_RETRY_EXC_ERR;
   EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
@@ -691,9 +695,9 @@ TEST_F(LoopbackRcQpTest, SendRnr) {
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
-                                    ? IBV_WC_RNR_RETRY_EXC_ERR
-                                    : IBV_WC_RETRY_EXC_ERR;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_RNR_RETRY_EXC_ERR;
   EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
@@ -711,14 +715,14 @@ TEST_F(LoopbackRcQpTest, SendRnrInfiniteRetries) {
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
   verbs_util::PostSend(local.qp, send);
-  if (Introspection().SupportsRnrRetries()) {
-    EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
-  } else {
+  if (Introspection().GeneratesRetryExcOnConnTimeout()) {
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(local.cq));
     EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
     EXPECT_EQ(completion.qp_num, local.qp->qp_num);
     EXPECT_EQ(completion.wr_id, 1);
+  } else {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   }
 }
 
@@ -819,19 +823,21 @@ TEST_F(LoopbackRcQpTest, RecvBufferExceedMr) {
   verbs_util::PostSend(local.qp, send);
 
   // Behavior for recv SGL longer than the MR (but the payload is not) is not
-  // *strictly* defined by the IBTA spec. Here we adopt the industry standard
-  // that it should result in a success.
+  // *strictly* defined by the IBTA spec.
+  // On Mellanox NICs, we expect the recv WR result in a success.
+  // On MEV, we expect the recv WR result in IBV_WC_LOC_PROT_ERR, and the
+  // send fail with IBV_WC_REM_OP_ERR
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_REM_OP_ERR));
 
   ASSERT_OK_AND_ASSIGN(ibv_wc completion2,
                        verbs_util::WaitForCompletion(remote.cq));
   EXPECT_EQ(completion2.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion2.wr_id, 0);
-  EXPECT_EQ(completion2.status, IBV_WC_SUCCESS);
+  EXPECT_THAT(completion2.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_LOC_PROT_ERR));
 }
 
 TEST_F(LoopbackRcQpTest, BadRecvLkey) {
@@ -1043,12 +1049,15 @@ TEST_F(LoopbackRcQpTest, Type1MWUnbind) {
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_THAT(local.buffer.span(), Each(kRemoteBufferContent));
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   // Issue a read with the old rkey.
   read.wr.rdma.rkey = original_rkey;
   verbs_util::PostSend(local.qp, read);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 }
 
 TEST_F(LoopbackRcQpTest, ReadInvalidLkey) {
@@ -1102,9 +1111,12 @@ TEST_F(LoopbackRcQpTest, ReadInvalidRkey) {
   read.wr.rdma.rkey = (read.wr.rdma.rkey + 10) * 5;
   verbs_util::PostSend(local.qp, read);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
   // Existing hardware does not set this on error.
   // EXPECT_EQ(completion.opcode, IBV_WC_RDMA_READ);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
@@ -1125,9 +1137,12 @@ TEST_F(LoopbackRcQpTest, ReadInvalidRKeyAndInvalidLKey) {
   read.wr.rdma.rkey = (read.wr.rdma.rkey + 10) * 5;
   verbs_util::PostSend(local.qp, read);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_THAT(local.buffer.span(), Each(kLocalBufferContent));
@@ -1347,7 +1362,8 @@ TEST_F(LoopbackRcQpTest, WriteImmDataInvalidRKey) {
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
-  EXPECT_EQ(completion.status, IBV_WC_LOC_ACCESS_ERR);
+  EXPECT_THAT(completion.status,
+              AnyOf(IBV_WC_LOC_ACCESS_ERR, IBV_WC_LOC_PROT_ERR));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
   EXPECT_THAT(remote.buffer.span(), Each(kRemoteBufferContent));
@@ -1369,9 +1385,9 @@ TEST_F(LoopbackRcQpTest, WriteImmDataRnR) {
   // Verify WRITE completion.
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
-  enum ibv_wc_status expected = Introspection().SupportsRnrRetries()
-                                    ? IBV_WC_RNR_RETRY_EXC_ERR
-                                    : IBV_WC_RETRY_EXC_ERR;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_RNR_RETRY_EXC_ERR;
   EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
@@ -1714,11 +1730,14 @@ TEST_F(LoopbackRcQpTest, FetchAddUnaligned) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       remote.mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers should be unmodified.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
@@ -1784,11 +1803,14 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), corrupted_rkey,
       1);
   verbs_util::PostSend(local.qp, fetch_add);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -1810,11 +1832,14 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKeyAndInvalidRKey) {
   // Also corrupt the lkey.
   sge.lkey = sge.lkey * 13 + 7;
   verbs_util::PostSend(local.qp, fetch_add);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -1834,13 +1859,16 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidLKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       remote.mr->rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   // Our implementation checks the key first. The hardware may check the
   // alignment first.
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -1860,13 +1888,16 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       corrupted_rkey, 1);
   verbs_util::PostSend(local.qp, fetch_add);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   // Our implementation will check the key first. The hardware may or may not
   // behave the same way.
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers should not have changed.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -2018,11 +2049,14 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(),
       remote.mr->rkey + 7 * 10, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The remote buffer should not have changed because it will be caught by the
   // invalid rkey.
@@ -2043,11 +2077,14 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKeyAndInvalidLKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(),
       remote.mr->rkey + 7 * 10, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // The buffers shouldn't change because the rkey will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -2088,11 +2125,14 @@ TEST_F(LoopbackRcQpTest, CompareSwapUnaligned) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       remote.mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -2111,11 +2151,14 @@ TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidRKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       remote.mr->rkey * 10 + 3, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -2137,11 +2180,14 @@ TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidLKey) {
       /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data() + 1,
       remote.mr->rkey, 2, 3);
   verbs_util::PostSend(local.qp, cmp_swp);
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
 
   // No buffers should change because the alignment will get caught.
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
@@ -2184,11 +2230,14 @@ TEST_F(LoopbackRcQpTest, RemoteFatalError) {
 
   verbs_util::PostSend(local.qp, cmp_swp);
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_INV_REQ_ERR;
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(local.cq));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_EQ(completion.status, IBV_WC_REM_INV_REQ_ERR);
+  EXPECT_EQ(completion.status, expected);
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 
@@ -2296,11 +2345,20 @@ TEST_P(RemoteRcQpStateTest, RemoteRcQpStateTests) {
                             remote.qp->qp_num));
   ASSERT_OK(BringUpClientQp(remote, param.remote_state, local.port_attr.gid,
                             local.qp->qp_num));
-  EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode),
-              IsOkAndHolds(param.remote_state == IBV_QPS_RTR ||
-                                   param.remote_state == IBV_QPS_RTS
-                               ? IBV_WC_SUCCESS
-                               : IBV_WC_RETRY_EXC_ERR));
+
+  switch (param.remote_state) {
+    case IBV_QPS_RTR:
+    case IBV_QPS_RTS:
+      EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode), IBV_WC_SUCCESS);
+      break;
+    case IBV_QPS_ERR:
+      EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode),
+                  AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_OP_ERR));
+      break;
+    default:
+      EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode),
+                  IBV_WC_RETRY_EXC_ERR);
+  }
 }
 
 std::vector<RemoteQpStateTestParameter> GenerateRemoteQpStateParameters(

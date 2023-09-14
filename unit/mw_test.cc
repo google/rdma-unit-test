@@ -170,9 +170,11 @@ TEST_P(MwGeneralTest, BindReadDiffQp) {
   verbs_util::PostSend(setup.local_qp, read);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, GetParam() == IBV_MW_TYPE_1
-                                   ? IBV_WC_SUCCESS
-                                   : IBV_WC_REM_ACCESS_ERR);
+  enum ibv_wc_status type2_expected =
+      Introspection().GeneratesRetryExcOnConnTimeout() ? IBV_WC_RETRY_EXC_ERR
+                                                       : IBV_WC_REM_ACCESS_ERR;
+  EXPECT_EQ(completion.status,
+            GetParam() == IBV_MW_TYPE_1 ? IBV_WC_SUCCESS : type2_expected);
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
 }
@@ -307,6 +309,9 @@ TEST_F(MwType1Test, BindZeroLengthMw) {
                                              setup.buffer.span(), setup.mr),
               IsOkAndHolds(IBV_WC_SUCCESS));
   uint32_t original_rkey = mw->rkey;
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(
       verbs_util::ExecuteType1MwBind(
           setup.local_qp, mw, setup.buffer.span().subspan(0, 0), setup.mr),
@@ -315,7 +320,7 @@ TEST_F(MwType1Test, BindZeroLengthMw) {
   EXPECT_THAT(
       verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), original_rkey),
-      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+      IsOkAndHolds(expected));
 }
 
 TEST_F(MwType1Test, UnsignaledBindError) {
@@ -506,10 +511,13 @@ TEST_F(MwType2Test, LocalInvalidate) {
 
   ASSERT_THAT(verbs_util::ExecuteLocalInvalidate(setup.remote_qp, mw->rkey),
               IsOkAndHolds(IBV_WC_SUCCESS));
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(
       verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), mw->rkey),
-      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+      IsOkAndHolds(expected));
 }
 
 TEST_F(MwType2Test, UnsignaledLocalInvalidate) {
@@ -524,10 +532,13 @@ TEST_F(MwType2Test, UnsignaledLocalInvalidate) {
   invalidate.send_flags = invalidate.send_flags & ~IBV_SEND_SIGNALED;
   verbs_util::PostSend(setup.remote_qp, invalidate);
   // Do another operation to ensure no completion.
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(
       verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), mw->rkey),
-      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+      IsOkAndHolds(expected));
 }
 
 TEST_F(MwType2Test, UnsignaledLocalInvalidateError) {
@@ -657,10 +668,13 @@ TEST_F(MwType2Test, CrossQpRead) {
   ASSERT_OK(
       ibv_.SetUpLoopbackRcQps(new_local_qp, new_remote_qp, setup.port_attr));
 
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
   EXPECT_THAT(
       verbs_util::ExecuteRdmaRead(new_local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), mw->rkey),
-      IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
+      IsOkAndHolds(expected));
 }
 
 TEST_F(MwType2Test, BindType1WhenQpError) {
@@ -951,7 +965,11 @@ class MwType2AdvancedTest : public LoopbackFixture {
       EXPECT_EQ(status, info.failing_completion.status)
           << "Not all QPs failed with the same error.";
     }
-    EXPECT_EQ(status, IBV_WC_REM_ACCESS_ERR);
+    enum ibv_wc_status expected =
+        Introspection().GeneratesRetryExcOnConnTimeout()
+            ? IBV_WC_RETRY_EXC_ERR
+            : IBV_WC_REM_ACCESS_ERR;
+    EXPECT_EQ(status, expected);
   }
 
   // Joins all reader threads.

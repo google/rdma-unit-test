@@ -18,17 +18,19 @@ namespace rdma_unit_test {
 
 // The mixture of operation sizes to use for operation size mixture tests. Note
 // that UD ops must be less than max MTU size of 4k.
-constexpr int kUdMixedOpSizesBytes[4] = {32, 256, 1024, 4 * 1024};
+constexpr int kUdMixedOpSizesBytes[5] = {32, 256, 1024, 4 * 1024, 8 * 1024};
 constexpr int kRcMixedOpSizesBytes[5] = {32, 256, 1024, 4 * 1024, 16 * 1024};
 
-Config::OperationProfile MixedSizeUdOpProfile() {
+Config::OperationProfile MixedSizeUdOpProfile(int mtu) {
   Config::OperationProfile op_profile;
-  float ratio = 1. / sizeof(kRcMixedOpSizesBytes);
   for (const int &op_size : kUdMixedOpSizesBytes) {
+    if (op_size > mtu) {
+      break;
+    }
     Config::OperationProfile::OpSizeProportion *op_size_proportion =
         op_profile.add_op_size_proportions();
     op_size_proportion->set_size_bytes(op_size);
-    op_size_proportion->set_proportion(ratio);
+    op_size_proportion->set_proportion(1);
   }
   // Sets the type to UD.
   op_profile.mutable_ud_op_profile();
