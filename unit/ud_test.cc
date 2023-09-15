@@ -86,6 +86,69 @@ class LoopbackUdQpTest : public LoopbackFixture {
     memcpy(&iphdr, static_cast<uint8_t*>(buffer) + 20, sizeof(iphdr));
     return iphdr;
   }
+
+  // IBTA class D faults (RQ side errors in UD) expect responder to silent drop
+  // the request:
+  // NAK Codes Returned: none
+  // Current Receive WQE: no WQE consumed
+  // Subsequent Receive WQEs: no impact
+  // Final Receive Queue State: no change
+  void CheckClassDFaults(Client local, Client remote, bool recreate_local_qp,
+                         bool post_recv_wqe) {
+    constexpr int kSendCheckSize = 10;
+    // No NAK code returned on receive side
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
+
+    if (recreate_local_qp) {
+      local.qp = ibv_.CreateQp(local.pd, local.cq, IBV_QPT_UD);
+      ASSERT_THAT(local.qp, NotNull());
+      ASSERT_OK(ibv_.ModifyUdQpResetToRts(local.qp, kQKey));
+    }
+
+    std::fill_n(local.buffer.data(), local.buffer.size(), kLocalBufferContent);
+    std::fill_n(remote.buffer.data(), remote.buffer.size(),
+                kRemoteBufferContent);
+
+    if (post_recv_wqe) {
+      ibv_sge recv_sge = verbs_util::CreateSge(
+          remote.buffer.subspan(0, kSendCheckSize + sizeof(ibv_grh)),
+          remote.mr);
+      ibv_recv_wr recv =
+          verbs_util::CreateRecvWr(/*wr_id=*/0, &recv_sge, /*num_sge=*/1);
+      verbs_util::PostRecv(remote.qp, recv);
+    }
+
+    // Post a send of smaller size to verify the current recv WQE has not been
+    // consumed
+    ibv_sge send_sge = verbs_util::CreateSge(
+        local.buffer.subspan(0, kSendCheckSize), local.mr);
+    ibv_send_wr send_check =
+        verbs_util::CreateSendWr(/*wr_id=*/1, &send_sge, /*num_sge=*/1);
+    ibv_ah* ah_check =
+        ibv_.CreateAh(local.pd, local.port_attr.port, local.port_attr.gid_index,
+                      remote.port_attr.gid);
+    ASSERT_THAT(ah_check, NotNull());
+    send_check.wr.ud.ah = ah_check;
+    send_check.wr.ud.remote_qpn = remote.qp->qp_num;
+    send_check.wr.ud.remote_qkey = kQKey;
+    verbs_util::PostSend(local.qp, send_check);
+
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(local.cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+    ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(remote.cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+    EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+    EXPECT_EQ(completion.byte_len, sizeof(ibv_grh) + kSendCheckSize);
+    EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 0);
+    absl::Span<uint8_t> recv_payload =
+        remote.buffer.subspan(sizeof(ibv_grh), kSendCheckSize);
+    EXPECT_THAT(recv_payload, Each(kLocalBufferContent));
+  }
 };
 
 TEST_F(LoopbackUdQpTest, Send) {
@@ -159,6 +222,8 @@ TEST_F(LoopbackUdQpTest, SendLargerThanMtu) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_LEN_ERR);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/false);
 }
 
 TEST_F(LoopbackUdQpTest, SendRnr) {
@@ -183,6 +248,8 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
   EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_GENERAL_ERR));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/true);
 }
 
 /* According to ROCE v2 Annex A17.9.2, when setting traffic class,
@@ -269,7 +336,8 @@ TEST_F(LoopbackUdQpTest, SendWithTooSmallRecv) {
   EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(remote.cq));
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/false,
+                    /*post_recv_wqe=*/false);
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidAh) {
@@ -358,6 +426,8 @@ TEST_F(LoopbackUdQpTest, SendInvalidQpn) {
   absl::Span<uint8_t> recv_payload =
       remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
   EXPECT_THAT(recv_payload, Each(kRemoteBufferContent));
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/false,
+                    /*post_recv_wqe=*/false);
 }
 
 TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
@@ -394,6 +464,8 @@ TEST_F(LoopbackUdQpTest, SendInvalidQKey) {
   absl::Span<uint8_t> recv_payload =
       remote.buffer.subspan(sizeof(ibv_grh), kPayloadLength);
   EXPECT_THAT(recv_payload, Each(kRemoteBufferContent));
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/false,
+                    /*post_recv_wqe=*/false);
 }
 
 // Read not supported on UD.
@@ -432,8 +504,8 @@ TEST_F(LoopbackUdQpTest, PollMultipleCqe) {
   for (int i = 0; i < kNumCompletions; ++i) {
     verbs_util::PostRecv(remote.qp, recv);
   }
-  ibv_sge send_sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
-  send_sge.length = kPayloadLength;
+  ibv_sge send_sge =
+      verbs_util::CreateSge(local.buffer.subspan(0, kPayloadLength), local.mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &send_sge, /*num_sge=*/1);
   ibv_ah* ah = ibv_.CreateLoopbackAh(local.pd, remote.port_attr);
@@ -491,6 +563,8 @@ TEST_F(LoopbackUdQpTest, Write) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/true);
 }
 
 // FetchAndAdd not supported on UD.
@@ -518,6 +592,8 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/true);
 }
 
 // CompareAndSwap not supported on UD.
@@ -544,6 +620,8 @@ TEST_F(LoopbackUdQpTest, CompareSwap) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_QP_OP_ERR);
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/true);
 }
 
 class AdvancedLoopbackTest : public RdmaVerbsFixture {

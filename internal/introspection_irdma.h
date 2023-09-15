@@ -46,13 +46,13 @@ class IntrospectionIrdma : public NicIntrospection {
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {
     static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
-        {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, "b/244148056"},
-        {{"QpStateTest", "PostSendInit"}, "b/224824818"},
-        {{"QpStateTest", "PostSendRtr"}, "b/224824818"},
-        {{"QpStateTest", "PostSendReset"}, "b/224824818"},
-        {{"LoopbackUdQpTest", "SendTrafficClass"}, "b/224913565"},
-        {{"AdvancedLoopbackTest", "RcSendToUd"}, "b/233527443"},
-        {{"AdvancedLoopbackTest", "UdSendToRc"}, "b/233527443"},
+        {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, ""},
+        {{"QpStateTest", "PostSendInit"}, ""},
+        {{"QpStateTest", "PostSendRtr"}, ""},
+        {{"QpStateTest", "PostSendReset"}, ""},
+        {{"LoopbackUdQpTest", "SendTrafficClass"}, ""},
+        {{"AdvancedLoopbackTest", "RcSendToUd"}, ""},
+        {{"AdvancedLoopbackTest", "UdSendToRc"}, ""},
     };
     return deviations;
   }
