@@ -15,11 +15,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <thread>  // NOLINT
-#include <utility>
 #include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
@@ -27,6 +27,7 @@
 #include "internal/verbs_extension.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"

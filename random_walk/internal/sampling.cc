@@ -23,7 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/random/discrete_distribution.h"
 #include "absl/random/random.h"
 #include "absl/types/span.h"

@@ -41,6 +41,8 @@ class IntrospectionRxe : public NicIntrospection {
 
   bool SupportsRcQp() const override { return false; }
 
+  bool IsSlowNic() const override { return true; }
+
  protected:
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {

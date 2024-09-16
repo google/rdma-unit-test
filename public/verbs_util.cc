@@ -16,30 +16,33 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <resolv.h>
-#include <sys/poll.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 
-#include <array>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
-#include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include <magic_enum.hpp>
 #include "infiniband/verbs.h"
 #include "public/flags.h"
+
 #include "public/status_matchers.h"
 
 namespace rdma_unit_test {
@@ -53,7 +56,7 @@ int VerbsMtuToInt(ibv_mtu mtu) {
 // Determines whether the gid is a valid ipv4 or ipv6 ip address.
 // Returns AF_INET if ipv4.
 // Returns AF_INET6 if ipv6.
-// Reterns -1 if an invalid ip address.
+// Returns -1 if an invalid ip address.
 int GetIpAddressType(const ibv_gid& gid) {
   char ip_str[INET6_ADDRSTRLEN];
   const char* result = inet_ntop(
@@ -61,11 +64,11 @@ int GetIpAddressType(const ibv_gid& gid) {
   if (result == nullptr) return -1;
 
   const in6_addr* addr6 = reinterpret_cast<const in6_addr*>(gid.raw);
-  if (addr6->s6_addr32[0] != 0 || addr6->s6_addr32[1] != 0 ||
-      addr6->s6_addr16[4] != 0 || addr6->s6_addr16[5] != 0xffff) {
-    return AF_INET6;
-  }
-  return AF_INET;
+
+  if (absl::GetFlag(FLAGS_skip_default_gid) && IN6_IS_ADDR_LINKLOCAL(addr6))
+    return -1;
+
+  return (IN6_IS_ADDR_V4MAPPED(addr6)) ? AF_INET : AF_INET6;
 }
 
 std::string GidToString(const ibv_gid& gid) {
@@ -91,7 +94,7 @@ absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
   }
   for (int i = 0; i < num_devices; ++i) {
     ibv_device* device = devices[i];
-    VLOG(1) << "Found device " << device->name << ".";
+    LOG(INFO) << "Found device " << device->name << ".";
     device_names.push_back(device->name);
   }
   return device_names;
@@ -141,7 +144,7 @@ ibv_wc_opcode WrToWcOpcode(ibv_wr_opcode opcode) {
     case IBV_WR_BIND_MW:
       return IBV_WC_BIND_MW;
     default:
-      LOG(DFATAL) << "Unsupported opcode " << static_cast<int>(opcode);
+      LOG(FATAL) << "Unsupported opcode " << static_cast<int>(opcode);
       return static_cast<ibv_wc_opcode>(0xff);
   }
 }
@@ -266,6 +269,21 @@ ibv_send_wr CreateWriteWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                       rkey);
 }
 
+ibv_send_wr CreateWriteWithImmWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
+                                 void* remote_buffer, uint32_t rkey,
+                                 uint32_t imm) {
+  return ibv_send_wr{
+      .wr_id = wr_id,
+      .next = nullptr,
+      .sg_list = sge,
+      .num_sge = num_sge,
+      .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
+      .send_flags = IBV_SEND_SIGNALED,
+      .imm_data = imm,
+      .wr{.rdma{.remote_addr = reinterpret_cast<uint64_t>(remote_buffer),
+                .rkey = rkey}}};
+}
+
 ibv_send_wr CreateAtomicWr(ibv_wr_opcode opcode, uint64_t wr_id, ibv_sge* sge,
                            int num_sge, void* remote_buffer, uint32_t rkey,
                            uint64_t compare_add, uint64_t swap) {
@@ -338,7 +356,8 @@ absl::Duration GetSlowDownTimeout(absl::Duration timeout, uint64_t multiplier) {
   return timeout * multiplier;
 }
 
-absl::StatusOr<ibv_wc> WaitForCompletion(ibv_cq* cq, absl::Duration timeout) {
+absl::StatusOr<ibv_wc> WaitForCompletion(ibv_cq* cq, absl::Duration timeout,
+                                         absl::Duration poll_interval) {
   ibv_wc result;
   absl::Time stop =
       absl::Now() +
@@ -346,7 +365,7 @@ absl::StatusOr<ibv_wc> WaitForCompletion(ibv_cq* cq, absl::Duration timeout) {
                          absl::GetFlag(FLAGS_completion_wait_multiplier));
   int count = ibv_poll_cq(cq, 1, &result);
   while (count == 0 && absl::Now() < stop) {
-    absl::SleepFor(absl::Milliseconds(10));
+    absl::SleepFor(poll_interval);
     count = ibv_poll_cq(cq, 1, &result);
   }
   if (count > 0) {
@@ -373,7 +392,8 @@ absl::Status WaitForPollingExtendedCompletion(ibv_cq_ex* cq,
   if (result != ENOENT) {
     return absl::InternalError("Failed to start polling completion.");
   }
-  return absl::DeadlineExceededError("Timeout while waiting for a completion.");
+  return absl::DeadlineExceededError(
+      "Timeout while waiting for extended completion.");
 }
 
 absl::Status WaitForNextExtendedCompletion(ibv_cq_ex* cq,
@@ -452,6 +472,8 @@ absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
       .events = POLLIN,
       .revents = 0,
   };
+  timeout =
+      GetSlowDownTimeout(timeout, absl::GetFlag(FLAGS_other_wait_multiplier));
   int poll_result = poll(&poll_fd, 1, absl::ToInt64Milliseconds(timeout));
   if (poll_result < 0) {
     return absl::InternalError(absl::StrCat("Poll error: ", strerror(errno)));

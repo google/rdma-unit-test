@@ -20,15 +20,10 @@
 #include <cstdint>
 #include <iterator>
 #include <random>
-#include <string>
 #include <vector>
 
-#include "glog/logging.h"
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
-#include "google/protobuf/repeated_field.h"
-#include "public/status_matchers.h"
 #include "traffic/config.pb.h"
 #include "traffic/op_types.h"
 

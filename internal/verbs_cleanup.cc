@@ -14,7 +14,6 @@
 
 #include "internal/verbs_cleanup.h"
 
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/synchronization/mutex.h"

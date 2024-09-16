@@ -17,13 +17,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_EXTENSION_INTERFACE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_VERBS_EXTENSION_INTERFACE_H_
 
-#include <cstdint>
-#include <utility>
-
-#include "absl/status/status.h"
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
-#include "public/verbs_util.h"
 
 namespace rdma_unit_test {
 

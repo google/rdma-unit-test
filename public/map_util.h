@@ -15,9 +15,9 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_MAP_UTIL_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_PUBLIC_MAP_UTIL_H_
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 
 namespace rdma_unit_test {
 namespace map_util {

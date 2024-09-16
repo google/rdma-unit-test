@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include "absl/log/check.h"
 #include "google/protobuf/text_format.h"
 #include "public/status_matchers.h"
 #include "random_walk/internal/random_walk_config.pb.h"

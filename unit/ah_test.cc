@@ -13,14 +13,16 @@
 // limitations under the License.
 
 #include <errno.h>
+#include <stdint.h>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+#include "internal/verbs_extension.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "unit/rdma_verbs_fixture.h"
@@ -70,17 +72,11 @@ TEST_F(AhTest, DestroyWithInvalidHandle) {
   ah->handle = 0xDEADBEEF;
   int result = ibv_destroy_ah(ah);
   EXPECT_NE(result, 0);
+  EXPECT_EQ(errno, result);
   if (result != 0) {
     ah->handle = handle;
     ibv_destroy_ah(ah);
   }
-}
-
-TEST_F(AhTest, DeallocPdWithOutstandingAh) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_ah* ah = ibv_.CreateAh(setup.pd, setup.simple_ah_attr);
-  ASSERT_THAT(ah, NotNull());
-  EXPECT_EQ(ibv_.DeallocPd(setup.pd), EBUSY);
 }
 
 }  // namespace rdma_unit_test

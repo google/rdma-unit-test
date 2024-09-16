@@ -26,14 +26,11 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 
-
 namespace rdma_unit_test {
 namespace verbs_util {
-
 
 //////////////////////////////////////////////////////////////////////////////
 //                          Constants
@@ -65,7 +62,6 @@ int GetIpAddressType(const ibv_gid& gid);
 
 // Converts an uint64_t mtu to a ibv_mtu object.
 ibv_mtu ToVerbsMtu(uint64_t mtu);
-
 
 // Enumerates the names of all the devices available for the host.
 absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames();
@@ -139,6 +135,11 @@ ibv_send_wr CreateReadWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
 ibv_send_wr CreateWriteWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
                           void* remote_buffer, uint32_t rkey);
 
+// Creates a WR for RDMA write with immediate.
+ibv_send_wr CreateWriteWithImmWr(uint64_t wr_id, ibv_sge* sge, int num_sge,
+                                 void* remote_buffer, uint32_t rkey,
+                                 uint32_t imm);
+
 // Create an Atomic work request.
 ibv_send_wr CreateAtomicWr(ibv_wr_opcode opcode, uint64_t wr_id, ibv_sge* sge,
                            int num_sge, void* remote_buffer, uint32_t rkey,
@@ -168,7 +169,8 @@ void PostSrqRecv(ibv_srq* srq, const ibv_recv_wr& wr);
 
 // Polls for and returns a completion.
 absl::StatusOr<ibv_wc> WaitForCompletion(
-    ibv_cq* cq, absl::Duration timeout = kDefaultCompletionTimeout);
+    ibv_cq* cq, absl::Duration timeout = kDefaultCompletionTimeout,
+    absl::Duration poll_interval = absl::Milliseconds(10));
 
 absl::Status WaitForPollingExtendedCompletion(
     ibv_cq_ex* cq, absl::Duration timeout = kDefaultCompletionTimeout);
@@ -255,6 +257,10 @@ absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> ExecuteSendRecv(
 // function, OpenUntrackedDevice(), is mainly used as an internal util function.
 // VerbsAllocator::OpenDevice() is preferred for most end user calls.
 absl::StatusOr<ibv_context*> OpenUntrackedDevice(const std::string device_name);
+
+// Calculates the duration of timeout once it is multiplied by a given
+// multiplier.  Used to ensure that timeouts are slower in slow environments.
+absl::Duration GetSlowDownTimeout(absl::Duration timeout, uint64_t multiplier);
 
 }  // namespace verbs_util
 }  // namespace rdma_unit_test

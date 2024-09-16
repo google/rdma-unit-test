@@ -15,9 +15,12 @@
 #include "internal/verbs_attribute.h"
 
 #include <cstdint>
+#include <string>
 
 #include "absl/flags/flag.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "infiniband/verbs.h"
 
 ABSL_FLAG(ibv_mtu, verbs_mtu, IBV_MTU_4096,

@@ -13,31 +13,21 @@
 // limitations under the License.
 
 #include <chrono>  // NOLINT
-#include <climits>
-#include <cstdint>
-#include <cstring>
-#include <fstream>
 #include <future>  // NOLINT
-#include <list>
 #include <memory>
-#include <optional>
-#include <thread>  // NOLINT
-#include <utility>
-#include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/flags/flag.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/substitute.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "infiniband/verbs.h"
+
 #include "public/status_matchers.h"
+#include "traffic/client.h"
 #include "traffic/config.pb.h"
 #include "traffic/op_types.h"
 #include "traffic/rdma_stress_fixture.h"

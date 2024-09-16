@@ -17,14 +17,17 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_UNIT_OP_FIXTURE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_UNIT_OP_FIXTURE_H_
 
+#include <stddef.h>
+
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
-#include "public/verbs_util.h"
+#include "public/verbs_helper_suite.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {

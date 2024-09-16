@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "random_walk/flags.h"
-
 #include "absl/flags/flag.h"
+#include "absl/strings/string_view.h"
 
 ABSL_FLAG(int, duration, 20,
           "Duration of the random walk test measured in seconds.");

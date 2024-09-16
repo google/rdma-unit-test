@@ -14,25 +14,22 @@
 
 // Initialize absl::Flags before initializing/running unit tests.
 
-#include <cstdint>
-
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/debugging/failure_signal_handler.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/log/initialize.h"
 #include "absl/time/time.h"
 #include "internal/introspection_mlx4.h"
 #include "internal/introspection_mlx5.h"
 #include "internal/introspection_rxe.h"
-#include "public/introspection.h"
 #include "random_walk/flags.h"
 #include "random_walk/internal/multi_node_orchestrator.h"
 #include "random_walk/internal/random_walk_config.pb.h"
 #include "random_walk/internal/single_node_orchestrator.h"
 
 int main(int argc, char* argv[]) {
-  google::InitGoogleLogging(argv[0]);
+  absl::InitializeLog();
   absl::ParseCommandLine(argc, argv);
   absl::FailureSignalHandlerOptions options;
   absl::InstallFailureSignalHandler(options);

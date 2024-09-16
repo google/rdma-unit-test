@@ -16,7 +16,6 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_INTERNAL_COMPLETION_PROFILE_H_
 
 #include <cstddef>
-#include <cstdint>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"

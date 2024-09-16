@@ -16,7 +16,6 @@
 
 #include "random_walk/internal/completion_profile.h"
 
-#include <cstdint>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -24,7 +23,6 @@
 #include "absl/container/flat_hash_map.h"
 #include <magic_enum.hpp>
 #include "infiniband/verbs.h"
-#include "public/map_util.h"
 #include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {
@@ -36,19 +34,17 @@ void CompletionProfile::RegisterCompletion(const ibv_wc& completion) {
 
 std::string CompletionProfile::DumpStats() const {
   std::stringstream sstream;
-  sstream << "Dumping completion profile:" << std::endl;
-  sstream << "---------------------------------------------------" << std::endl;
+  sstream << "Dumping completion profile:" << '\n';
+  sstream << "---------------------------------------------------" << '\n';
   for (const auto& [action, profile] : profiles_) {
-    sstream << "Action : " << magic_enum::enum_name(action) << std::endl;
+    sstream << "Action : " << magic_enum::enum_name(action) << '\n';
     for (const auto& [status, count] : profile) {
       if (count > 0) {
-        sstream << "  " << ibv_wc_status_str(status) << " : " << count
-                << std::endl;
+        sstream << "  " << ibv_wc_status_str(status) << " : " << count << '\n';
       }
     }
-    sstream << "---------------------------------------------------"
-            << std::endl;
-    sstream << std::endl;
+    sstream << "---------------------------------------------------" << '\n';
+    sstream << '\n';
   }
 
   return sstream.str();

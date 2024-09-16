@@ -21,17 +21,15 @@
 #include <deque>
 #include <list>
 #include <memory>
-#include <ostream>
 #include <string>
 #include <vector>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/flags/declare.h"
-#include "absl/memory/memory.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
-#include "absl/types/optional.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "traffic/op_types.h"
@@ -87,25 +85,25 @@ class QpState : public QpOpInterface {
 
   // For RC QPs: set and get the unique destination QP id.
   virtual QpOpInterface* remote_qp_state() const {
-    LOG(DFATAL) << "Function only available for RC QPs.";
+    LOG(FATAL) << "Function only available for RC QPs.";
     return nullptr;
   }
   virtual void set_remote_qp_state(QpOpInterface* remote_qp_state) {
-    LOG(DFATAL) << "Function only available for RC QPs.";
+    LOG(FATAL) << "Function only available for RC QPs.";
   }
 
   // For UD QPs: add and get destinations for UD QPs and AHs.
   virtual void add_ud_destination(QpOpInterface* remote_qp_state, ibv_ah* ah) {
-    LOG(DFATAL) << "Function only available for UD QPs.";
+    LOG(FATAL) << "Function only available for UD QPs.";
   }
 
   virtual const std::vector<UdDestination>* ud_destinations() const {
-    LOG(DFATAL) << "Function only available for UD QPs.";
+    LOG(FATAL) << "Function only available for UD QPs.";
     return nullptr;
   }
 
   virtual UdDestination random_ud_destination() {
-    LOG(DFATAL) << "Function only available for UD QPs.";
+    LOG(FATAL) << "Function only available for UD QPs.";
     return UdDestination{.ah = nullptr, .qp_state = nullptr};
   }
 

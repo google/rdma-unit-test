@@ -18,8 +18,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "absl/strings/string_view.h"
 #include "infiniband/verbs.h"
 #include "traffic/op_types.h"
 #include "traffic/qp_op_interface.h"

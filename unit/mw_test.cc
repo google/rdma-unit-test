@@ -13,8 +13,8 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <stdlib.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -22,24 +22,29 @@
 #include <optional>
 #include <string>
 #include <thread>  // NOLINT
+#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/cleanup/cleanup.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -959,12 +964,19 @@ class MwType2AdvancedTest : public LoopbackFixture {
   }
 
   // Checks that all readers completed with the same failure.
-  void VerifyFailure(AdvancedSetup& advanced) const {
+  void VerifyFailure(AdvancedSetup& advanced,
+                     std::optional<ibv_wc_status> status_override = {}) const {
     ibv_wc_status status = advanced.reader.failing_completion.status;
     for (const QpInfo& info : advanced.reader_only_qps) {
       EXPECT_EQ(status, info.failing_completion.status)
           << "Not all QPs failed with the same error.";
     }
+
+    if (status_override.has_value()) {
+      EXPECT_EQ(status, status_override.value());
+      return;
+    }
+
     enum ibv_wc_status expected =
         Introspection().GeneratesRetryExcOnConnTimeout()
             ? IBV_WC_RETRY_EXC_ERR
@@ -973,7 +985,7 @@ class MwType2AdvancedTest : public LoopbackFixture {
   }
 
   // Joins all reader threads.
-  void JoinAll(AdvancedSetup& advanced) {
+  static void JoinAll(AdvancedSetup& advanced) {
     for (auto& thread : advanced.threads) {
       thread.join();
     }
@@ -989,45 +1001,44 @@ TEST_F(MwType2AdvancedTest, OnlyReads) {
   JoinAll(advanced);
 }
 
-// TODO(author2): The test failed on actual hardware. Will need to validate
-// it before re-enabling.
-TEST_F(MwType2AdvancedTest, DISABLED_Rebind) {
+TEST_F(MwType2AdvancedTest, Rebind) {
   ASSERT_OK_AND_ASSIGN(AdvancedSetup advanced, CreateAdvancedSetup());
   absl::Notification cancel_notification;
 
   std::atomic<size_t> total_reads = 0;
   StartReaderThreads(advanced, advanced.mw->rkey, total_reads,
                      cancel_notification);
+  auto thread_cleanup = absl::MakeCleanup([&advanced] { JoinAll(advanced); });
 
   LOG(INFO) << "Started reader";
 
   // Issue rebind.
   ibv_send_wr bind = verbs_util::CreateType2BindWr(
-      /*wr_id=*/1, advanced.mw, advanced.basic.buffer.span(), kRKey + 1,
-      advanced.basic.mr);
+      /*wr_id=*/1, advanced.mw, advanced.basic.buffer.span(),
+      advanced.mw->rkey + 1, advanced.basic.mr);
   verbs_util::PostSend(advanced.owner.qp, bind);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(advanced.owner.cq));
-  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+  ASSERT_EQ(completion.status, IBV_WC_MW_BIND_ERR);
   ASSERT_EQ(completion.opcode, IBV_WC_BIND_MW);
 
-  JoinAll(advanced);
+  std::move(thread_cleanup).Invoke();
   LOG(INFO) << "Reader end.";
+
   VerifyFailure(advanced);
 }
 
-// TODO(author2): The test failed on actual hardware. Will need to validate
-// it before re-enabling.
-TEST_F(MwType2AdvancedTest, DISABLED_Invalidate) {
+TEST_F(MwType2AdvancedTest, Invalidate) {
   ASSERT_OK_AND_ASSIGN(AdvancedSetup advanced, CreateAdvancedSetup());
   absl::Notification cancel_notification;
   std::atomic<size_t> total_reads = 0;
   StartReaderThreads(advanced, advanced.mw->rkey, total_reads,
                      cancel_notification);
+  auto thread_cleanup = absl::MakeCleanup([&advanced] { JoinAll(advanced); });
 
   // Invalidate.
   ibv_send_wr invalidate =
-      verbs_util::CreateLocalInvalidateWr(/*wr_id=*/1, kRKey);
+      verbs_util::CreateLocalInvalidateWr(/*wr_id=*/1, advanced.mw->rkey);
   ibv_send_wr* bad_wr;
   ASSERT_EQ(ibv_post_send(advanced.owner.qp, &invalidate, &bad_wr), 0);
 
@@ -1036,7 +1047,7 @@ TEST_F(MwType2AdvancedTest, DISABLED_Invalidate) {
   ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
   ASSERT_EQ(completion.opcode, IBV_WC_LOCAL_INV);
 
-  JoinAll(advanced);
+  std::move(thread_cleanup).Invoke();
   VerifyFailure(advanced);
 }
 
@@ -1046,11 +1057,12 @@ TEST_F(MwType2AdvancedTest, Dealloc) {
   std::atomic<size_t> total_reads = 0;
   StartReaderThreads(advanced, advanced.mw->rkey, total_reads,
                      cancel_notification);
+  auto thread_cleanup = absl::MakeCleanup([&advanced] { JoinAll(advanced); });
 
   // Delete.
   ASSERT_EQ(ibv_.DeallocMw(advanced.mw), 0);
 
-  JoinAll(advanced);
+  std::move(thread_cleanup).Invoke();
   VerifyFailure(advanced);
 }
 

@@ -141,6 +141,9 @@ class NicIntrospection {
   // Returns a boolean indicating if the NIC supports extended CQs.
   virtual bool SupportsExtendedCqs() const { return true; }
 
+  // Reports IBTA Class J errors for SendInvalidate ops.
+  virtual bool NoNakOnSendInvalidateErrors() const { return true; }
+
   virtual bool GeneratesRetryExcOnConnTimeout() const { return false; }
 
   // Returns true if the provider requires the use of file backed shared
@@ -160,6 +163,11 @@ class NicIntrospection {
   // the message should be dropped.
   virtual bool BuffersMessagesWhenNotReadyToReceive() const { return false; }
 
+  // Returns true if this NIC is sufficiently slow that we need to limit the
+  // number of iterations in some tests to allow them to complete in a
+  // reasonable amount of time.
+  virtual bool IsSlowNic() const { return false; }
+
   // Returns if the providers provides a hardware counter (in sysfs).
   bool HasCounter(HardwareCounter counter) const;
 
@@ -175,6 +183,9 @@ class NicIntrospection {
 
   // Returns the name of the ibverbs device.
   const std::string device_name() const { return name_; }
+
+  // Returns the default name of the ibverbs device.
+  std::string sysfs_device_name() const;
 
   // Returns the device attributes.
   const ibv_device_attr& device_attr() const { return attr_; }

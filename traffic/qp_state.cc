@@ -14,29 +14,30 @@
 
 #include "traffic/qp_state.h"
 
-#include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <list>
 #include <memory>
-#include <optional>
-#include <ostream>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "traffic/op_types.h"
+#include "traffic/qp_op_interface.h"
 #include "traffic/test_op.h"
 
 ABSL_FLAG(bool, print_op_buffers, false,
@@ -228,7 +229,7 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
     op_addrs.push_back(*addr_iter);
     buffer->active_addresses.insert(*addr_iter);
     buffer->free_addresses.erase(addr_iter);
-    VLOG(2) << "New " << TestOp::ToString(op_type) << " op allocated on client "
+    LOG(INFO) << "New " << TestOp::ToString(op_type) << " op allocated on client "
             << local_client_id_ << ", qp_id " << qp_id()
             << ", addr: " << static_cast<void*>(op_addrs.back())
             << ", op size: " << op_bytes;
@@ -239,7 +240,7 @@ absl::StatusOr<std::vector<uint8_t*>> QpState::GetNextOpAddresses(
 void QpState::BatchRcSendWqe(std::unique_ptr<ibv_send_wr> wqe,
                              std::unique_ptr<ibv_sge> sge, uint32_t op_id) {
   TestOp* op_raw_ptr = reinterpret_cast<TestOp*>(wqe->wr_id);
-  VLOG(2) << "Batching op " << op_id << ", type "
+  LOG(INFO) << "Batching op " << op_id << ", type "
           << TestOp::ToString(op_raw_ptr->op_type) << ", size "
           << op_raw_ptr->length << " bytes, on qp " << qp_id();
   if (!rc_send_batch_.empty()) {
@@ -257,7 +258,7 @@ void QpState::FlushRcSendWqes() {
     LOG(FATAL) << "ibv_post_send returned non-zero error: "  // Crash OK.
                << ibv_ret;
   }
-  VLOG(2) << "posted a batch of size " << send_batch_size << ", on qp "
+  LOG(INFO) << "posted a batch of size " << send_batch_size << ", on qp "
           << qp_id();
   do {
     std::unique_ptr<ibv_send_wr> wqe_head =
@@ -267,7 +268,7 @@ void QpState::FlushRcSendWqes() {
     // the address of the corresponding TestOp, when the TestOp and its wqe are
     // created.
     TestOp* op_raw_ptr = reinterpret_cast<TestOp*>(wqe_head->wr_id);
-    VLOG(2) << "\t\t  op id " << op_raw_ptr->op_id << ", type "
+    LOG(INFO) << "\t\t  op id " << op_raw_ptr->op_id << ", type "
             << TestOp::ToString(op_raw_ptr->op_type) << ", size "
             << op_raw_ptr->length << " bytes.";
     rc_send_batch_.pop_front();
@@ -276,7 +277,7 @@ void QpState::FlushRcSendWqes() {
 
 void QpState::BatchRcRecvWqe(std::unique_ptr<ibv_recv_wr> wqe,
                              std::unique_ptr<ibv_sge> sge, uint32_t op_id) {
-  VLOG(2) << "Batching recv op " << op_id << ", size " << sge->length
+  LOG(INFO) << "Batching recv op " << op_id << ", size " << sge->length
           << " bytes, on qp " << qp_id();
   if (!rc_recv_batch_.empty()) {
     rc_recv_batch_.back().wqe->next = wqe.get();
@@ -293,7 +294,7 @@ void QpState::FlushRcRecvWqes() {
     LOG(FATAL) << "ibv_post_recv returned non-zero error: "  // Crash OK.
                << ibv_ret;
   }
-  VLOG(2) << "posted a batch of size " << recv_batch_size << ", on qp "
+  LOG(INFO) << "posted a batch of size " << recv_batch_size << ", on qp "
           << qp_id();
   do {
     std::unique_ptr<ibv_recv_wr> wqe_head =
@@ -303,7 +304,7 @@ void QpState::FlushRcRecvWqes() {
     // the address of the corresponding TestOp, when the TestOp and its wqe are
     // created.
     TestOp* op_raw_ptr = reinterpret_cast<TestOp*>(wqe_head->wr_id);
-    VLOG(2) << "\t\t  op id " << op_raw_ptr->op_id << ", type "
+    LOG(INFO) << "\t\t  op id " << op_raw_ptr->op_id << ", type "
             << TestOp::ToString(op_raw_ptr->op_type) << ", size "
             << op_raw_ptr->length << " bytes.";
     rc_recv_batch_.pop_front();
@@ -332,10 +333,10 @@ void QpState::CheckDataLanded() {
     } else {
       LOG(INFO) << "op_id " << op_ptr->op_id
                 << " ---------DID NOT LAND successfully-------";
-      VLOG(2) << absl::StrFormat("op_id: %lu, src after operation: ",
+      LOG(INFO) << absl::StrFormat("op_id: %lu, src after operation: ",
                                  op_ptr->op_id)
               << op_ptr->SrcBuffer();
-      VLOG(2) << absl::StrFormat("op_id: %lu, dest after operation: ",
+      LOG(INFO) << absl::StrFormat("op_id: %lu, dest after operation: ",
                                  op_ptr->op_id)
               << op_ptr->DestBuffer();
     }
@@ -346,8 +347,8 @@ void QpState::CheckDataLanded() {
     LOG(INFO) << "op_id " << op_ptr->op_id << " "
               << static_cast<void*>(op_ptr->src_addr) << " "
               << static_cast<void*>(op_ptr->dest_addr);
-    VLOG(2) << "src: " << op_ptr->SrcBuffer();
-    VLOG(2) << "dst: " << op_ptr->DestBuffer();
+    LOG(INFO) << "src: " << op_ptr->SrcBuffer();
+    LOG(INFO) << "dst: " << op_ptr->DestBuffer();
   }
 
   LOG(INFO) << "Unchecked received ops:";
@@ -355,8 +356,8 @@ void QpState::CheckDataLanded() {
     LOG(INFO) << "op_id " << op_ptr->op_id << " "
               << static_cast<void*>(op_ptr->src_addr) << " "
               << static_cast<void*>(op_ptr->dest_addr);
-    VLOG(2) << "src: " << op_ptr->SrcBuffer();
-    VLOG(2) << "dst: " << op_ptr->DestBuffer();
+    LOG(INFO) << "src: " << op_ptr->SrcBuffer();
+    LOG(INFO) << "dst: " << op_ptr->DestBuffer();
   }
 }
 
@@ -383,7 +384,7 @@ std::unique_ptr<TestOp> QpState::TryValidateRecvOp(const TestOp& send) {
   }
 
   if (target_op_uptr == nullptr) {
-    VLOG(2) << absl::StrFormat(
+    LOG(INFO) << absl::StrFormat(
         "Store SEND op for future validation! qp_id "
         "%d, op_id %lu, src after %s: ",
         send.qp_id, send.op_id, TestOp::ToString(send.op_type)),

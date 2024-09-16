@@ -16,9 +16,7 @@
 #define THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_QP_OP_INTERFACE_H_
 
 #include <cstdint>
-#include <list>
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include "absl/status/statusor.h"

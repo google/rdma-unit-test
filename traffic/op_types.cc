@@ -16,6 +16,8 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
+
 namespace rdma_unit_test {
 
 bool AbslParseFlag(absl::string_view text, OpTypes* out, std::string* error) {

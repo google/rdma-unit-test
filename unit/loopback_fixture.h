@@ -15,12 +15,11 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_UNIT_LOOPBACK_FIXTURE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_UNIT_LOOPBACK_FIXTURE_H_
 
-#include <cstdint>
-#include <utility>
-
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+#include "public/rdma_memblock.h"
+#include "public/verbs_helper_suite.h"
 #include "unit/rdma_verbs_fixture.h"
 
 namespace rdma_unit_test {

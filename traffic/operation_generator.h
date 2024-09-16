@@ -18,12 +18,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <random>
-#include <string>
 #include <vector>
 
 #include "absl/flags/declare.h"
-#include "absl/memory/memory.h"
-#include "google/protobuf/repeated_field.h"
+#include "google/protobuf/repeated_ptr_field.h"
 #include "traffic/config.pb.h"
 #include "traffic/op_types.h"
 

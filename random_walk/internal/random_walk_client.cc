@@ -20,22 +20,23 @@
 
 #include <array>
 #include <cerrno>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <memory>
-#include <string>
 #include <tuple>
 #include <vector>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -47,11 +48,13 @@
 #include "public/introspection.h"
 #include "public/map_util.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
 #include "random_walk/internal/bind_ops_tracker.h"
 #include "random_walk/internal/client_update_service.pb.h"
+#include "random_walk/internal/completion_profile.h"
 #include "random_walk/internal/ibv_resource_manager.h"
 #include "random_walk/internal/invalidate_ops_tracker.h"
 #include "random_walk/internal/logging.h"
@@ -122,7 +125,7 @@ void RandomWalkClient::Run(absl::Duration duration) {
     absl::Status result = RandomWalk();
     if (!result.ok()) {
       LOG(INFO) << result;
-      LOG(DFATAL) << "Random walk fails at step " << step_count << ".";
+      LOG(FATAL) << "Random walk fails at step " << step_count << ".";
       break;
     }
     ++step_count;
@@ -140,7 +143,7 @@ void RandomWalkClient::Run(size_t steps) {
     absl::Status result = RandomWalk();
     if (!result.ok()) {
       LOG(INFO) << result;
-      LOG(DFATAL) << "Random walk fails at step " << step_count << ".";
+      LOG(FATAL) << "Random walk fails at step " << step_count << ".";
       break;
     }
     ++step_count;
@@ -415,7 +418,7 @@ absl::StatusCode RandomWalkClient::DeregMr(ibv_mr* mr) {
   int result = ibv_.DeregMr(mr);
   log_.PushDeregMr(mr);
   if (result) {
-    LOG(DFATAL) << "Failed to deregister mr (" << result << ").";
+    LOG(FATAL) << "Failed to deregister mr (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.dereg_mr;
@@ -442,7 +445,7 @@ absl::StatusCode RandomWalkClient::DeallocType1Mw(ibv_mw* mw, bool is_bound) {
   int result = ibv_.DeallocMw(mw);
   log_.PushDeallocMw(mw);
   if (result) {
-    LOG(DFATAL) << "Failed to deallocate (bound) mw (" << result << ").";
+    LOG(FATAL) << "Failed to deallocate (bound) mw (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.dealloc_type_1_mw;
@@ -478,7 +481,7 @@ absl::StatusCode RandomWalkClient::DeallocType2Mw(ibv_mw* mw, bool is_bound) {
   int result = ibv_.DeallocMw(mw);
   log_.PushDeallocMw(mw);
   if (result) {
-    LOG(DFATAL) << "Failed to deallocate (bound) mw (" << result << ").";
+    LOG(FATAL) << "Failed to deallocate (bound) mw (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.dealloc_type_2_mw;
@@ -648,7 +651,7 @@ absl::StatusCode RandomWalkClient::TryDoRandomAction() {
       break;
     }
     default: {
-      LOG(DFATAL) << "Unknown action code.";
+      LOG(FATAL) << "Unknown action code.";
       result = absl::StatusCode::kInternal;
     }
   }
@@ -664,7 +667,7 @@ absl::StatusCode RandomWalkClient::TryCreateCq() {
   ibv_cq* cq = ibv_.CreateCq(context_, cqe);
   log_.PushCreateCq(cq);
   if (!cq) {
-    LOG(DFATAL) << "Failed to create cq (" << errno << ").";
+    LOG(FATAL) << "Failed to create cq (" << errno << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.create_cq;
@@ -688,7 +691,7 @@ absl::StatusCode RandomWalkClient::TryDestroyCq() {
   int result = ibv_.DestroyCq(cq);
   log_.PushDestroyCq(cq);
   if (result) {
-    LOG(DFATAL) << "Failed to destroy CQ (" << result << ").";
+    LOG(FATAL) << "Failed to destroy CQ (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.destroy_cq;
@@ -704,7 +707,7 @@ absl::StatusCode RandomWalkClient::TryAllocPd() {
   ibv_pd* pd = ibv_.AllocPd(context_);
   log_.PushAllocPd(pd);
   if (!pd) {
-    LOG(DFATAL) << "Failed to allocate PD. (errno = " << errno << ").";
+    LOG(FATAL) << "Failed to allocate PD. (errno = " << errno << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.alloc_pd;
@@ -728,7 +731,7 @@ absl::StatusCode RandomWalkClient::TryDeallocPd() {
   int result = ibv_.DeallocPd(pd);
   log_.PushDeallocPd(pd);
   if (result) {
-    LOG(DFATAL) << "Failed to deallocate PD (" << result << ").";
+    LOG(FATAL) << "Failed to deallocate PD (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.dealloc_pd;
@@ -752,7 +755,7 @@ absl::StatusCode RandomWalkClient::TryRegMr() {
   ibv_mr* mr = ibv_.RegMr(pd, memblock);
   log_.PushAllocPd(pd);
   if (!mr) {
-    LOG(DFATAL) << "Failed to register mr.";
+    LOG(FATAL) << "Failed to register mr.";
     return absl::StatusCode::kInternal;
   }
   ++stats_.reg_mr;
@@ -800,7 +803,7 @@ absl::StatusCode RandomWalkClient::TryAllocType1Mw() {
   ibv_mw* mw = ibv_.AllocMw(pd, IBV_MW_TYPE_1);
   log_.PushAllocMw(pd, IBV_MW_TYPE_1, mw);
   if (!mw) {
-    LOG(DFATAL) << "Failed to allocate mw.";
+    LOG(FATAL) << "Failed to allocate mw.";
     return absl::StatusCode::kInternal;
   }
   ++stats_.alloc_type_1_mw;
@@ -827,7 +830,7 @@ absl::StatusCode RandomWalkClient::TryAllocType2Mw() {
   ibv_mw* mw = ibv_.AllocMw(pd, IBV_MW_TYPE_2);
   log_.PushAllocMw(pd, IBV_MW_TYPE_2, mw);
   if (!mw) {
-    LOG(DFATAL) << "Failed to allocate mw.";
+    LOG(FATAL) << "Failed to allocate mw.";
     return absl::StatusCode::kInternal;
   }
   PdInfo* pd_info = resource_manager_.GetMutablePdInfo(pd);
@@ -903,7 +906,7 @@ absl::StatusCode RandomWalkClient::TryBindType1Mw() {
   int result = ibv_bind_mw(qp, mw, &bind_wr);
   log_.PushBindMw(bind_wr, mw);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   resource_manager_.GetMutableRcQpInfo(qp)->inflight_ops.insert(wr_id);
@@ -947,7 +950,7 @@ absl::StatusCode RandomWalkClient::TryBindType2Mw() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &bind_wr, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   resource_manager_.GetMutableRcQpInfo(qp)->inflight_ops.insert(wr_id);
@@ -1026,14 +1029,14 @@ absl::StatusCode RandomWalkClient::TryCreateUdQp() {
   ibv_qp* qp = ibv_.CreateQp(pd, init_attr);
   log_.PushCreateQp(qp);
   if (!qp) {
-    LOG(DFATAL) << "Failed to create UD QP (" << errno << ")";
+    LOG(FATAL) << "Failed to create UD QP (" << errno << ")";
     return absl::StatusCode::kInternal;
   }
   uint32_t qkey = absl::Uniform<uint32_t>(bitgen_);
   auto status = ibv_.ModifyUdQpResetToRts(qp, qkey);
   if (!status.ok()) {
     CHECK_EQ(0, ibv_.DestroyQp(qp));  // Crash ok
-    LOG(DFATAL) << "Failed to bring up UD QP (" << status << ").";
+    LOG(FATAL) << "Failed to bring up UD QP (" << status << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.create_ud_qp;
@@ -1100,7 +1103,7 @@ absl::StatusCode RandomWalkClient::TryCreateAh() {
   ibv_ah* ah = ibv_.CreateLoopbackAh(pd, port_attr_);
   log_.PushCreateAh(pd, client_id, ah);
   if (!ah) {
-    LOG(DFATAL) << "Failed to create ah (" << errno << ").";
+    LOG(FATAL) << "Failed to create ah (" << errno << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.create_ah;
@@ -1124,7 +1127,7 @@ absl::StatusCode RandomWalkClient::TryDestroyAh() {
   int result = ibv_.DestroyAh(ah);
   log_.PushDestroyAh(ah);
   if (result) {
-    LOG(DFATAL) << "Failed to destroy ah (" << result << ").";
+    LOG(FATAL) << "Failed to destroy ah (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   ++stats_.destroy_ah;
@@ -1194,7 +1197,7 @@ absl::StatusCode RandomWalkClient::TrySend() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &send, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   QpInfo* qp_info = resource_manager_.GetMutableQpInfo(qp);
@@ -1245,7 +1248,7 @@ absl::StatusCode RandomWalkClient::TrySendWithInv() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &send_inv, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   QpInfo* qp_info = resource_manager_.GetMutableQpInfo(qp);
@@ -1304,7 +1307,7 @@ absl::StatusCode RandomWalkClient::TryRecv() {
   } else if (result == ENOMEM) {
     return absl::StatusCode::kOk;
   } else {
-    LOG(DFATAL) << "Failed to post to recv queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to recv queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
 }
@@ -1359,7 +1362,7 @@ absl::StatusCode RandomWalkClient::TryRead() {
   }
   int result = ibv_post_send(qp, &read, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   RcQpInfo* qp_info = resource_manager_.GetMutableRcQpInfo(qp);
@@ -1418,7 +1421,7 @@ absl::StatusCode RandomWalkClient::TryWrite() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &write, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   RcQpInfo* qp_info = resource_manager_.GetMutableRcQpInfo(qp);
@@ -1473,7 +1476,7 @@ absl::StatusCode RandomWalkClient::TryFetchAdd() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &fetch_add, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   RcQpInfo* qp_info = resource_manager_.GetMutableRcQpInfo(qp);
@@ -1529,7 +1532,7 @@ absl::StatusCode RandomWalkClient::TryCompSwap() {
   ibv_send_wr* bad_wr = nullptr;
   int result = ibv_post_send(qp, &comp_swap, &bad_wr);
   if (result) {
-    LOG(DFATAL) << "Failed to post to send queue (" << result << ").";
+    LOG(FATAL) << "Failed to post to send queue (" << result << ").";
     return absl::StatusCode::kInternal;
   }
   RcQpInfo* qp_info = resource_manager_.GetMutableRcQpInfo(qp);
@@ -1797,7 +1800,7 @@ void RandomWalkClient::ProcessCompletion(ibv_wc completion) {
       break;
     }
     default: {
-      LOG(DFATAL) << magic_enum::enum_name(action)
+      LOG(FATAL) << magic_enum::enum_name(action)
                   << " should not receive completion.";
     }
   }

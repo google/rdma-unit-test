@@ -14,13 +14,15 @@
 
 #include <errno.h>
 
+#include <array>
 #include <cstdlib>
+#include <ios>
 #include <thread>  // NOLINT
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "public/introspection.h"
@@ -168,13 +170,23 @@ TEST_F(DeviceLimitTest, MaxCqMixed) {
 
 TEST_F(DeviceLimitTest, MaxMr) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
-  RdmaMemBlock buffer = ibv_.AllocBuffer(/*pages=*/1);
+
+  // ib_umem_get uses pin_user_pages_fast (introduced in 5.6) to pin user space
+  // pages in memory. For pin_user_pages* functions, the page's refcount will be
+  // incremented by (1U << 10). As a result, multiple user buffers are needed to
+  // not overflow the 32 bits (atomic_t) refcount in order to exercise 4M MRs.
+  constexpr int kNumUserBuffers = 2;
+  std::array<RdmaMemBlock, kNumUserBuffers> buffers;
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    buffers[i] = ibv_.AllocBuffer(/*pages=*/1);
+  }
+
   ibv_pd* pd = ibv_.AllocPd(context);
   ASSERT_THAT(pd, NotNull());
   int max_mr = Introspection().device_attr().max_mr;
   int actual_max = 0;
   for (int i = 0; i < max_mr + kErrorMax + 10; ++i) {
-    if (ibv_.RegMr(pd, buffer) != nullptr) {
+    if (ibv_.RegMr(pd, buffers[i % kNumUserBuffers]) != nullptr) {
       ++actual_max;
     } else {
       break;

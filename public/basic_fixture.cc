@@ -14,7 +14,10 @@
 
 #include "public/basic_fixture.h"
 
+#include <optional>
+
 #include "gtest/gtest.h"
+#include "absl/log/check.h"
 #include "public/introspection.h"
 
 namespace rdma_unit_test {

@@ -14,12 +14,10 @@
 
 // Initialize absl::Flags before initializing/running unit tests.
 
-#include <cstdint>
-
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/debugging/failure_signal_handler.h"
 #include "absl/flags/parse.h"
+#include "absl/log/initialize.h"
 #include "internal/introspection_irdma.h"
 #include "internal/introspection_mlx4.h"
 #include "internal/introspection_mlx5.h"
@@ -27,12 +25,9 @@
 
 int main(int argc, char* argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  google::InitGoogleLogging(argv[0]);
+  absl::InitializeLog();
   absl::FailureSignalHandlerOptions options;
   absl::InstallFailureSignalHandler(options);
-  // gtest/glog use gflags which conflict with absl::flags. Therefore we
-  // cannot call gflags::ParseCommandLineFlags(&argc, &argv, true).
-  // There is work underway for opensource logging in absl.
   absl::ParseCommandLine(argc, argv);
 
   // Register supported NIC's

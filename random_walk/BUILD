@@ -15,6 +15,7 @@
 # Random Walk Test for RDMA.
 
 package(
+    default_applicable_licenses = ["//:package_license"],
     default_testonly = True,
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
@@ -28,15 +29,11 @@ cc_test(
     deps = [
         ":action_weights",
         "//public:basic_fixture",
-        "//public:introspection",
         "//random_walk/internal:multi_node_orchestrator",
         "//random_walk/internal:random_walk_config_cc_proto",
         "//random_walk/internal:single_node_orchestrator",
         "//unit:gunit_main",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
-        "@com_google_protobuf//:protobuf",
         "@libibverbs",
     ],
 )
@@ -49,15 +46,11 @@ cc_library(
     deps = [
         ":action_weights",
         "//public:basic_fixture",
-        "//public:introspection",
         "//random_walk/internal:multi_node_orchestrator",
         "//random_walk/internal:random_walk_config_cc_proto",
         "//random_walk/internal:single_node_orchestrator",
-        "@com_glog_glog//:glog",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
-        "@com_google_protobuf//:protobuf",
     ],
     alwayslink = 1,
 )
@@ -70,14 +63,13 @@ cc_binary(
         "//internal:introspection_mlx4",
         "//internal:introspection_mlx5",
         "//internal:introspection_rxe",
-        "//public:introspection",
         "//random_walk/internal:multi_node_orchestrator",
         "//random_walk/internal:random_walk_config_cc_proto",
         "//random_walk/internal:single_node_orchestrator",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/debugging:failure_signal_handler",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/log:initialize",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
     ],
@@ -87,7 +79,10 @@ cc_library(
     name = "flags",
     srcs = ["flags.cc"],
     hdrs = ["flags.h"],
-    deps = ["@com_google_absl//absl/flags:flag"],
+    deps = [
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 cc_library(
@@ -97,6 +92,7 @@ cc_library(
     deps = [
         "//public:status_matchers",
         "//random_walk/internal:random_walk_config_cc_proto",
+        "@com_google_absl//absl/log:check",
         "@com_google_protobuf//:protobuf",
     ],
 )

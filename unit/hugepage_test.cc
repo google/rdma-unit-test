@@ -12,24 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <mntent.h>
-#include <paths.h>
-#include <stdio.h>
-
-#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <string>
-#include <tuple>
-#include <utility>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
+#include "absl/log/check.h"
 #include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "public/introspection.h"
 #include "public/page_size.h"

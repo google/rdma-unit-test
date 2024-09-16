@@ -14,15 +14,18 @@
 
 #include "unit/loopback_fixture.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <cstdint>
-#include <utility>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 

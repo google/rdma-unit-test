@@ -22,7 +22,7 @@
 #include <memory>
 #include <string>
 
-#include "glog/logging.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"

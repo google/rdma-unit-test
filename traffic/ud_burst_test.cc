@@ -14,15 +14,15 @@
 
 #include <cstdint>
 #include <memory>
-#include <type_traits>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+
 #include "public/status_matchers.h"
 #include "traffic/client.h"
 #include "traffic/op_types.h"

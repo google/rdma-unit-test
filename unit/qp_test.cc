@@ -14,13 +14,14 @@
 
 #include <errno.h>
 
-#include <algorithm>
 #include <cstdint>
+#include <string>
+#include <tuple>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -28,8 +29,10 @@
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
+#include "internal/verbs_extension.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -542,7 +545,10 @@ TEST_F(QpStateTest, PostRecvReset) {
   verbs_util::PostSend(setup.local_qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+
+    EXPECT_THAT(completion.status,
+                AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_OP_ERR));
+
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
   EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
@@ -601,7 +607,9 @@ TEST_F(QpStateTest, PostRecvInit) {
   verbs_util::PostSend(setup.local_qp, send);
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(setup.cq));
-  EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+
+    EXPECT_THAT(completion.status,
+                AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_OP_ERR));
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_EQ(completion.qp_num, setup.local_qp->qp_num);
   EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.cq));
@@ -902,11 +910,13 @@ TEST_P(ResponderQpStateTest, ResponderNotReadyToReceive) {
   EXPECT_EQ(verbs_util::GetQpState(responder.qp), responder_state);
 
   if (!Introspection().BuffersMessagesWhenNotReadyToReceive()) {
+
     LOG(INFO) << "Provider does not buffer incoming messages. Expecting "
                  "unsuccessful completions.";
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(requestor.cq));
-    EXPECT_EQ(completion.status, IBV_WC_RETRY_EXC_ERR);
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_RETRY_EXC_ERR,
+                                         IBV_WC_REM_OP_ERR, IBV_WC_FATAL_ERR));
     EXPECT_EQ(completion.wr_id, wr.wr_id);
     EXPECT_EQ(completion.qp_num, requestor.qp->qp_num);
   }

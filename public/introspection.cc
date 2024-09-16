@@ -14,19 +14,24 @@
 
 #include "public/introspection.h"
 
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -38,7 +43,6 @@
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/flags.h"
-#include "public/status_matchers.h"
 #include "public/verbs_util.h"
 
 namespace rdma_unit_test {
@@ -71,6 +75,33 @@ bool NicIntrospection::HasCounter(HardwareCounter counter) const {
   return GetHardwareCounters().contains(counter);
 }
 
+std::string NicIntrospection::sysfs_device_name() const {
+  // Introspection happens before the test happens and is used to examine
+  // whether the NIC type is supported/registered.
+  // In our current use case, we only test one NIC type at one time, so only
+  // the first device name is needed here.
+  std::string device_names = absl::GetFlag(FLAGS_device_name);
+  std::vector<std::string_view> devices = absl::StrSplit(device_names, ',');
+  std::string dev_name = std::string(devices.at(0));
+  absl::StatusOr<ibv_context*> context_or =
+      rdma_unit_test::verbs_util::OpenUntrackedDevice(dev_name);
+  if (!context_or.ok()) {
+    LOG(FATAL) << "Failed to open device: "  // Crash OK
+               << context_or.status().message();
+  }
+  ibv_context* context = context_or.value();
+  ibv_device_attr attr;
+  if (ibv_query_device(context, &attr)) {
+    LOG(FATAL) << "Failed to query device: "  // Crash OK
+               << std::strerror(errno);
+  }
+  std::string sysfs_device_name = context->device->name;
+  if (ibv_close_device(context)) {
+    LOG(FATAL) << "Failed to close device " << sysfs_device_name;  // Crash OK
+  }
+  return sysfs_device_name;
+}
+
 absl::StatusOr<uint64_t> NicIntrospection::GetCounterValue(
     HardwareCounter counter) const {
   auto& counters = GetHardwareCounters();
@@ -79,9 +110,8 @@ absl::StatusOr<uint64_t> NicIntrospection::GetCounterValue(
     return absl::NotFoundError(
         absl::StrCat("Cannot found counter ", magic_enum::enum_name(counter)));
   }
-  std::string path =
-      absl::StrCat("/sys/class/infiniband/", Introspection().device_name(),
-                   "/hw_counters/", iter->second);
+  std::string path = absl::StrCat("/sys/class/infiniband/", sysfs_device_name(),
+                                  "/ports/1/hw_counters/", iter->second);
   std::ifstream file(path);
   if (!file.is_open()) {
     return absl::InternalError(absl::StrCat("Cannot open file ", path));
@@ -119,11 +149,16 @@ const NicIntrospection& Introspection() {
     std::string dev_name = std::string(devices.at(0));
     absl::StatusOr<ibv_context*> context_or =
         rdma_unit_test::verbs_util::OpenUntrackedDevice(dev_name);
-    CHECK_OK(context_or.status());  // Crash ok
+    if (!context_or.ok()) {
+      LOG(FATAL) << "Failed to open device: "  // Crash OK
+                 << context_or.status().message();
+    }
     ibv_context* context = context_or.value();
     ibv_device_attr attr;
-    int query_result = ibv_query_device(context, &attr);
-    CHECK_EQ(0, query_result);  // Crash ok
+    if (ibv_query_device(context, &attr)) {
+      LOG(FATAL) << "Failed to query device: "  // Crash OK
+                 << std::strerror(errno);
+    }
     std::string device_name = context->device->name;
     // roce device name is overridden as: roce[<vendor_id>:<vendor_part_id>]
     // according to
@@ -132,12 +167,14 @@ const NicIntrospection& Introspection() {
       device_name =
           absl::StrFormat("roce[%x:%x]", attr.vendor_id, attr.vendor_part_id);
     }
-    CHECK_EQ(0, ibv_close_device(context));  // Crash ok
+    if (ibv_close_device(context)) {
+      LOG(FATAL) << "Failed to close device " << device_name;  // Crash OK
+    }
 
     IntrospectionRegistrar::Factory factory =
         IntrospectionRegistrar::GetInstance().GetFactory(device_name);
     if (!factory) {
-      LOG(FATAL) << "Unknown NIC type:" << device_name;  // Crash ok
+      LOG(FATAL) << "Unknown NIC type: " << device_name;  // Crash ok
     }
     NicIntrospection* device_info = factory(device_name, attr);
 

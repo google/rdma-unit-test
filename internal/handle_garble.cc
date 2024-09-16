@@ -14,6 +14,8 @@
 
 #include "internal/handle_garble.h"
 
+#include <stdint.h>
+
 namespace rdma_unit_test {
 
 HandleGarble::HandleGarble(uint32_t& handle)

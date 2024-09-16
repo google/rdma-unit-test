@@ -15,6 +15,7 @@ namespace rdma_unit_test {
 // https://github.com/linux-rdma/rdma-core/blob/master/kernel-boot/rdma-persistent-naming.rules
 // vendor_id: 0x8086 vendor_part_id: 0x1889
 const absl::string_view kNetworkInterfaceName = "roce[8086:1889]";
+const absl::string_view kNetworkInterfaceNameNew = "roce[8086:145c]";
 
 // Concrete class to override specific behaviour for irdma NIC.
 class IntrospectionIrdma : public NicIntrospection {
@@ -30,6 +31,11 @@ class IntrospectionIrdma : public NicIntrospection {
         [](const std::string& name, const ibv_device_attr& attr) {
           return new IntrospectionIrdma(name, attr);
         });
+    IntrospectionRegistrar::GetInstance().Register(
+        kNetworkInterfaceNameNew,
+        [](const std::string& name, const ibv_device_attr& attr) {
+          return new IntrospectionIrdma(name, attr);
+        });
   }
 
   bool SupportsZeroLengthMr() const override { return false; }
@@ -42,6 +48,8 @@ class IntrospectionIrdma : public NicIntrospection {
 
   bool SilentlyDropSendWrWhenResetInitRtr() const override { return false; }
 
+  bool NoNakOnSendInvalidateErrors() const override { return false; }
+
  protected:
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {
@@ -53,6 +61,17 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"LoopbackUdQpTest", "SendTrafficClass"}, ""},
         {{"AdvancedLoopbackTest", "RcSendToUd"}, ""},
         {{"AdvancedLoopbackTest", "UdSendToRc"}, ""},
+        {{"LoopbackRcQpTest", "FetchAddSplitSgl"}, "b/197723945#comment5"},
+        {{"CompChannelTest", "RequestNotificationInvalidCq"}, ""},
+        {{"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel"},
+         ""},
+        {{"DeviceLimitTest", "MaxAh"}, ""},
+        {{"MwType2Test", "CrossQpInvalidate"}, "b/235330853#comment21"},
+        {{"QpPostTest", "OverflowSendWr"}, ""},
+        {{"SrqTest", "ExceedDeviceMaxWr"}, ""},
+        {{"SrqTest", "SendManyWithOneOutstanding"}, ""},
+        {{"LoopbackUdQpTest", "SendWithTooSmallRecv"}, ""},
+        {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
     };
     return deviations;
   }
@@ -63,11 +82,11 @@ class IntrospectionIrdma : public NicIntrospection {
         {HardwareCounter::kRdmaRxRead, "InRdmaReads"},
         {HardwareCounter::kRdmaRxWrite, "InRdmaWrites"},
         {HardwareCounter::kRdmaRxSend, "InRdmaSends"},
-        {HardwareCounter::kRdmaRxAtomic, "Tx ATS"},
+        {HardwareCounter::kRdmaRxAtomic, "Tx atomics"},
         {HardwareCounter::kRdmaTxRead, "OutRdmaReads"},
         {HardwareCounter::kRdmaTxWrite, "OutRdmaWrites"},
         {HardwareCounter::kRdmaTxSend, "OutRdmaSends"},
-        {HardwareCounter::kRdmaTxAtomic, "Rx ATS"},
+        {HardwareCounter::kRdmaTxAtomic, "Rx atomics"},
         {HardwareCounter::kRdmaBind, "RdmaBnd"},
         {HardwareCounter::kRdmaInvalidate, "RdmaInv"},
         {HardwareCounter::kIpv6Discards, "ip6InDiscards"},

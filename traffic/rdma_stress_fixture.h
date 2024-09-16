@@ -15,6 +15,8 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_RDMA_STRESS_FIXTURE_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_TRAFFIC_RDMA_STRESS_FIXTURE_H_
 
+#include <sys/types.h>
+
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -26,6 +28,7 @@
 #include "public/verbs_helper_suite.h"
 #include "traffic/client.h"
 #include "traffic/latency_measurement.h"
+#include "traffic/op_types.h"
 #include "traffic/transport_validation.h"
 
 namespace rdma_unit_test {

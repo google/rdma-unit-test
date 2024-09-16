@@ -20,7 +20,6 @@
 #include <cstdint>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/types/optional.h"
 #include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {

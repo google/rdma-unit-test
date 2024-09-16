@@ -2,17 +2,17 @@
 #include <array>
 #include <cstdint>
 #include <memory>
-#include <string>
-#include <type_traits>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "internal/verbs_attribute.h"
+
 #include "public/status_matchers.h"
 #include "traffic/client.h"
 #include "traffic/op_types.h"

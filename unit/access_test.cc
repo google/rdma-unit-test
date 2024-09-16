@@ -14,17 +14,18 @@
 
 #include <cstdint>
 #include <string>
-#include <utility>
+#include <tuple>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -63,11 +64,12 @@ class AccessTestFixture : public RdmaVerbsFixture {
   constexpr static int kRemoteAccessAll = IBV_ACCESS_REMOTE_READ |
                                           IBV_ACCESS_REMOTE_WRITE |
                                           IBV_ACCESS_REMOTE_ATOMIC;
+  constexpr static int kNumPages = 2;
 
-  absl::StatusOr<BasicSetup> CreateBasicSetup() {
+  absl::StatusOr<BasicSetup> CreateBasicSetup(const int num_pages = kNumPages) {
     BasicSetup setup;
-    setup.src_buffer = ibv_.AllocBuffer(/*pages=*/2);
-    setup.dst_buffer = ibv_.AllocBuffer(/*pages=*/2);
+    setup.src_buffer = ibv_.AllocBuffer(num_pages);
+    setup.dst_buffer = ibv_.AllocBuffer(num_pages);
     ASSIGN_OR_RETURN(setup.context, ibv_.OpenDevice());
     setup.port_attr = ibv_.GetPortAttribute(setup.context);
     setup.pd = ibv_.AllocPd(setup.context);
@@ -198,7 +200,7 @@ TEST_F(MessagingAccessTest, MissingDstRemoteWrite) {
 // to a memory buffer given by an RKEY.
 class RdmaAccessTest : public AccessTestFixture,
                        public testing::WithParamInterface<
-                           std::tuple<RKeyMemmoryType, ibv_wr_opcode>> {
+                           std::tuple<RKeyMemmoryType, ibv_wr_opcode, int>> {
  protected:
   void SetUp() override {
     AccessTestFixture::SetUp();
@@ -281,7 +283,8 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::Values(RKeyMemmoryType::kMemoryRegion,
                                      RKeyMemmoryType::kMemoryWindowType1,
                                      RKeyMemmoryType::kMemoryWindowType2),
-                     testing::Values(IBV_WR_RDMA_READ, IBV_WR_RDMA_WRITE)),
+                     testing::Values(IBV_WR_RDMA_READ, IBV_WR_RDMA_WRITE),
+                     testing::Values(1, 2)),
     [](const testing::TestParamInfo<RdmaAccessTest::ParamType>& info) {
       std::string memory_type = "";
       switch (std::get<0>(info.param)) {
@@ -313,7 +316,8 @@ INSTANTIATE_TEST_SUITE_P(
           optype = "Unsupported";
         }
       }
-      return memory_type + optype;
+      return absl::StrCat(memory_type, optype, "PageSize",
+                          std::get<2>(info.param));
     });
 
 class AtomicAccessTest : public AccessTestFixture,
@@ -402,7 +406,7 @@ INSTANTIATE_TEST_SUITE_P(
                                      RKeyMemmoryType::kMemoryWindowType2),
                      testing::Values(IBV_WR_ATOMIC_FETCH_AND_ADD,
                                      IBV_WR_ATOMIC_CMP_AND_SWP)),
-    [](const testing::TestParamInfo<RdmaAccessTest::ParamType>& info) {
+    [](const testing::TestParamInfo<AtomicAccessTest::ParamType>& info) {
       std::string memory_type = "";
       switch (std::get<0>(info.param)) {
         case RKeyMemmoryType::kMemoryRegion: {

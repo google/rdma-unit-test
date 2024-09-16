@@ -21,9 +21,10 @@
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/types/optional.h"
 #include "infiniband/verbs.h"
 #include "public/map_util.h"
@@ -418,7 +419,7 @@ IbvResourceManager::QpInfo* IbvResourceManager::GetMutableQpInfo(ibv_qp* qp) {
       return map_util::FindOrNull(ud_qps_, qp->qp_num);
     }
     default: {
-      LOG(DFATAL) << "Unknown QP type " << qp->qp_type;
+      LOG(FATAL) << "Unknown QP type " << qp->qp_type;
       return nullptr;
     }
   }
@@ -485,7 +486,7 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForMessaging(
       break;
     }
     default: {
-      LOG(DFATAL) << "Unknown QP type " << qp_type;
+      LOG(FATAL) << "Unknown QP type " << qp_type;
     }
   }
   return stream_sampler.ExtractSample();
@@ -548,7 +549,7 @@ void IbvResourceManager::EraseQp(uint32_t qp_num, ibv_qp_type qp_type) {
       break;
     }
     default: {
-      LOG(DFATAL) << "Unknown QP type: " << qp_type;
+      LOG(FATAL) << "Unknown QP type: " << qp_type;
     }
   }
 }
@@ -562,7 +563,7 @@ uint32_t IbvResourceManager::QpCount(ibv_qp_type qp_type) const {
       return ud_qps_.size();
     }
     default: {
-      LOG(DFATAL) << "Unknown QP type :" << qp_type;
+      LOG(FATAL) << "Unknown QP type :" << qp_type;
       return 0;
     }
   }

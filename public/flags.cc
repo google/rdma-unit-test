@@ -30,9 +30,17 @@ ABSL_FLAG(uint64_t, completion_wait_multiplier, 1,
           "The multiplier applies to completion timeouts. Setting this flag "
           "higher than 1 will increase all timeout thresholds proportionally. "
           "Increase if tests are timing out due to slow RDMA devices.");
+ABSL_FLAG(uint64_t, other_wait_multiplier, 1,
+          "The multiplier applies to other timeouts (waits for polling and "
+          "asynchoronous events). Setting this flag higher than 1 will "
+          "increase all timeout thresholds proportionally. Increase if tests "
+          "are timing out due to slow RDMA devices.  Useful in emulation.");
 ABSL_FLAG(uint32_t, port_num, 0,
           "The port number used for connection establishment. Default: 0 "
           "(first available port)");
 ABSL_FLAG(int, gid_index, -1,
           "The GID index used for connection establishment. Ignore ipv4_only "
-          "when assigned. Default: -1 (first available GID)");
+          "when assigned. Default: -1 (use the first available IPv6 GID, if "
+          "none available, use the first available IPv4 GID)");
+ABSL_FLAG(bool, skip_default_gid, false,
+          "If true, skip the Default GIDs (link-local IPv6 in RoCEv2).");

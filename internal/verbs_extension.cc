@@ -14,10 +14,8 @@
 
 #include "internal/verbs_extension.h"
 
-#include <utility>
-
-#include "glog/logging.h"
 #include "infiniband/verbs.h"
+#include "public/rdma_memblock.h"
 
 namespace rdma_unit_test {
 

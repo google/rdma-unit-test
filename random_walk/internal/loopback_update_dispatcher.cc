@@ -20,9 +20,8 @@
 #include <memory>
 #include <utility>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
-#include "absl/types/optional.h"
+#include "absl/log/check.h"
 #include "public/map_util.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/inbound_update_interface.h"

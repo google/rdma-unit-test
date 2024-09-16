@@ -14,30 +14,28 @@
 
 #include <errno.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <limits>
-#include <string>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/flags/flag.h"
+#include "absl/log/log.h"
+#include "absl/meta/type_traits.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
-#include "absl/synchronization/barrier.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "public/flags.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -236,7 +234,10 @@ class CqOverflowTest : public CqBatchOpTest {
     auto read_value = [](uint8_t* target) {
       return reinterpret_cast<volatile std::atomic<uint8_t>*>(target)->load();
     };
-    absl::Time stop = absl::Now() + poll_timeout;
+    absl::Time stop =
+        absl::Now() +
+        verbs_util::GetSlowDownTimeout(
+            poll_timeout, absl::GetFlag(FLAGS_other_wait_multiplier));
     bool completed = false;
     for (absl::Time now = absl::Now(); now < stop; now = absl::Now()) {
       completed = true;
@@ -270,7 +271,8 @@ TEST_F(CqOverflowTest, SendCqOverflow) {
     QueueWrite(setup, qp_pairs[0]);
   }
   WaitForData(setup.dst_memblock.subspan(0, total_writes), kSrcContent);
-  absl::SleepFor(kCompletionWaitTime);
+  absl::SleepFor(verbs_util::GetSlowDownTimeout(
+      kCompletionWaitTime, absl::GetFlag(FLAGS_completion_wait_multiplier)));
   WaitForAndVerifyCompletions(cq, cq->cqe);
   verbs_util::ExpectNoCompletion(cq, absl::Seconds(1));
 }
@@ -292,7 +294,8 @@ TEST_F(CqOverflowTest, SendSharedCqOverflow) {
   WaitForData(
       setup.dst_memblock.subspan(0, writes_per_queue_pair * kQueuePairCount),
       kSrcContent);
-  absl::SleepFor(kCompletionWaitTime);
+  absl::SleepFor(verbs_util::GetSlowDownTimeout(
+      kCompletionWaitTime, absl::GetFlag(FLAGS_completion_wait_multiplier)));
   WaitForAndVerifyCompletions(cq, cq_size);
   verbs_util::ExpectNoCompletion(cq, absl::Seconds(1));
 }
@@ -315,7 +318,8 @@ TEST_F(CqOverflowTest, RecvCqOverflow) {
     QueueSend(setup, qp_pairs[0]);
   }
   WaitForData(setup.dst_memblock.subspan(0, total_sends), kSrcContent);
-  absl::SleepFor(kCompletionWaitTime);
+  absl::SleepFor(verbs_util::GetSlowDownTimeout(
+      kCompletionWaitTime, absl::GetFlag(FLAGS_completion_wait_multiplier)));
   WaitForAndVerifyCompletions(recv_cq, recv_cq->cqe);
   verbs_util::ExpectNoCompletion(recv_cq, absl::Seconds(1));
 }
@@ -342,7 +346,8 @@ TEST_F(CqOverflowTest, RecvSharedCqOverflow) {
   ThreadedSubmission(qp_pairs, sends_per_queue_pair,
                      [&setup, this](QpPair& qp) { QueueSend(setup, qp); });
   WaitForData(setup.dst_memblock.subspan(0, total_sends), kSrcContent);
-  absl::SleepFor(kCompletionWaitTime);
+  absl::SleepFor(verbs_util::GetSlowDownTimeout(
+      kCompletionWaitTime, absl::GetFlag(FLAGS_completion_wait_multiplier)));
   WaitForAndVerifyCompletions(recv_cq, recv_cq->cqe);
   verbs_util::ExpectNoCompletion(recv_cq, absl::Seconds(1));
 }

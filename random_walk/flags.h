@@ -15,8 +15,6 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_FLAGS_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_RANDOM_WALK_FLAGS_H_
 
-#include <string>
-
 #include "absl/flags/declare.h"
 
 ABSL_DECLARE_FLAG(int, duration);

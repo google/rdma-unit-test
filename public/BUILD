@@ -43,9 +43,10 @@ cc_library(
         ":status_matchers",
         ":verbs_util",
         "//internal:introspection_registrar",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -62,7 +63,8 @@ cc_library(
     hdrs = ["rdma_memblock.h"],
     deps = [
         ":page_size",
-        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
@@ -73,9 +75,9 @@ cc_library(
     name = "map_util",
     hdrs = ["map_util.h"],
     deps = [
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:check",
     ],
 )
 
@@ -86,9 +88,10 @@ cc_library(
     deps = [
         ":flags",
         ":status_matchers",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -108,6 +111,7 @@ cc_library(
     hdrs = ["basic_fixture.h"],
     deps = [
         ":introspection",
+        "@com_google_absl//absl/log:check",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -125,10 +129,11 @@ cc_library(
         "//internal:verbs_attribute",
         "//internal:verbs_cleanup",
         "//internal:verbs_extension",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -145,7 +150,7 @@ cc_library(
     srcs = ["status_matchers.cc"],
     hdrs = ["status_matchers.h"],
     deps = [
-        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",

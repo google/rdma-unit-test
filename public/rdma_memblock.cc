@@ -25,9 +25,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ios>
 #include <memory>
+#include <ostream>
 
-#include "glog/logging.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/types/span.h"
@@ -54,7 +57,7 @@ RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment,
   memblock_ = Create(alloc_size, use_huge_page);
   uint8_t* buffer = memblock_->buffer.data() + offset_;
   span_ = absl::MakeSpan(buffer, length);
-  VLOG(1) << absl::StrCat("created new memblock: ", " alloc_size=", alloc_size,
+  LOG(INFO) << absl::StrCat("created new memblock: ", " alloc_size=", alloc_size,
                           " length=", length, " alignment=", alignment,
                           " base=")
           << std::hex << reinterpret_cast<uint64_t>(buffer);
@@ -63,7 +66,7 @@ RdmaMemBlock::RdmaMemBlock(size_t length, size_t alignment,
 RdmaMemBlock::RdmaMemBlock(const RdmaMemBlock& base, size_t offset,
                            size_t size) {
   // The caller can provide a size of 0 to test memory region registration
-  VLOG(1) << absl::StrCat("creating sub memblock offset=", offset,
+  LOG(INFO) << absl::StrCat("creating sub memblock offset=", offset,
                           " size=", size);
 
   offset_ = base.span_.data() - base.memblock_->buffer.data() + offset;

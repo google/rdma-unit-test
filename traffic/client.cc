@@ -17,15 +17,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <poll.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/epoll.h>
-#include <sys/poll.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <climits>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -36,11 +34,12 @@
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -51,8 +50,10 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+#include "internal/verbs_cleanup.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -318,7 +319,7 @@ absl::StatusOr<uint32_t> Client::CreateQp(bool is_rc,
     qps_[qp_id] = std::move(qp_state);
   }
 
-  VLOG(2) << "Client" << client_id()
+  LOG(INFO) << "Client" << client_id()
           << ", created Qp: " << qps_[qp_id]->ToString();
   return qp_id;
 }
@@ -362,7 +363,7 @@ absl::Status Client::PostOps(const OpAttributes& attributes) {
   std::string op_type_str = TestOp::ToString(op_type);
   std::unique_ptr<QpState>& initiator_qp_state =
       qps_[attributes.initiator_qp_id];
-  VLOG(2) << "Post " << attributes.num_ops << " " << op_type_str
+  LOG(INFO) << "Post " << attributes.num_ops << " " << op_type_str
           << " op on initiator client" << client_id() << ", "
           << initiator_qp_state->ToString();
 
@@ -601,7 +602,7 @@ int Client::ExecuteOps(Client& target, const size_t num_qps,
         int validated = ValidateOrDeferCompletions();
 
         if (send_completions || recv_completions || validated) {
-          VLOG(2) << "Completions Fetched/Validated "
+          LOG(INFO) << "Completions Fetched/Validated "
                   << send_completions + recv_completions << "/" << validated;
         }
         if (validated > 0) {
@@ -640,7 +641,7 @@ int Client::ExecuteOps(Client& target, const size_t num_qps,
       uint64_t new_ops_issued = qp_new_ops(qp_state);
       if (new_ops_issued < ops_per_qp &&
           qp_state->outstanding_ops_count() < max_inflight_per_qp) {
-        VLOG(2) << "Selected qp  " << qp_state->qp_id()
+        LOG(INFO) << "Selected qp  " << qp_state->qp_id()
                 << " to issue new op(s) on, with " << new_ops_issued
                 << " ops on it.";
         break;
@@ -648,7 +649,7 @@ int Client::ExecuteOps(Client& target, const size_t num_qps,
 
       next_qp_id = (next_qp_id + 1) % num_qps;
       if (next_qp_id == next_qp_id_old) {
-        VLOG(2) << "Searched over all qps. Not issuing a new op.";
+        LOG(INFO) << "Searched over all qps. Not issuing a new op.";
         return;
       }
     }
@@ -743,7 +744,7 @@ int Client::ExecuteOps(Client& target, const size_t num_qps,
 
     inflight_ops += ops_to_post;
     issued_ops += ops_to_post;
-    VLOG(2) << "Client " << client_id() << ": Batched " << ops_to_post
+    LOG(INFO) << "Client " << client_id() << ": Batched " << ops_to_post
             << " new ops. All issued ops: " << issued_ops
             << ", Total outstanding_ops_count: " << inflight_ops;
 
@@ -828,8 +829,8 @@ int Client::TryPollCompletions(int count, ibv_cq* cq) {
     }
   }
   total_completions_ += num_completed;
-  LOG_EVERY_N_SEC(INFO, 1) << "Client " << client_id() << ": Received "
-                           << total_completions_ << " completions.";
+  LOG_EVERY_N(INFO, 10) << "Client " << client_id() << ": Received "
+                        << total_completions_ << " completions.";
   return num_completed;
 }
 absl::StatusOr<int> Client::PollSendCompletions(
@@ -859,7 +860,7 @@ absl::StatusOr<int> Client::PollCompletions(int count, ibv_cq* cq,
     }
 
     if (now >= timeout) {
-      VLOG(2) << "Client " << client_id() << ": Expected " << count
+      LOG(INFO) << "Client " << client_id() << ": Expected " << count
               << " completions, polled " << num_completed << " completions.";
       return absl::DeadlineExceededError("Timeout when polling completions.");
     }
@@ -1043,13 +1044,13 @@ int Client::ValidateOrDeferCompletions() {
             std::memcmp(src_addr, dest_addr, op_uptr->length);
         EXPECT_EQ(buffer_content_compare, 0);
         if (buffer_content_compare != 0) {
-          VLOG(2) << "Buffer mis-match:";
-          VLOG(2) << absl::StrFormat(
+          LOG(INFO) << "Buffer mis-match:";
+          LOG(INFO) << absl::StrFormat(
                          "client %lu, qp_id %d, op_id %lu, src after %s: ",
                          client_id(), op_uptr->qp_id, op_uptr->op_id,
                          op_type_str)
                   << " " << op_uptr->SrcBuffer();
-          VLOG(2) << absl::StrFormat(
+          LOG(INFO) << absl::StrFormat(
                          "client %lu, qp_id %d, op_id %lu, dest after %s: ",
                          client_id(), op_uptr->qp_id, op_uptr->op_id,
                          op_type_str)
@@ -1135,7 +1136,7 @@ void Client::DumpPendingOps() {
               << ", #Completed: " << qp->TotalOpsCompleted()
               << ", #Pending: " << qp->outstanding_ops_count();
     for (auto& [op_id, op] : qp->outstanding_ops()) {
-      VLOG(2) << op_id;
+      LOG(INFO) << op_id;
     }
   }
 }
@@ -1173,7 +1174,7 @@ absl::Status Client::ValidateDstBuffer(uint8_t* dst_addr, uint32_t length,
   for (uint32_t i = 0; i * kOpIdGapInBuffer < length; ++i) {
     EXPECT_EQ(dst_addr[i * kOpIdGapInBuffer], (id + i) % UCHAR_MAX);
   }
-  VLOG(2) << "Validation of dst_buffer successful.";
+  LOG(INFO) << "Validation of dst_buffer successful.";
   return absl::OkStatus();
 }
 

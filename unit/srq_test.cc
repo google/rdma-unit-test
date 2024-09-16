@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -22,14 +23,17 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -66,7 +70,8 @@ class SrqTest : public RdmaVerbsFixture {
 
   // `max_outstanding` is the total number of outstanding ops in the test and
   // determines the size of QPs, CQs and SRQs
-  absl::StatusOr<BasicSetup> CreateBasicSetup(uint32_t max_outstanding = 200) {
+  absl::StatusOr<BasicSetup> CreateBasicSetup(uint32_t max_outstanding = 200,
+                                              uint32_t max_sge = 1) {
     BasicSetup setup;
     setup.send_buffer = ibv_.AllocBuffer(kBufferMemoryPages);
     std::fill(setup.send_buffer.data(),
@@ -100,7 +105,7 @@ class SrqTest : public RdmaVerbsFixture {
     }
     setup.srq_init_attr = ibv_srq_init_attr{.attr = ibv_srq_attr{
                                                 .max_wr = max_outstanding,
-                                                .max_sge = 1,
+                                                .max_sge = max_sge,
                                             }};
     setup.srq = ibv_.CreateSrq(setup.pd, setup.srq_init_attr);
     if (!setup.srq) {
@@ -113,7 +118,7 @@ class SrqTest : public RdmaVerbsFixture {
     if (!setup.send_qp) {
       return absl::InternalError("Failed to create send qp.");
     }
-    setup.recv_qp = ibv_.CreateQp(setup.pd, setup.send_cq, setup.recv_cq,
+    setup.recv_qp = ibv_.CreateQp(setup.pd, setup.recv_cq, setup.recv_cq,
                                   setup.srq, IBV_QPT_RC,
                                   QpInitAttribute()
                                       .set_max_send_wr(max_outstanding)
@@ -313,6 +318,86 @@ TEST_F(SrqTest, Send) {
   ibv_recv_wr recv =
       verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
   verbs_util::PostSrqRecv(setup.srq, recv);
+  ibv_sge ssge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
+  verbs_util::PostSend(setup.send_qp, send);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.send_cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 1);
+  ASSERT_OK_AND_ASSIGN(completion,
+                       verbs_util::WaitForCompletion(setup.recv_cq));
+  EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(completion.wr_id, 0);
+  EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
+}
+
+TEST_F(SrqTest, SendManyWithOneOutstanding) {
+  int num_iterations = 40;
+  if (Introspection().IsSlowNic()) {
+    num_iterations = 2;
+  }
+  for (int i = 0; i < num_iterations; ++i) {
+    LOG(INFO) << "\n\nStarting iteration " << i + 1 << " of " << num_iterations
+              << "\n\n";
+    ASSERT_OK_AND_ASSIGN(BasicSetup setup,
+                         CreateBasicSetup(/*max_outstanding=*/512,
+                                          /*max_sge=*/2));
+    std::array<ibv_sge, 2> rsges;
+    rsges[0] = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+    rsges[1] = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+    int num_sends = 50'000;
+    if (Introspection().IsSlowNic()) {
+      num_sends = 500;
+    }
+    for (int j = 0; j < num_sends; ++j) {
+      LOG_EVERY_N_SEC(INFO, 5)
+          << "\tIssuing send " << j + 1 << " of " << num_sends;
+      ibv_recv_wr recv = verbs_util::CreateRecvWr(
+          /*wr_id=*/reinterpret_cast<uint64_t>(setup.context), rsges.data(), 1);
+      verbs_util::PostSrqRecv(setup.srq, recv);
+      ibv_sge ssge =
+          verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
+      ibv_send_wr send =
+          verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);
+      verbs_util::PostSend(setup.send_qp, send);
+      ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                           verbs_util::WaitForCompletion(
+                               setup.send_cq, /*timeout=*/absl::Seconds(100),
+                               /*poll_interval=*/absl::ZeroDuration()));
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.wr_id, 1);
+      ASSERT_OK_AND_ASSIGN(completion,
+                           verbs_util::WaitForCompletion(
+                               setup.recv_cq, /*timeout=*/absl::Seconds(100),
+                               /*poll_interval=*/absl::ZeroDuration()));
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.wr_id, reinterpret_cast<uint64_t>(setup.context));
+      EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
+    }
+  }
+}
+
+TEST_F(SrqTest, QpFlush) {
+  // Flushing RQ on QP associated with SRQ will not interfere with other QP
+  // on the same SRQ.
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.recv_cq, setup.recv_cq, setup.srq,
+                             IBV_QPT_UD);
+  // QP shares SRQ with setup.recv_qp.
+  ASSERT_THAT(qp, NotNull());
+  ASSERT_THAT(ibv_.ModifyUdQpResetToRts(qp, setup.port_attr, /*qkey=*/200),
+              IsOk());
+
+  ibv_sge rsge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostSrqRecv(setup.srq, recv);
+  // Now flush QP. setup.srq should not be affected.
+  ASSERT_THAT(ibv_.ModifyQpToError(qp), IsOk());
+  EXPECT_TRUE(verbs_util::ExpectNoCompletion(setup.recv_cq));
+
   ibv_sge ssge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);
   ibv_send_wr send =
       verbs_util::CreateSendWr(/*wr_id=*/1, &ssge, /*num_sge=*/1);

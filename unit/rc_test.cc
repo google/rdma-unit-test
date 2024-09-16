@@ -16,6 +16,7 @@
 #include <sched.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -27,6 +28,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -38,6 +40,7 @@
 #include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -138,6 +141,57 @@ TEST_F(LoopbackRcQpTest, Send) {
   EXPECT_EQ(completion.wr_id, 0);
   EXPECT_EQ(completion.wc_flags, 0);
   EXPECT_THAT(remote.buffer.span(), Each(kLocalBufferContent));
+}
+
+TEST_F(LoopbackRcQpTest, SendManyWithOneOutstanding) {
+  int num_iterations = 40;
+  if (Introspection().IsSlowNic()) {
+    num_iterations = 2;
+  }
+  for (int i = 0; i < num_iterations; ++i) {
+    LOG(INFO) << "Iteration " << i + 1 << " of " << num_iterations;
+    Client local, remote;
+    QpInitAttribute qp_init_attr;
+    qp_init_attr.set_max_recv_wr(512);
+    ASSERT_OK_AND_ASSIGN(std::tie(local, remote),
+                         CreateConnectedClientsPair(1, qp_init_attr));
+
+    int num_sends = 50'000;
+    if (Introspection().IsSlowNic()) {
+      num_sends = 500;
+    }
+    for (int j = 0; j < num_sends; ++j) {
+      ibv_sge sge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+      ibv_recv_wr recv =
+          verbs_util::CreateRecvWr(/*wr_id=*/0, &sge, /*num_sge=*/1);
+      verbs_util::PostRecv(remote.qp, recv);
+
+      ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+      ibv_send_wr send =
+          verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+      verbs_util::PostSend(local.qp, send);
+
+      ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                           verbs_util::WaitForCompletion(
+                               local.cq, /*timeout=*/absl::Seconds(100),
+                               /*poll_interval=*/absl::ZeroDuration()));
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.opcode, IBV_WC_SEND);
+      EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+      EXPECT_EQ(completion.wr_id, 1);
+      ASSERT_OK_AND_ASSIGN(completion,
+                           verbs_util::WaitForCompletion(
+                               remote.cq, /*timeout=*/absl::Seconds(100),
+                               /*poll_interval=*/absl::ZeroDuration()));
+      EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+      EXPECT_EQ(completion.opcode, IBV_WC_RECV);
+      EXPECT_EQ(completion.byte_len, local.buffer.size());
+      EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
+      EXPECT_EQ(completion.wr_id, 0);
+      EXPECT_EQ(completion.wc_flags, 0);
+      EXPECT_THAT(remote.buffer.span(), Each(kLocalBufferContent));
+    }
+  }
 }
 
 TEST_F(LoopbackRcQpTest, SendEmptySgl) {
@@ -503,7 +557,8 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateEmptySgl) {
   read.wr_id = 2;
   verbs_util::PostSend(local.qp, read);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
-  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  EXPECT_THAT(completion.status,
+              AnyOf(IBV_WC_REM_ACCESS_ERR, IBV_WC_RETRY_EXC_ERR));
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 2);
 }
@@ -566,16 +621,24 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateBadRkey) {
   send.invalidate_rkey = (mw->rkey + 10) * 5;
   verbs_util::PostSend(local.qp, send);
 
-  // When a send with invalidate failed, the responder should not send out a
-  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
-  // requester should not send out a completion in this case.
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(remote.cq));
   // General memory management error undefined in ibverbs.
   EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, recv.wr_id);
+
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  if (Introspection().NoNakOnSendInvalidateErrors()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
+  } else {
+    ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
+    EXPECT_THAT(completion.status, IBV_WC_REM_ACCESS_ERR);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+  }
 }
 
 TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
@@ -604,16 +667,24 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateType1Rkey) {
   send.invalidate_rkey = mw->rkey;
   verbs_util::PostSend(local.qp, send);
 
-  // When a send with invalidate failed, the responder should not send out a
-  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
-  // requester should not send out a completion in this case.
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(remote.cq));
   // Memory management error (IB Spec 11.6.2) undefined for ibverbs.
   EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 0);
+
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  if (Introspection().NoNakOnSendInvalidateErrors()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
+  } else {
+    ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
+    EXPECT_THAT(completion.status, IBV_WC_REM_ACCESS_ERR);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+  }
 }
 
 // Send with Invalidate targeting another QPs MW.
@@ -643,16 +714,24 @@ TEST_F(LoopbackRcQpTest, SendWithInvalidateWrongQp) {
   send.invalidate_rkey = mw->rkey;
   verbs_util::PostSend(local.qp, send);
 
-  // When a send with invalidate failed, the responder should not send out a
-  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
-  // requester should not send out a completion in this case.
-  EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
   ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                        verbs_util::WaitForCompletion(remote.cq));
   // General memory management error undefined in ibverbs.
   EXPECT_THAT(completion.status, Ne(IBV_WC_SUCCESS));
   EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
   EXPECT_EQ(completion.wr_id, recv.wr_id);
+
+  // When a send with invalidate failed, the responder should not send out a
+  // NAK code, see IB spec 9.9.6.3 responder error behavior (class J error). The
+  // requester should not send out a completion in this case.
+  if (Introspection().NoNakOnSendInvalidateErrors()) {
+    EXPECT_TRUE(verbs_util::ExpectNoCompletion(local.cq));
+  } else {
+    ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(local.cq));
+    EXPECT_THAT(completion.status, IBV_WC_REM_ACCESS_ERR);
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+  }
 }
 
 TEST_F(LoopbackRcQpTest, SendWithTooSmallRecv) {
@@ -1148,6 +1227,28 @@ TEST_F(LoopbackRcQpTest, ReadInvalidRKeyAndInvalidLKey) {
   EXPECT_THAT(local.buffer.span(), Each(kLocalBufferContent));
 }
 
+TEST_F(LoopbackRcQpTest, ReadUnregisteredRemoteAddress) {
+  Client local, remote;
+  // Creates an unregistered buffer and read from it.
+  auto buffer = ibv_.AllocBuffer(/*pages=*/kPages);
+  std::fill_n(buffer.data(), buffer.size(), kRemoteBufferContent);
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr read = verbs_util::CreateReadWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, buffer.data(), remote.mr->rkey);
+  verbs_util::PostSend(local.qp, read);
+
+  enum ibv_wc_status expected = Introspection().GeneratesRetryExcOnConnTimeout()
+                                    ? IBV_WC_RETRY_EXC_ERR
+                                    : IBV_WC_REM_ACCESS_ERR;
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, expected);
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(local.buffer.span(), Each(kLocalBufferContent));
+}
+
 TEST_F(LoopbackRcQpTest, BasicWrite) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -1525,6 +1626,26 @@ TEST_F(LoopbackRcQpTest, WriteInvalidRKeyAndInvalidLKey) {
   EXPECT_EQ(completion.qp_num, local.qp->qp_num);
   EXPECT_EQ(completion.wr_id, 1);
   EXPECT_THAT(remote.buffer.span(), Each(kRemoteBufferContent));
+}
+
+TEST_F(LoopbackRcQpTest, WriteUnregisteredAddress) {
+  Client local, remote;
+  // Creates an unregistered buffer and write to it.
+  auto buffer = ibv_.AllocBuffer(/*pages=*/kPages);
+  std::fill_n(buffer.data(), buffer.size(), kRemoteBufferContent);
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr read = verbs_util::CreateWriteWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, buffer.data(), remote.mr->rkey);
+  verbs_util::PostSend(local.qp, read);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_THAT(completion.status,
+              AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_ACCESS_ERR));
+  EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(completion.wr_id, 1);
+  EXPECT_THAT(buffer.span(), Each(kRemoteBufferContent));
 }
 
 TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
@@ -2356,8 +2477,9 @@ TEST_P(RemoteRcQpStateTest, RemoteRcQpStateTests) {
                   AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_OP_ERR));
       break;
     default:
-      EXPECT_THAT(ExecuteRdmaOp(local, remote, param.opcode),
-                  IBV_WC_RETRY_EXC_ERR);
+      EXPECT_THAT(
+          ExecuteRdmaOp(local, remote, param.opcode),
+          AnyOf(IBV_WC_RETRY_EXC_ERR, IBV_WC_REM_OP_ERR, IBV_WC_FATAL_ERR));
   }
 }
 

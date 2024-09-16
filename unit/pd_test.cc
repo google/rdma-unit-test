@@ -16,16 +16,18 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -56,6 +58,7 @@ TEST_F(PdTest, DeleteInvalidPd) {
   ibv_pd* pd = ibv_.AllocPd(context);
   HandleGarble garble(pd->handle);
   EXPECT_EQ(ibv_dealloc_pd(pd), ENOENT);
+  EXPECT_EQ(errno, ENOENT);
 }
 
 TEST_F(PdTest, AllocQpWithInvalidPd) {
@@ -83,6 +86,69 @@ TEST_F(PdTest, AllocMwWithInvalidPd) {
   ASSERT_THAT(pd, NotNull());
   HandleGarble garble(pd->handle);
   EXPECT_THAT(ibv_.AllocMw(pd, IBV_MW_TYPE_1), IsNull());
+}
+
+TEST_F(PdTest, AhRefCount) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  PortAttribute port_attr = ibv_.GetPortAttribute(context);
+  ibv_ah_attr ah_attr = AhAttribute().GetAttribute(
+      port_attr.port, port_attr.gid_index, port_attr.gid);
+  ibv_ah* ah = ibv_.CreateAh(pd, ah_attr);
+  ASSERT_THAT(ah, NotNull());
+  int result = ibv_.DeallocPd(pd);
+  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(errno, EBUSY);
+}
+
+TEST_F(PdTest, MrRefCount) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_mr* mr = ibv_.RegMr(pd, buffer);
+  ASSERT_THAT(mr, NotNull());
+  int result = ibv_.DeallocPd(pd);
+  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(errno, EBUSY);
+}
+
+TEST_F(PdTest, MwRefCount) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_mw* mw = ibv_.AllocMw(pd, IBV_MW_TYPE_1);
+  ASSERT_THAT(mw, NotNull());
+  int result = ibv_.DeallocPd(pd);
+  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(errno, EBUSY);
+}
+
+TEST_F(PdTest, QpRefCount) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_cq* cq = ibv_.CreateCq(context);
+  ASSERT_THAT(cq, NotNull());
+  ibv_qp* qp = ibv_.CreateQp(pd, cq);
+  ASSERT_THAT(qp, NotNull());
+  int result = ibv_.DeallocPd(pd);
+  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(errno, EBUSY);
+}
+
+TEST_F(PdTest, SrqRefCount) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_srq* srq = ibv_.CreateSrq(pd);
+  ASSERT_THAT(srq, NotNull());
+  int result = ibv_.DeallocPd(pd);
+  EXPECT_EQ(result, EBUSY);
+  EXPECT_EQ(errno, EBUSY);
 }
 
 class PdBindTest : public LoopbackFixture,
@@ -748,6 +814,52 @@ TEST_F(PdSrqTest, SrqRecvMrSrqMismatch) {
   EXPECT_EQ(completion.status, IBV_WC_REM_OP_ERR);
   ASSERT_OK_AND_ASSIGN(completion, verbs_util::WaitForCompletion(recv_cq));
   EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
+}
+
+// When the SRQ and recv MR are on one PD, and the QP and write destination
+// MR are on a different PD, write with immediate should still succeed.
+TEST_F(PdSrqTest, QpSrqPdMismatchWriteWithImm) {
+  // PD 1 will have the SRQ and recv MR.
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_pd* pd1 = ibv_.AllocPd(setup.context);
+  ASSERT_THAT(pd1, NotNull());
+  ibv_srq* srq = ibv_.CreateSrq(pd1);
+  ASSERT_THAT(srq, NotNull());
+  ibv_mr* mr_recv = ibv_.RegMr(pd1, setup.buffer);
+  ASSERT_THAT(mr_recv, NotNull());
+
+  // PD 2 will have the QPs, the source and the destination MR.
+  ibv_pd* pd2 = ibv_.AllocPd(setup.context);
+  ASSERT_THAT(pd2, NotNull());
+  ibv_qp* local_qp = ibv_.CreateQp(pd2, setup.cq);
+  ASSERT_THAT(local_qp, NotNull());
+  ibv_qp* remote_qp = ibv_.CreateQp(pd2, setup.cq, setup.cq, srq);
+  ASSERT_THAT(remote_qp, NotNull());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local_qp, remote_qp, setup.port_attr));
+  ibv_mr* mr_write_dst = ibv_.RegMr(pd2, setup.buffer);
+  ASSERT_THAT(mr_write_dst, NotNull());
+  ibv_mr* mr_send = ibv_.RegMr(pd2, setup.buffer);
+  ASSERT_THAT(mr_send, NotNull());
+
+  // Post a recv that will be targeted by the completion carrying the immediate.
+  ibv_sge rsge = verbs_util::CreateSge(setup.buffer.span(), mr_recv);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostSrqRecv(srq, recv);
+
+  // Post a send carrying the write w/ imm work request.
+  ibv_sge ssge = verbs_util::CreateSge(setup.buffer.span(), mr_send);
+  ibv_send_wr send = verbs_util::CreateWriteWithImmWr(
+      /*wr_id=*/1, &ssge, /*num_sge=*/1, setup.buffer.data(),
+      /*rkey=*/mr_write_dst->rkey, /*imm_value=*/0);
+  verbs_util::PostSend(local_qp, send);
+
+  // Expect 2 successful completions: the write, and the incoming immediate.
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(setup.cq));
+    EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
+  }
 }
 
 // TODO(author1): Create Max

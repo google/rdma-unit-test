@@ -18,15 +18,19 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <thread>  // NOLINT
+#include <vector>
 
-#include "glog/logging.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/barrier.h"
+#include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 

@@ -19,17 +19,19 @@
 #include <memory>
 #include <optional>
 #include <utility>
-#include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "absl/flags/flag.h"
 #include "absl/status/statusor.h"
 #include "infiniband/verbs.h"
 #include "public/status_matchers.h"
+#include "traffic/client.h"
 #include "traffic/config.pb.h"
+#include "traffic/op_types.h"
+#include "traffic/operation_generator.h"
+#include "traffic/qp_state.h"
 #include "traffic/rdma_stress_fixture.h"
+#include "traffic/test_op.h"
 
 namespace rdma_unit_test {
 namespace {

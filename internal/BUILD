@@ -16,6 +16,7 @@
 # Targets in this packages is designed to be direct dependencies of targets in ../public/ but not ../cases/.
 
 package(
+    default_applicable_licenses = ["//:package_license"],
     default_testonly = True,
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
@@ -63,7 +64,7 @@ cc_library(
     srcs = ["introspection_registrar.cc"],
     hdrs = ["introspection_registrar.h"],
     deps = [
-        "@com_glog_glog//:glog",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@libibverbs",
     ],
@@ -88,7 +89,6 @@ cc_library(
     deps = [
         "//public:rdma_memblock",
         "//public:verbs_util",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/status",
         "@libibverbs",
     ],
@@ -100,7 +100,6 @@ cc_library(
     hdrs = ["verbs_cleanup.h"],
     deps = [
         "//public:rdma_memblock",
-        "@com_glog_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/synchronization",

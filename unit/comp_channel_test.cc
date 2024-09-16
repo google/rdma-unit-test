@@ -14,14 +14,14 @@
 
 #include <errno.h>
 #include <sys/select.h>
+#include <sys/time.h>
 
 #include <cstdint>
-#include <ctime>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock.h"
@@ -30,6 +30,7 @@
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"

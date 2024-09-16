@@ -12,21 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <climits>
 #include <memory>
 #include <string>
 #include <tuple>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
+#include "traffic/client.h"
 #include "traffic/op_profiles.h"
 #include "traffic/op_types.h"
+#include "traffic/operation_generator.h"
 #include "traffic/rdma_stress_fixture.h"
 
 namespace rdma_unit_test {

@@ -16,25 +16,21 @@
 
 #include "random_walk/internal/grpc_update_dispatcher.h"
 
-#include <cstdint>
 #include <memory>
 #include <string>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "absl/types/optional.h"
 #include "grpcpp/client_context.h"
 #include "grpcpp/create_channel.h"
-#include "grpcpp/grpcpp.h"
 #include "grpcpp/security/credentials.h"
 #include "grpcpp/support/status.h"
 #include "public/map_util.h"
-#include "public/status_matchers.h"
 #include "random_walk/internal/client_update_service.grpc.pb.h"
 #include "random_walk/internal/client_update_service.pb.h"
-#include "random_walk/internal/rpc_server.h"
 #include "random_walk/internal/types.h"
 
 namespace rdma_unit_test {

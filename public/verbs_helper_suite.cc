@@ -16,17 +16,19 @@
 
 #include <sys/socket.h>
 
-#include <cstddef>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -41,6 +43,7 @@
 #include "public/flags.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_util.h"
 
@@ -88,7 +91,7 @@ int VerbsHelperSuite::ModifyRcQpResetToInit(ibv_qp* qp, uint8_t port,
   int mask = qp_attr.GetRcResetToInitMask();
 
   int result_code = ibv_modify_qp(qp, &mod_init, mask);
-  VLOG(1) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
                              result_code);
   return result_code;
 }
@@ -101,11 +104,11 @@ int VerbsHelperSuite::ModifyRcQpInitToRtr(ibv_qp* qp,
   ibv_qp_attr mod_rtr = qp_attr.GetRcInitToRtrAttr(local.port, local.gid_index,
                                                    remote_gid, remote_qpn);
   int mask = qp_attr.GetRcInitToRtrMask();
-  LOG_IF(DFATAL, mod_rtr.path_mtu > local.attr.active_mtu)  // Crash OK
+  LOG_IF(FATAL, mod_rtr.path_mtu > local.attr.active_mtu)  // Crash OK
       << absl::StrFormat("Path mtu %d bigger than port active mtu %d.",
                          128 << mod_rtr.path_mtu, 128 << local.attr.active_mtu);
   int result_code = extension().ModifyRcQpInitToRtr(qp, mod_rtr, mask);
-  VLOG(1) << absl::StrFormat("Modified QP (%p) from INIT to RTR (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modified QP (%p) from INIT to RTR (%d).", qp,
                              result_code);
   return result_code;
 }
@@ -114,7 +117,7 @@ int VerbsHelperSuite::ModifyRcQpRtrToRts(ibv_qp* qp, QpAttribute qp_attr) {
   ibv_qp_attr mod_rts = qp_attr.GetRcRtrToRtsAttr();
   int mask = qp_attr.GetRcRtrToRtsMask();
   int result_code = ibv_modify_qp(qp, &mod_rts, mask);
-  VLOG(1) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
                              result_code);
   return result_code;
 }
@@ -139,7 +142,7 @@ absl::Status VerbsHelperSuite::ModifyUdQpResetToRts(ibv_qp* qp,
     return absl::InternalError(absl::StrFormat(
         "Modify QP from RESET to INIT failed (%d).", result_code));
   }
-  VLOG(1) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) from RESET to INIT (%d).", qp,
                              result_code);
 
   // Ready to receive.
@@ -150,7 +153,7 @@ absl::Status VerbsHelperSuite::ModifyUdQpResetToRts(ibv_qp* qp,
     return absl::InternalError(absl::StrFormat(
         "Modified QP from INIT to RTR failed (%d).", result_code));
   }
-  VLOG(1) << absl::StrFormat("Modify QP (%p) from INIT to RTR (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) from INIT to RTR (%d).", qp,
                              result_code);
 
   // Ready to send.
@@ -161,7 +164,7 @@ absl::Status VerbsHelperSuite::ModifyUdQpResetToRts(ibv_qp* qp,
     return absl::InternalError(absl::StrFormat(
         "Modified QP from RTR to RTS failed (%d).", result_code));
   }
-  VLOG(1) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) from RTR to RTS (%d).", qp,
                              result_code);
   return absl::OkStatus();
 }
@@ -193,7 +196,7 @@ absl::Status VerbsHelperSuite::ModifyQpToReset(ibv_qp* qp) const {
 
 int VerbsHelperSuite::ModifyQp(ibv_qp* qp, ibv_qp_attr& attr, int mask) const {
   int result_code = ibv_modify_qp(qp, &attr, mask);
-  VLOG(1) << absl::StrFormat("Modify QP (%p) to %s (%d).", qp,
+  LOG(INFO) << absl::StrFormat("Modify QP (%p) to %s (%d).", qp,
                              magic_enum::enum_name(attr.qp_state), result_code);
   return result_code;
 }
@@ -252,14 +255,14 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice() {
         EnumeratePorts(context);
     if (enum_result.ok() && !enum_result.value().empty()) {
       port_attrs = enum_result.value();
-      VLOG(1) << "Found (" << port_attrs.size()
+      LOG(INFO) << "Found (" << port_attrs.size()
               << ") active ports for device: " << device_name;
       // Just need one device with active ports. Break at this point.
       break;
     }
     LOG(INFO) << "Failed to get ports for device: " << device_name;
     int result = ibv_close_device(context);
-    LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
+    LOG_IF(FATAL, result != 0) << "Failed to close device: " << device_name;
     context = nullptr;
   }
   if (!context || port_attrs.empty()) {
@@ -270,7 +273,7 @@ absl::StatusOr<ibv_context*> VerbsHelperSuite::OpenDevice() {
   absl::MutexLock guard(&mtx_port_attrs_);
   port_attrs_[context] = port_attrs;
 
-  VLOG(1) << "Opened device " << context;
+  LOG(INFO) << "Opened device " << context;
 
   return context;
 }
@@ -302,14 +305,14 @@ absl::Status VerbsHelperSuite::OpenAllDevices(
         EnumeratePorts(context);
     if (enum_result.ok() && !enum_result.value().empty()) {
       port_attrs = enum_result.value();
-      VLOG(1) << "Found (" << port_attrs.size()
+      LOG(INFO) << "Found (" << port_attrs.size()
               << ") active ports for device: " << device_name;
       contexts.push_back(context);
     } else {
       LOG(INFO) << "Failed to get ports for device: " << device_name;
       LOG(INFO) << "Getting error" << enum_result.status().message();
       int result = ibv_close_device(context);
-      LOG_IF(DFATAL, result != 0) << "Failed to close device: " << device_name;
+      LOG_IF(FATAL, result != 0) << "Failed to close device: " << device_name;
     }
     if (!context || port_attrs.empty()) {
       return absl::InternalError(absl::StrCat("Failed to open device ",
@@ -319,7 +322,7 @@ absl::Status VerbsHelperSuite::OpenAllDevices(
     cleanup_.AddCleanup(context);
     absl::MutexLock guard(&mtx_port_attrs_);
     port_attrs_[context] = port_attrs;
-    VLOG(1) << "Opened device " << context;
+    LOG(INFO) << "Opened device " << context;
     context = nullptr;
   }
   if (contexts.empty()) {
@@ -346,10 +349,10 @@ ibv_ah* VerbsHelperSuite::CreateLoopbackAh(ibv_pd* pd,
 ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
   ibv_ah* ah = extension().CreateAh(pd, ah_attr);
   if (ah) {
-    VLOG(1) << "Created AH " << ah;
+    LOG(INFO) << "Created AH " << ah;
     cleanup_.AddCleanup(ah);
   } else {
-    VLOG(1) << "Failed to create AH: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create AH: " << std::strerror(errno);
   }
   return ah;
 }
@@ -357,10 +360,10 @@ ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
 int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
   int result = ibv_destroy_ah(ah);
   if (result == 0) {
-    VLOG(1) << "Destroyed AH " << ah;
+    LOG(INFO) << "Destroyed AH " << ah;
     cleanup_.ReleaseCleanup(ah);
   } else {
-    VLOG(1) << "Failed to destroy AH: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy AH: " << std::strerror(errno);
   }
   return result;
 }
@@ -368,10 +371,10 @@ int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
 ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
   ibv_pd* pd = ibv_alloc_pd(context);
   if (pd) {
-    VLOG(1) << "Allocated PD " << pd;
+    LOG(INFO) << "Allocated PD " << pd;
     cleanup_.AddCleanup(pd);
   } else {
-    VLOG(1) << "Failed to allocate PD: " << std::strerror(errno);
+    LOG(INFO) << "Failed to allocate PD: " << std::strerror(errno);
   }
   return pd;
 }
@@ -379,10 +382,10 @@ ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
 int VerbsHelperSuite::DeallocPd(ibv_pd* pd) {
   int result = ibv_dealloc_pd(pd);
   if (result == 0) {
-    VLOG(1) << "Deallocated PD " << pd;
+    LOG(INFO) << "Deallocated PD " << pd;
     cleanup_.ReleaseCleanup(pd);
   } else {
-    VLOG(1) << "Failed to deallocate PD: " << std::strerror(errno);
+    LOG(INFO) << "Failed to deallocate PD: " << std::strerror(errno);
   }
   return result;
 }
@@ -391,10 +394,10 @@ ibv_mr* VerbsHelperSuite::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
                                 int access) {
   ibv_mr* mr = extension().RegMr(pd, memblock, access);
   if (mr) {
-    VLOG(1) << "Registered MR " << mr;
+    LOG(INFO) << "Registered MR " << mr;
     cleanup_.AddCleanup(mr);
   } else {
-    VLOG(1) << "Failed to register MR: " << std::strerror(errno);
+    LOG(INFO) << "Failed to register MR: " << std::strerror(errno);
   }
   return mr;
 }
@@ -403,9 +406,9 @@ int VerbsHelperSuite::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
                               const RdmaMemBlock* memblock, int access) {
   int result = extension().ReregMr(mr, flags, pd, memblock, access);
   if (result == 0) {
-    VLOG(1) << "Reregistered MR " << mr;
+    LOG(INFO) << "Reregistered MR " << mr;
   } else {
-    VLOG(1) << "Failed to reregister MR: " << std::strerror(errno);
+    LOG(INFO) << "Failed to reregister MR: " << std::strerror(errno);
   }
   return result;
 }
@@ -413,10 +416,10 @@ int VerbsHelperSuite::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
 int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
   int result = ibv_dereg_mr(mr);
   if (result == 0) {
-    VLOG(1) << "Deregistered MR " << mr;
+    LOG(INFO) << "Deregistered MR " << mr;
     cleanup_.ReleaseCleanup(mr);
   } else {
-    VLOG(1) << "Failed to deregister MR: " << std::strerror(errno);
+    LOG(INFO) << "Failed to deregister MR: " << std::strerror(errno);
   }
   return result;
 }
@@ -424,10 +427,10 @@ int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
 ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
   ibv_mw* mw = ibv_alloc_mw(pd, type);
   if (mw) {
-    VLOG(1) << "Allocated MW " << mw;
+    LOG(INFO) << "Allocated MW " << mw;
     cleanup_.AddCleanup(mw);
   } else {
-    VLOG(1) << "Failed to allocate MW: " << std::strerror(errno);
+    LOG(INFO) << "Failed to allocate MW: " << std::strerror(errno);
   }
   return mw;
 }
@@ -435,10 +438,10 @@ ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
 int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
   int result = ibv_dealloc_mw(mw);
   if (result == 0) {
-    VLOG(1) << "Deallocated MW " << mw;
+    LOG(INFO) << "Deallocated MW " << mw;
     cleanup_.ReleaseCleanup(mw);
   } else {
-    VLOG(1) << "Failed to deallocate MW: " << std::strerror(errno);
+    LOG(INFO) << "Failed to deallocate MW: " << std::strerror(errno);
   }
   return result;
 }
@@ -446,10 +449,10 @@ int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
 ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
   ibv_comp_channel* channel = ibv_create_comp_channel(context);
   if (channel) {
-    VLOG(1) << "Created channel " << channel;
+    LOG(INFO) << "Created channel " << channel;
     cleanup_.AddCleanup(channel);
   } else {
-    VLOG(1) << "Failed to create comp channel: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create comp channel: " << std::strerror(errno);
   }
   return channel;
 }
@@ -457,10 +460,10 @@ ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
 int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
   int result = ibv_destroy_comp_channel(channel);
   if (result == 0) {
-    VLOG(1) << "Destroyed channel " << channel;
+    LOG(INFO) << "Destroyed channel " << channel;
     cleanup_.ReleaseCleanup(channel);
   } else {
-    VLOG(1) << "Failed to destroy comp channel: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy comp channel: " << std::strerror(errno);
   }
   return result;
 }
@@ -470,10 +473,10 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
   ibv_cq* cq = ibv_create_cq(context, cqe, /*cq_context=*/nullptr, channel,
                              /*cq_vector=*/0);
   if (cq) {
-    VLOG(1) << "Created CQ " << cq;
+    LOG(INFO) << "Created CQ " << cq;
     cleanup_.AddCleanup(cq);
   } else {
-    VLOG(1) << "Failed to create CQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create CQ: " << std::strerror(errno);
   }
   return cq;
 }
@@ -481,10 +484,10 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
 int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
-    VLOG(1) << "Destroyed CQ " << cq;
+    LOG(INFO) << "Destroyed CQ " << cq;
     cleanup_.ReleaseCleanup(cq);
   } else {
-    VLOG(1) << "Failed to destroy CQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy CQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -493,10 +496,10 @@ ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
                                         ibv_cq_init_attr_ex& cq_attr) {
   ibv_cq_ex* cq = ibv_create_cq_ex(context, &cq_attr);
   if (cq) {
-    VLOG(1) << "Created CQ " << cq;
+    LOG(INFO) << "Created CQ " << cq;
     cleanup_.AddCleanup(cq);
   } else {
-    VLOG(1) << "Failed to create extended CQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create extended CQ: " << std::strerror(errno);
   }
   return cq;
 }
@@ -511,10 +514,10 @@ int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {
   ibv_cq* cq = ibv_cq_ex_to_cq(cq_ex);
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
-    VLOG(1) << "Destroyed CQ " << cq;
+    LOG(INFO) << "Destroyed CQ " << cq;
     cleanup_.ReleaseCleanup(cq_ex);
   } else {
-    VLOG(1) << "Failed to destroy extended CQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy extended CQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -528,10 +531,10 @@ ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, uint32_t max_wr,
 ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
   ibv_srq* srq = ibv_create_srq(pd, &attr);
   if (srq) {
-    VLOG(1) << "Created SRQ " << srq;
+    LOG(INFO) << "Created SRQ " << srq;
     cleanup_.AddCleanup(srq);
   } else {
-    VLOG(1) << "Failed to create SRQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create SRQ: " << std::strerror(errno);
   }
   return srq;
 }
@@ -539,10 +542,10 @@ ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
 int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
   int result = ibv_destroy_srq(srq);
   if (result == 0) {
-    VLOG(1) << "Destroyed SRQ " << srq;
+    LOG(INFO) << "Destroyed SRQ " << srq;
     cleanup_.ReleaseCleanup(srq);
   } else {
-    VLOG(1) << "Failed to destroy SRQ: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy SRQ: " << std::strerror(errno);
   }
   return result;
 }
@@ -569,10 +572,10 @@ ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_cq* send_cq, ibv_cq* recv_cq,
 ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
   ibv_qp* qp = extension().CreateQp(pd, basic_attr);
   if (qp) {
-    VLOG(1) << "Created QP " << qp;
+    LOG(INFO) << "Created QP " << qp;
     cleanup_.AddCleanup(qp);
   } else {
-    VLOG(1) << "Failed to create QP: " << std::strerror(errno);
+    LOG(INFO) << "Failed to create QP: " << std::strerror(errno);
   }
   return qp;
 }
@@ -580,10 +583,10 @@ ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
 int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
   int result = ibv_destroy_qp(qp);
   if (result == 0) {
-    VLOG(1) << "Destroyed QP " << qp;
+    LOG(INFO) << "Destroyed QP " << qp;
     cleanup_.ReleaseCleanup(qp);
   } else {
-    VLOG(1) << "Failed to destroy QP: " << std::strerror(errno);
+    LOG(INFO) << "Failed to destroy QP: " << std::strerror(errno);
   }
   return result;
 }
@@ -610,11 +613,23 @@ std::string GidToString(const ibv_gid& gid) {
                          gid.raw[12], gid.raw[13], gid.raw[14], gid.raw[15]);
 }
 
+std::string IpTypeToString(int ip_type) {
+  switch (ip_type) {
+    case AF_INET:
+      return "AF_INET";
+    case AF_INET6:
+      return "AF_INET6";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace
 
 absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
     ibv_context* context) {
   std::vector<PortAttribute> result;
+  std::vector<PortAttribute> result_ipv4;
   ibv_port_attr port_attr = {};
   bool ipv4_only = absl::GetFlag(FLAGS_ipv4_only);
   LOG(INFO) << "Enumerating Ports for " << context
@@ -637,7 +652,7 @@ absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
       if (query_result != 0) {
         return absl::InternalError("Failed to query port attributes.");
       }
-      VLOG(1) << "Found port: " << static_cast<uint32_t>(port) << std::endl
+      LOG(INFO) << "Found port: " << static_cast<uint32_t>(port) << std::endl
               << "\t"
               << "state: " << port_attr.state << std::endl
               << "\t"
@@ -675,14 +690,23 @@ absl::StatusOr<std::vector<PortAttribute>> VerbsHelperSuite::EnumeratePorts(
       if (ipv4_only && (ip_type == AF_INET6)) {
         continue;
       }
-      VLOG(2) << absl::StrFormat("Adding port %d with gid %s", port,
-                                 GidToString(gid));
+      LOG(INFO) << absl::StrFormat("Adding port %d with gid %s type %s", port,
+                                 GidToString(gid), IpTypeToString(ip_type));
       PortAttribute match{.port = static_cast<uint8_t>(port),
                           .gid = gid,
                           .gid_index = gid_index,
                           .attr = port_attr};
-      result.push_back(match);
+      if (ip_type == AF_INET) {
+        result_ipv4.push_back(match);
+      } else if (ip_type == AF_INET6) {
+        result.push_back(match);
+      } else {
+        LOG(INFO) << absl::StrFormat("Skipping port %d with gid %s: unknown type",
+                                   port, GidToString(gid));
+      }
     }
+    // Add ipv4 GIDs after IPv6 ones
+    result.insert(result.end(), result_ipv4.begin(), result_ipv4.end());
   }
   return result;
 }

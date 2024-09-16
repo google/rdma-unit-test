@@ -19,13 +19,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/flags/flag.h"
 #include "absl/types/optional.h"
 #include "infiniband/verbs.h"
 #include "random_walk/internal/sampling.h"

@@ -26,9 +26,10 @@
 // 3. Easy to pass attributes around test helper functions.
 
 #include <cstdint>
-#include <optional>
+#include <string>
 
 #include "absl/flags/declare.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 

@@ -21,19 +21,16 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
-#include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
-#include "gtest/gtest.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
 #include "public/status_matchers.h"
@@ -54,7 +51,7 @@ RdmaStressFixture::RdmaStressFixture() {
   for (auto& context : contexts_) {
     port_attrs_.push_back(ibv_.GetPortAttribute(context));
     // Change the blocking mode of the async event queue.
-    VLOG(2) << "Allow getting asynchronous events in nonblocking mode.";
+    LOG(INFO) << "Allow getting asynchronous events in nonblocking mode.";
     int flags = TEMP_FAILURE_RETRY(fcntl(context->async_fd, F_GETFL));
     if (flags < 0) {
       LOG(ERROR) << "Failed reading async_fd file status flags on device "
@@ -189,7 +186,7 @@ void RdmaStressFixture::HaltExecution(Client& client) {
 
   // Log a summary of all qps.
   for (uint32_t qp_id = 0; qp_id < client.num_qps(); ++qp_id) {
-    VLOG(2) << client.qp_state(qp_id)->ToString();
+    LOG(INFO) << client.qp_state(qp_id)->ToString();
   }
 
   // Keep polling async events for possible errors until no more events exist.

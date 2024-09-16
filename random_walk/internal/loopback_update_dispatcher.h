@@ -21,7 +21,6 @@
 #include <memory>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/types/optional.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/inbound_update_interface.h"
 #include "random_walk/internal/update_dispatcher_interface.h"

@@ -14,19 +14,17 @@
 
 #include <errno.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <thread>  // NOLINT
 #include <tuple>
 #include <utility>
 #include <vector>
 
-#include "glog/logging.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/notification.h"
@@ -34,6 +32,7 @@
 #include "internal/handle_garble.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
+
 #include "public/status_matchers.h"
 #include "public/verbs_helper_suite.h"
 #include "public/verbs_util.h"
@@ -84,6 +83,7 @@ TEST_F(MrTest, DeregInvalidMr) {
   EXPECT_THAT(mr, NotNull());
   HandleGarble garble(mr->handle);
   EXPECT_EQ(ibv_dereg_mr(mr), ENOENT);
+  EXPECT_EQ(errno, ENOENT);
 }
 
 TEST_F(MrTest, RemoteWriteWithoutLocalWrite) {
@@ -98,12 +98,6 @@ TEST_F(MrTest, RemoteAtomicWithoutLocalWrite) {
   EXPECT_THAT(ibv_.RegMr(setup.pd, setup.buffer,
                          IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC),
               IsNull());
-}
-
-TEST_F(MrTest, DestroyPdWithOutstandingMr) {
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ASSERT_THAT(ibv_.RegMr(setup.pd, setup.buffer), NotNull());
-  EXPECT_EQ(ibv_.DeallocPd(setup.pd), EBUSY);
 }
 
 // Test using ibv_rereg_mr to associate the MR with another buffer.

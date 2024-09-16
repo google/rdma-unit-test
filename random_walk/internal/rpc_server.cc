@@ -16,19 +16,16 @@
 
 #include "random_walk/internal/rpc_server.h"
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 
-#include "glog/logging.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/check.h"
 #include "absl/synchronization/mutex.h"
 #include "grpcpp/server_context.h"
 #include "grpcpp/support/status.h"
-#include "random_walk/internal/client_update_service.grpc.pb.h"
 #include "random_walk/internal/client_update_service.pb.h"
 #include "random_walk/internal/inbound_update_interface.h"
-#include "random_walk/internal/types.h"
 #include "random_walk/internal/update_reorder_queue.h"
 
 namespace rdma_unit_test {
