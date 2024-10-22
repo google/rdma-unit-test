@@ -94,14 +94,20 @@ new_local_repository(
     name = "libibverbs",
     path = "/usr/lib64",
     build_file_content = """
-cc_library(
+cc_import(
     name = "libibverbs",
-    srcs = [
-         "libibverbs.so",
-         "libnl-3.so.200",
-         "libnl-route-3.so.200",
-    ],
+    shared_library = "libibverbs.so",
+    deps = [":libnl-route"],
     visibility = ["//visibility:public"],
+)
+cc_import(
+    name = "libnl-route",
+    shared_library = "libnl-route-3.so.200",
+    deps = [":libnl"],
+)
+cc_import(
+    name = "libnl",
+    shared_library = "libnl-3.so.200",
 )
 """,
 )
