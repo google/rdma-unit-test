@@ -1,6 +1,7 @@
 workspace(
     name = "rdma_unit_test",
 )
+
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # Google Test. Official release 1.13.0.
@@ -31,8 +32,8 @@ http_archive(
 # gflags(required by glog)
 http_archive(
     name = "com_github_gflags_gflags",
-    strip_prefix = "gflags-2.2.2",
     sha256 = "19713a36c9f32b33df59d1c79b4958434cb005b5b47dc5400a7a4b078111d9b5",
+    strip_prefix = "gflags-2.2.2",
     url = "https://github.com/gflags/gflags/archive/v2.2.2.zip",
 )
 
@@ -43,9 +44,13 @@ http_archive(
     strip_prefix = "grpc-1.56.1",
     url = "https://github.com/grpc/grpc/archive/refs/tags/v1.56.1.tar.gz",
 )
+
 load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
+
 grpc_deps()
+
 load("@com_github_grpc_grpc//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
+
 grpc_extra_deps()
 
 # Needed for gRPC.
@@ -80,28 +85,10 @@ http_archive(
     urls = ["https://github.com/bazelbuild/rules_python/archive/4b84ad270387a7c439ebdccfd530e2339601ef27.tar.gz"],
 )
 
-
 # Magic_enum
 http_archive(
     name = "magic_enum",
-    strip_prefix = "magic_enum-0.9.3",
     sha256 = "2ac5f5f0591c8f587b53b89c3ef64c85cc24ebaaa389a659c6bf36a0aa192fe6",
+    strip_prefix = "magic_enum-0.9.3",
     urls = ["https://github.com/Neargye/magic_enum/archive/v0.9.3.zip"],
-)
-
-# libibverbs
-new_local_repository(
-    name = "libibverbs",
-    path = "/usr/lib64",
-    build_file_content = """
-cc_library(
-    name = "libibverbs",
-    srcs = [
-         "libibverbs.so",
-         "libnl-3.so.200",
-         "libnl-route-3.so.200",
-    ],
-    visibility = ["//visibility:public"],
-)
-""",
 )

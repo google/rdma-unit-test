@@ -126,17 +126,35 @@ class AccessTestFixture : public RdmaVerbsFixture {
       return absl::InternalError("Failed to allocate MW.");
     }
     ibv_wc_status status = IBV_WC_SUCCESS;
+    // While all providers update mw->rkey on a successful type 1 bind, some
+    // providers (e.g., irdma) also update it when a type 2 bind WR is
+    // posted. The rxe and mlx providers do not, however.
+    int rkey = 0;
     switch (mw_type) {
       case IBV_MW_TYPE_1: {
         ASSIGN_OR_RETURN(status, verbs_util::ExecuteType1MwBind(
                                      qp, mw, memblock.span(), mr, access));
+        // Type 1 bind changes the mw->rkey value.
+        rkey = mw->rkey;
         break;
       }
       case IBV_MW_TYPE_2: {
         static uint32_t type2_rkey = 1024;
-        ASSIGN_OR_RETURN(
-            status, verbs_util::ExecuteType2MwBind(qp, mw, memblock.span(),
-                                                   ++type2_rkey, mr, access));
+        // The rkey for a type 2 memory window is composed of an upper
+        // 24 bit index owned by the NIC (created during ibv_alloc_mw) and a
+        // lower 8 bit key owned by the consumer, and it is the consumer's
+        // responsibility to generate the final rkey before use. Some providers
+        // (e.g., rxe) return values from ibv_alloc_mw that have some of the low
+        // 8 bits set, so they must be masked.
+        // NOTE: For at least the irdma, rxe, and mlx providers, only the 8 lsb
+        //       of the WQE rkey are used, with the upper 24 coming from the
+        //       mw->rkey, but the full key is provided here for completeness.
+        rkey = (mw->rkey & ~0xFF) | (type2_rkey & 0xFF);
+        ++type2_rkey;
+        ASSIGN_OR_RETURN(status,
+                         verbs_util::ExecuteType2MwBind(qp, mw, memblock.span(),
+                                                        rkey, mr, access));
+
         break;
       }
       default:
@@ -146,7 +164,7 @@ class AccessTestFixture : public RdmaVerbsFixture {
       return absl::InternalError(
           absl::StrCat("Cannot bind mw (", status, ")."));
     }
-    return mw->rkey;
+    return rkey;
   }
 };
 

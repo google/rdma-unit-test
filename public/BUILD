@@ -41,6 +41,7 @@ cc_library(
     deps = [
         ":flags",
         ":status_matchers",
+        ":system_libibverbs",
         ":verbs_util",
         "//internal:introspection_registrar",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -52,7 +53,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
         "@magic_enum",
     ],
 )
@@ -88,6 +88,7 @@ cc_library(
     deps = [
         ":flags",
         ":status_matchers",
+        ":system_libibverbs",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log",
@@ -100,7 +101,6 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
         "@magic_enum",
     ],
 )
@@ -125,6 +125,7 @@ cc_library(
         ":page_size",
         ":rdma_memblock",
         ":status_matchers",
+        ":system_libibverbs",
         ":verbs_util",
         "//internal:verbs_attribute",
         "//internal:verbs_cleanup",
@@ -139,7 +140,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
-        "@libibverbs",
         "@magic_enum",
     ],
 )
@@ -161,4 +161,9 @@ cc_library(
 cc_library(
     name = "page_size",
     hdrs = ["page_size.h"],
+)
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
 )

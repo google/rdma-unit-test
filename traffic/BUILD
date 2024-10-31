@@ -39,9 +39,9 @@ cc_library(
     deps = [
         ":op_types",
         ":qp_op_interface",
+        ":system_libibverbs",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
-        "@libibverbs",
     ],
 )
 
@@ -57,8 +57,8 @@ cc_library(
     hdrs = ["qp_op_interface.h"],
     deps = [
         ":op_types",
+        ":system_libibverbs",
         "@com_google_absl//absl/status:statusor",
-        "@libibverbs",
     ],
 )
 
@@ -84,6 +84,7 @@ cc_library(
         ":op_types",
         ":operation_generator",
         ":qp_op_interface",
+        ":system_libibverbs",
         ":test_op",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -97,7 +98,6 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
 )
 
@@ -110,6 +110,7 @@ cc_library(
         ":operation_generator",
         ":qp_op_interface",
         ":qp_state",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//internal:verbs_cleanup",
         "//public:page_size",
@@ -128,7 +129,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
 )
 
@@ -165,6 +165,7 @@ cc_library(
         ":latency_measurement",
         ":op_types",
         ":qp_state",
+        ":system_libibverbs",
         ":transport_validation",
         "//internal:verbs_attribute",
         "//public:basic_fixture",
@@ -177,7 +178,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
 )
 
@@ -191,13 +191,13 @@ cc_library(
         ":operation_generator",
         ":qp_state",
         ":rdma_stress_fixture",
+        ":system_libibverbs",
         ":test_op",
         "//public:status_matchers",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -208,8 +208,8 @@ cc_test(
     shard_count = 2,
     deps = [
         ":simple_rdma_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -238,8 +238,8 @@ cc_test(
     shard_count = 2,
     deps = [
         ":rdma_stability_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -267,8 +267,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":basic_rc_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -298,8 +298,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":basic_ud_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -324,8 +324,8 @@ cc_test(
     shard_count = 2,
     deps = [
         ":cq_overrun_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -355,8 +355,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":mixed_qp_mode_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -386,8 +386,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":qp_oversubscription_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -415,9 +415,9 @@ cc_test(
     ],
     linkstatic = 1,
     deps = [
+        ":system_libibverbs",
         ":ud_burst_test_cc",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -430,6 +430,7 @@ cc_library(
         ":operation_generator",
         ":qp_state",
         ":rdma_stress_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:status_matchers",
         "//public:verbs_util",
@@ -437,7 +438,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -447,9 +447,9 @@ cc_test(
     timeout = "long",
     linkstatic = 1,
     deps = [
+        ":system_libibverbs",
         ":vary_mtu_test_cc",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -476,8 +476,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":event_driven_completion_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )
 
@@ -500,6 +500,11 @@ cc_library(
     alwayslink = 1,
 )
 
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
+)
+
 cc_test(
     name = "rnr_nack_test",
     args = [
@@ -507,7 +512,7 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":rnr_nack_test_cc",
+        ":system_libibverbs",
         "//unit:gunit_main",
-        "@libibverbs",
     ],
 )

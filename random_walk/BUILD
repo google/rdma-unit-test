@@ -28,13 +28,13 @@ cc_test(
     shard_count = 4,
     deps = [
         ":action_weights",
+        ":system_libibverbs",
         "//public:basic_fixture",
         "//random_walk/internal:multi_node_orchestrator",
         "//random_walk/internal:random_walk_config_cc_proto",
         "//random_walk/internal:single_node_orchestrator",
         "//unit:gunit_main",
         "@com_google_absl//absl/time",
-        "@libibverbs",
     ],
 )
 
@@ -95,4 +95,9 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_protobuf//:protobuf",
     ],
+)
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
 )

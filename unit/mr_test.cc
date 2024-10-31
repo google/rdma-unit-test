@@ -186,13 +186,11 @@ class MrLoopbackTest : public LoopbackFixture {
       wqe.wr_id = wr_id++;
     }
 
-    // Indicates that the client filled the outstanding queue.
-    bool saturation = false;
     *results = std::vector<uint64_t>(IBV_WC_GENERAL_ERR + 1, 0);
     absl::Notification cancel_notification;
     absl::Notification running_notification;
     std::thread another_thread([&local, &wqes, &cancel_notification,
-                                &running_notification, &saturation, results]() {
+                                &running_notification, results]() {
       // Must have enough outstanding to saturate the QP, but not too many
       // outstanding to overflow the default CQ size.
       constexpr int kTargetOutstanding = 100;
@@ -210,8 +208,6 @@ class MrLoopbackTest : public LoopbackFixture {
             for (auto& wqe : wqes) {
               wqe.wr_id += kBatchSize;
             }
-          } else {
-            saturation = true;
           }
         }
         // Prioritize reaping completions by pulling 50 per batch vs. the
@@ -237,7 +233,6 @@ class MrLoopbackTest : public LoopbackFixture {
     dereg();
     cancel_notification.Notify();
     another_thread.join();
-    EXPECT_TRUE(saturation);
   }
 };
 

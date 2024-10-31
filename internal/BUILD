@@ -27,10 +27,10 @@ cc_library(
     hdrs = ["introspection_irdma.h"],
     deps = [
         ":introspection_registrar",
+        ":system_libibverbs",
         "//public:introspection",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -40,9 +40,9 @@ cc_library(
     hdrs = ["introspection_mlx4.h"],
     deps = [
         ":introspection_registrar",
+        ":system_libibverbs",
         "//public:introspection",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -52,9 +52,9 @@ cc_library(
     hdrs = ["introspection_mlx5.h"],
     deps = [
         ":introspection_registrar",
+        ":system_libibverbs",
         "//public:introspection",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -64,9 +64,9 @@ cc_library(
     srcs = ["introspection_registrar.cc"],
     hdrs = ["introspection_registrar.h"],
     deps = [
+        ":system_libibverbs",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
-        "@libibverbs",
     ],
 )
 
@@ -75,9 +75,9 @@ cc_library(
     hdrs = ["introspection_rxe.h"],
     deps = [
         ":introspection_registrar",
+        ":system_libibverbs",
         "//public:introspection",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -87,10 +87,10 @@ cc_library(
     srcs = ["verbs_extension.cc"],
     hdrs = ["verbs_extension.h"],
     deps = [
+        ":system_libibverbs",
         "//public:rdma_memblock",
         "//public:verbs_util",
         "@com_google_absl//absl/status",
-        "@libibverbs",
     ],
 )
 
@@ -99,12 +99,12 @@ cc_library(
     srcs = ["verbs_cleanup.cc"],
     hdrs = ["verbs_cleanup.h"],
     deps = [
+        ":system_libibverbs",
         "//public:rdma_memblock",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
 )
 
@@ -119,9 +119,14 @@ cc_library(
     srcs = ["verbs_attribute.cc"],
     hdrs = ["verbs_attribute.h"],
     deps = [
+        ":system_libibverbs",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@libibverbs",
     ],
+)
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
 )

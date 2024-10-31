@@ -14,3 +14,8 @@ license(
 )
 
 exports_files(["LICENSE"])
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
+)

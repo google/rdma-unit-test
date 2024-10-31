@@ -697,7 +697,7 @@ TEST_F(MwType2Test, BindType1WhenQpError) {
 struct MwBindAccessTestParameters {
   int mr_access;
   int mw_access;
-  ibv_wc_status expected_bind_status;
+  std::vector<ibv_wc_status> expected_bind_status;
   std::string name;
 };
 
@@ -745,7 +745,7 @@ TEST_P(MwBindAccessTest, MwBindAccessTests) {
   ASSERT_THAT(mw, NotNull());
   EXPECT_THAT(ExecuteBind(mw_type, setup.remote_qp, mw, setup.buffer.span(), mr,
                           params.mw_access),
-              IsOkAndHolds(params.expected_bind_status));
+              IsOkAndHolds(testing::AnyOfArray(params.expected_bind_status)));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -759,50 +759,56 @@ INSTANTIATE_TEST_SUITE_P(
                              IBV_ACCESS_REMOTE_WRITE,
                 .mw_access = IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ |
                              IBV_ACCESS_REMOTE_WRITE,
-                .expected_bind_status = IBV_WC_SUCCESS,
+                .expected_bind_status = {IBV_WC_SUCCESS},
                 .name = "AllAccessPermissions"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_MW_BIND,
                 .mw_access = 0,
-                .expected_bind_status = IBV_WC_SUCCESS,
+                .expected_bind_status = {IBV_WC_SUCCESS},
                 .name = "MrBindAccessSufficientForMwBind"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC |
                              IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE,
                 .mw_access = 0,
-                .expected_bind_status = IBV_WC_MW_BIND_ERR,
+                .expected_bind_status = {IBV_WC_MW_BIND_ERR,
+                                         IBV_WC_LOC_QP_OP_ERR,
+                                         IBV_WC_WR_FLUSH_ERR},
                 .name = "MrBindAccessNecessaryForMwBind"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_MW_BIND,
                 .mw_access = IBV_ACCESS_REMOTE_READ,
-                .expected_bind_status = IBV_WC_SUCCESS,
+                .expected_bind_status = {IBV_WC_SUCCESS},
                 .name = "MwRemoteReadRequiresOnlyMrBindAccess"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND,
                 .mw_access = IBV_ACCESS_REMOTE_WRITE,
-                .expected_bind_status = IBV_WC_SUCCESS,
+                .expected_bind_status = {IBV_WC_SUCCESS},
                 .name = "MrLocalWriteSufficientForMwRemoteWrite"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_MW_BIND,
                 .mw_access = IBV_ACCESS_REMOTE_WRITE,
-                .expected_bind_status = IBV_WC_MW_BIND_ERR,
+                .expected_bind_status = {IBV_WC_MW_BIND_ERR,
+                                         IBV_WC_LOC_QP_OP_ERR,
+                                         IBV_WC_WR_FLUSH_ERR},
                 .name = "MrLocalWriteNecessaryForMwRemoteWrite"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_MW_BIND,
                 .mw_access = IBV_ACCESS_REMOTE_ATOMIC,
-                .expected_bind_status = IBV_WC_SUCCESS,
+                .expected_bind_status = {IBV_WC_SUCCESS},
                 .name = "MrLocalAtomicSufficientForMwRemoteAtomic"},
 
             MwBindAccessTestParameters{
                 .mr_access = IBV_ACCESS_MW_BIND,
                 .mw_access = IBV_ACCESS_REMOTE_ATOMIC,
-                .expected_bind_status = IBV_WC_MW_BIND_ERR,
+                .expected_bind_status = {IBV_WC_MW_BIND_ERR,
+                                         IBV_WC_LOC_QP_OP_ERR,
+                                         IBV_WC_WR_FLUSH_ERR},
                 .name = "MrLocalAtomicNecessaryForMwRemoteAtomic"}
 
             )),

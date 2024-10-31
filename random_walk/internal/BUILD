@@ -35,6 +35,7 @@ cc_library(
         ":logging",
         ":random_walk_config_cc_proto",
         ":sampling",
+        ":system_libibverbs",
         ":types",
         ":update_dispatcher_interface",
         "//internal:verbs_attribute",
@@ -59,7 +60,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
-        "@libibverbs",
         "@magic_enum",
     ],
 )
@@ -70,6 +70,7 @@ cc_library(
     hdrs = ["ibv_resource_manager.h"],
     deps = [
         ":sampling",
+        ":system_libibverbs",
         ":types",
         "//public:map_util",
         "//public:verbs_util",
@@ -79,7 +80,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:optional",
-        "@libibverbs",
     ],
 )
 
@@ -109,11 +109,11 @@ cc_library(
         ":loopback_update_dispatcher",
         ":random_walk_client",
         ":random_walk_config_cc_proto",
+        ":system_libibverbs",
         ":types",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
         "@com_google_absl//absl/time",
-        "@libibverbs",
     ],
 )
 
@@ -127,12 +127,12 @@ cc_library(
         ":random_walk_client",
         ":random_walk_config_cc_proto",
         ":rpc_server",
+        ":system_libibverbs",
         ":types",
         "//public:verbs_helper_suite",
         "//public:verbs_util",
         "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/time",
-        "@libibverbs",
     ],
 )
 
@@ -142,6 +142,7 @@ cc_library(
     hdrs = ["sampling.h"],
     deps = [
         ":random_walk_config_cc_proto",
+        ":system_libibverbs",
         ":types",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -154,7 +155,6 @@ cc_library(
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
-        "@libibverbs",
     ],
 )
 
@@ -170,10 +170,10 @@ cc_library(
     srcs = ["bind_ops_tracker.cc"],
     hdrs = ["bind_ops_tracker.h"],
     deps = [
+        ":system_libibverbs",
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/types:optional",
-        "@libibverbs",
     ],
 )
 
@@ -239,12 +239,12 @@ cc_library(
     srcs = ["logging.cc"],
     hdrs = ["logging.h"],
     deps = [
+        ":system_libibverbs",
         ":types",
         "//public:rdma_memblock",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@libibverbs",
     ],
 )
 
@@ -278,12 +278,17 @@ cc_library(
     srcs = ["completion_profile.cc"],
     hdrs = ["completion_profile.h"],
     deps = [
+        ":system_libibverbs",
         ":types",
         "//public:map_util",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@libibverbs",
         "@magic_enum",
     ],
+)
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
 )
 
 proto_library(

@@ -28,6 +28,7 @@ cc_library(
     srcs = ["access_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -38,7 +39,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -48,6 +48,7 @@ cc_library(
     srcs = ["ah_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//internal:verbs_extension",
         "//public:status_matchers",
@@ -56,7 +57,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -66,6 +66,7 @@ cc_library(
     srcs = ["buffer_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//public:basic_fixture",
         "//public:introspection",
         "//public:page_size",
@@ -79,7 +80,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -89,6 +89,7 @@ cc_library(
     srcs = ["comp_channel_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -100,7 +101,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -111,6 +111,7 @@ cc_library(
     deps = [
         ":batch_op_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//public:flags",
         "//public:introspection",
@@ -129,7 +130,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -140,6 +140,7 @@ cc_library(
     deps = [
         ":batch_op_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -154,7 +155,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -164,6 +164,7 @@ cc_library(
     srcs = ["device_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//public:introspection",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -171,7 +172,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -181,6 +181,7 @@ cc_library(
     srcs = ["hugepage_test.cc"],
     deps = [
         ":loopback_fixture",
+        ":system_libibverbs",
         "//public:introspection",
         "//public:page_size",
         "//public:rdma_memblock",
@@ -191,7 +192,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -201,6 +201,7 @@ cc_library(
     srcs = ["rc_test.cc"],
     deps = [
         ":loopback_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -215,7 +216,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -226,6 +226,7 @@ cc_library(
     deps = [
         ":loopback_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//public:introspection",
         "//public:rdma_memblock",
@@ -237,7 +238,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -247,6 +247,7 @@ cc_library(
     srcs = ["mw_test.cc"],
     deps = [
         ":loopback_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
         "//public:introspection",
@@ -265,7 +266,6 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -276,6 +276,7 @@ cc_library(
     deps = [
         ":loopback_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
         "//public:introspection",
@@ -287,7 +288,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -298,6 +298,7 @@ cc_library(
     deps = [
         ":loopback_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
         "//internal:verbs_extension",
@@ -312,7 +313,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -322,6 +322,7 @@ cc_library(
     srcs = ["srq_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
         "//public:introspection",
@@ -336,7 +337,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -346,6 +346,7 @@ cc_library(
     srcs = ["threaded_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//internal:verbs_extension",
         "//public:introspection",
@@ -357,7 +358,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -368,6 +368,7 @@ cc_library(
     deps = [
         ":loopback_fixture",
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:handle_garble",
         "//internal:verbs_attribute",
         "//public:page_size",
@@ -381,7 +382,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -391,6 +391,7 @@ cc_library(
     srcs = ["stress_test.cc"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -403,7 +404,6 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -413,6 +413,7 @@ cc_library(
     srcs = ["async_event_test.cc"],
     deps = [
         ":loopback_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:introspection",
         "//public:status_matchers",
@@ -422,7 +423,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
-        "@libibverbs",
     ],
     alwayslink = 1,
 )
@@ -490,6 +490,7 @@ cc_library(
     hdrs = ["loopback_fixture.h"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -499,7 +500,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@libibverbs",
     ],
 )
 
@@ -509,6 +509,7 @@ cc_library(
     hdrs = ["batch_op_fixture.h"],
     deps = [
         ":rdma_verbs_fixture",
+        ":system_libibverbs",
         "//internal:verbs_attribute",
         "//public:rdma_memblock",
         "//public:status_matchers",
@@ -520,8 +521,12 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@libibverbs",
     ],
+)
+
+cc_library(
+    name = "system_libibverbs",
+    linkopts = ["-libverbs"],
 )
 
 cc_test(
@@ -531,7 +536,7 @@ cc_test(
     deps = [
         ":access_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -542,7 +547,7 @@ cc_test(
     deps = [
         ":ah_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -553,7 +558,7 @@ cc_test(
     deps = [
         ":buffer_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -564,7 +569,7 @@ cc_test(
     deps = [
         ":comp_channel_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -575,7 +580,7 @@ cc_test(
     deps = [
         ":cq_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -586,7 +591,7 @@ cc_test(
     deps = [
         ":cq_ex_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -597,7 +602,7 @@ cc_test(
     deps = [
         ":device_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -608,7 +613,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":hugepage_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -620,7 +625,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":rc_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -631,7 +636,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":mr_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -642,7 +647,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":mw_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -653,7 +658,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":pd_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -664,7 +669,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":qp_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -675,7 +680,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":srq_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -686,8 +691,8 @@ cc_test(
     shard_count = 3,
     deps = [
         ":gunit_main",
+        ":system_libibverbs",
         ":threaded_test_cc",
-        "@libibverbs",
     ],
 )
 
@@ -697,8 +702,8 @@ cc_test(
     linkstatic = 1,
     deps = [
         ":gunit_main",
+        ":system_libibverbs",
         ":ud_test_cc",
-        "@libibverbs",
     ],
 )
 
@@ -709,7 +714,7 @@ cc_test(
     deps = [
         ":gunit_main",
         ":stress_test_cc",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )
 
@@ -720,6 +725,6 @@ cc_test(
     deps = [
         ":async_event_test_cc",
         ":gunit_main",
-        "@libibverbs",
+        ":system_libibverbs",
     ],
 )

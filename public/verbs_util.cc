@@ -101,7 +101,7 @@ absl::StatusOr<std::vector<std::string>> EnumerateDeviceNames() {
 }
 
 ibv_srq_attr DefaultSrqAttr() {
-  ibv_srq_attr attr;
+  ibv_srq_attr attr = {};
   attr.max_wr = verbs_util::kDefaultMaxWr;
   attr.max_sge = verbs_util::kDefaultMaxSge;
   attr.srq_limit = 0;  // not used for infiniband.
@@ -109,16 +109,16 @@ ibv_srq_attr DefaultSrqAttr() {
 }
 
 ibv_qp_state GetQpState(ibv_qp* qp) {
-  ibv_qp_attr attr;
-  ibv_qp_init_attr init_attr;
+  ibv_qp_attr attr = {};
+  ibv_qp_init_attr init_attr = {};
   int result = ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
   DCHECK_EQ(0, result);
   return attr.qp_state;
 }
 
 ibv_qp_cap GetQpCap(ibv_qp* qp) {
-  ibv_qp_attr attr;
-  ibv_qp_init_attr init_attr;
+  ibv_qp_attr attr = {};
+  ibv_qp_init_attr init_attr = {};
   int result = ibv_query_qp(qp, &attr, IBV_QP_CAP, &init_attr);
   DCHECK_EQ(0, result);
   return attr.cap;
@@ -150,7 +150,7 @@ ibv_wc_opcode WrToWcOpcode(ibv_wr_opcode opcode) {
 }
 
 ibv_sge CreateSge(absl::Span<uint8_t> buffer, ibv_mr* mr) {
-  ibv_sge sge;
+  ibv_sge sge = {};
   sge.addr = reinterpret_cast<uint64_t>(buffer.data());
   sge.length = buffer.length();
   sge.lkey = mr->lkey;
@@ -165,7 +165,7 @@ ibv_sge CreateAtomicSge(void* addr, ibv_mr* mr) {
 
 ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
                                   int access) {
-  ibv_mw_bind_info info;
+  ibv_mw_bind_info info = {};
   info.addr = reinterpret_cast<uint64_t>(buffer.data());
   info.length = buffer.length();
   info.mr = mr;
@@ -175,7 +175,7 @@ ibv_mw_bind_info CreateMwBindInfo(absl::Span<uint8_t> buffer, ibv_mr* mr,
 
 ibv_mw_bind CreateType1MwBindWr(uint64_t wr_id, absl::Span<uint8_t> buffer,
                                 ibv_mr* mr, int access) {
-  ibv_mw_bind bind;
+  ibv_mw_bind bind = {};
   bind.wr_id = wr_id;
   bind.send_flags = IBV_SEND_SIGNALED;
   bind.bind_info = CreateMwBindInfo(buffer, mr, access);
@@ -185,7 +185,7 @@ ibv_mw_bind CreateType1MwBindWr(uint64_t wr_id, absl::Span<uint8_t> buffer,
 ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
                               const absl::Span<uint8_t> buffer, uint32_t rkey,
                               ibv_mr* mr, int access) {
-  ibv_send_wr bind;
+  ibv_send_wr bind = {};
   bind.wr_id = wr_id;
   bind.next = nullptr;
   bind.sg_list = nullptr;
@@ -199,7 +199,7 @@ ibv_send_wr CreateType2BindWr(uint64_t wr_id, ibv_mw* mw,
 }
 
 ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey) {
-  ibv_send_wr invalidate;
+  ibv_send_wr invalidate = {};
   invalidate.wr_id = wr_id;
   invalidate.next = nullptr;
   invalidate.sg_list = nullptr;
@@ -211,7 +211,7 @@ ibv_send_wr CreateLocalInvalidateWr(uint64_t wr_id, uint32_t rkey) {
 }
 
 ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge) {
-  ibv_send_wr send;
+  ibv_send_wr send = {};
   send.wr_id = wr_id;
   send.next = nullptr;
   send.sg_list = sge;
@@ -222,7 +222,7 @@ ibv_send_wr CreateSendWr(uint64_t wr_id, ibv_sge* sge, int num_sge) {
 }
 
 ibv_send_wr CreateSendWithInvalidateWr(uint64_t wr_id, uint32_t rkey) {
-  ibv_send_wr inv;
+  ibv_send_wr inv = {};
   inv.wr_id = wr_id;
   inv.next = nullptr;
   inv.sg_list = nullptr;
@@ -234,7 +234,7 @@ ibv_send_wr CreateSendWithInvalidateWr(uint64_t wr_id, uint32_t rkey) {
 }
 
 ibv_recv_wr CreateRecvWr(uint64_t wr_id, ibv_sge* sge, int num_sge) {
-  ibv_recv_wr recv;
+  ibv_recv_wr recv = {};
   recv.wr_id = wr_id;
   recv.next = nullptr;
   recv.sg_list = sge;
