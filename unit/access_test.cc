@@ -244,9 +244,12 @@ class RdmaAccessTest : public AccessTestFixture,
         CreateRKeyForBuffer(setup.pd, setup.dst_buffer, setup.dst_qp,
                             dst_remote_access, memory_type));
     ibv_sge sge = verbs_util::CreateSge(setup.src_buffer.span(), src_mr);
-    ibv_send_wr wr =
-        verbs_util::CreateRdmaWr(opcode, /*wr_id=*/1, &sge, /*num_sge=*/1,
-                                 setup.dst_buffer.data(), rkey);
+    void* remote_addr = setup.dst_buffer.data();
+    if (dst_remote_access & IBV_ACCESS_ZERO_BASED) {
+      remote_addr = nullptr;
+    }
+    ibv_send_wr wr = verbs_util::CreateRdmaWr(opcode, /*wr_id=*/1, &sge,
+                                              /*num_sge=*/1, remote_addr, rkey);
     verbs_util::PostSend(setup.src_qp, wr);
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,
                          verbs_util::WaitForCompletion(setup.src_cq));
@@ -259,6 +262,17 @@ class RdmaAccessTest : public AccessTestFixture,
 TEST_P(RdmaAccessTest, AllAccess) {
   ExecuteTest(/*src_mr_access=*/kMrAccessAll,
               /*dst_remote_access=*/kRemoteAccessAll,
+              /*expected_status=*/IBV_WC_SUCCESS);
+}
+
+TEST_P(RdmaAccessTest, ZeroBasedAccess) {
+  if (std::get<0>(GetParam()) == RKeyMemmoryType::kMemoryWindowType1) {
+    GTEST_SKIP()
+        << "Zero based access is not supported for type 1 MW according "
+           "to the verbs specification.";
+  }
+  ExecuteTest(/*src_mr_access=*/kMrAccessAll,
+              /*dst_remote_access=*/kRemoteAccessAll | IBV_ACCESS_ZERO_BASED,
               /*expected_status=*/IBV_WC_SUCCESS);
 }
 

@@ -65,6 +65,8 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"SrqTest", "SendManyWithOneOutstanding"}, ""},
         {{"LoopbackUdQpTest", "SendWithTooSmallRecv"}, ""},
         {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
+        {{"RdmaAccessTest", "ZeroBasedAccess"}, ""},
+        {{"MwGeneralTest", "ReadZeroBased"}, ""},
     };
     return deviations;
   }

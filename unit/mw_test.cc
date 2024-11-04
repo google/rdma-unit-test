@@ -162,6 +162,29 @@ TEST_P(MwGeneralTest, Read) {
               IsOkAndHolds(Field(&ibv_wc::status, IBV_WC_SUCCESS)));
 }
 
+TEST_P(MwGeneralTest, ReadZeroBased) {
+  if (GetParam() == IBV_MW_TYPE_1) {
+    GTEST_SKIP()
+        << "Zero based access is not supported for type 1 MW according "
+           "to the verbs specification.";
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
+  ASSERT_THAT(mw, NotNull());
+  int access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                     IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_ZERO_BASED;
+  ASSERT_THAT(ExecuteBind(setup.remote_qp, mw, setup.buffer.span(), setup.mr,
+                          access_flags),
+              IsOkAndHolds(IBV_WC_SUCCESS));
+  ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+  ibv_send_wr read =
+      verbs_util::CreateReadWr(/*wr_id=*/1, &sge, /*num_sge=*/1,
+                               /*remote_buffer=*/nullptr, mw->rkey);
+  verbs_util::PostSend(setup.local_qp, read);
+  EXPECT_THAT(verbs_util::WaitForCompletion(setup.cq),
+              IsOkAndHolds(Field(&ibv_wc::status, IBV_WC_SUCCESS)));
+}
+
 TEST_P(MwGeneralTest, BindReadDiffQp) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mw* mw = ibv_.AllocMw(setup.pd, GetParam());
