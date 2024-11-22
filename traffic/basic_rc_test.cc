@@ -178,7 +178,7 @@ TEST_P(MixedOpsTest, Basic) {
 INSTANTIATE_TEST_SUITE_P(
     BasicRc, MixedOpsTest,
     testing::Combine(/*num_qps=*/testing::Values(1, 100, 1000),
-                     /*num_ops=*/testing::Values(100, 1000000),
+                     /*num_ops=*/testing::Values(100, 1000, 1000000),
                      /*ops_in_flight=*/testing::Values(1, 32),
                      /*enable_atomics=*/testing::Bool()),
     [](const testing::TestParamInfo<MixedOpsTest::ParamType>& info) {

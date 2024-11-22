@@ -14,6 +14,8 @@
 
 # Test infrastructure and collections to stress RDMA datapath.
 
+load("//third_party/protobuf/bazel:proto_library.bzl", "proto_library")
+
 package(
     default_applicable_licenses = ["//:package_license"],
     default_testonly = True,

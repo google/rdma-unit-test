@@ -139,7 +139,7 @@ class QpAttribute {
   AhAttribute ah_attr_;
   ibv_mtu path_mtu_ = IBV_MTU_4096;
   uint32_t rq_psn_ = 1024;  // must match sq_psn in RcRtsRequiredAttr.
-  uint8_t max_dest_rd_atomic_ = 10;
+  uint8_t max_dest_rd_atomic_ = 8;
   uint8_t min_rnr_timer_ = 26;  // 81.92 milliseconds
 
   // Attributes for bringing QP from RTR to RTS state.
