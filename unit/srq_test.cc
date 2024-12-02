@@ -374,7 +374,9 @@ TEST_F(SrqTest, SendManyWithOneOutstanding) {
                                /*poll_interval=*/absl::ZeroDuration()));
       EXPECT_EQ(completion.status, IBV_WC_SUCCESS);
       EXPECT_EQ(completion.wr_id, reinterpret_cast<uint64_t>(setup.context));
-      EXPECT_THAT(setup.recv_buffer.span(), Each(kSendContent));
+      for (int k = 0; k < setup.recv_buffer.size(); ++k) {
+        EXPECT_EQ(setup.recv_buffer.data()[k], kSendContent);
+      }
     }
   }
 }

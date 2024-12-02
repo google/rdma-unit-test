@@ -189,7 +189,9 @@ TEST_F(LoopbackRcQpTest, SendManyWithOneOutstanding) {
       EXPECT_EQ(completion.qp_num, remote.qp->qp_num);
       EXPECT_EQ(completion.wr_id, 0);
       EXPECT_EQ(completion.wc_flags, 0);
-      EXPECT_THAT(remote.buffer.span(), Each(kLocalBufferContent));
+      for (int k = 0; k < remote.buffer.size(); ++k) {
+        EXPECT_EQ(remote.buffer.data()[k], kLocalBufferContent);
+      }
     }
   }
 }
