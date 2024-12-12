@@ -13,9 +13,12 @@
 // limitations under the License.
 
 #include <errno.h>
+#include <sched.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <thread>  // NOLINT
 #include <tuple>
 #include <vector>
 
@@ -25,6 +28,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
@@ -497,7 +501,66 @@ class QpStateTest : public RdmaVerbsFixture {
     }
     return setup;
   }
+
+  absl::Status BatchRead(BasicSetup& setup, const int batch_size,
+                         std::vector<ibv_wc_status> expected_statuses) {
+    for (int i = 0; i < batch_size; ++i) {
+      ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+      ibv_send_wr wr =
+          verbs_util::CreateRdmaWr(IBV_WR_RDMA_READ, i, &sge, /*num_sge=*/1,
+                                   setup.buffer.data(), setup.mr->rkey);
+      verbs_util::PostSend(setup.local_qp, wr);
+    }
+
+    // Batch completion poll
+    for (int i = 0; i < batch_size; ++i) {
+      ASSIGN_OR_RETURN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(
+                           setup.cq, verbs_util::kDefaultCompletionTimeout,
+                           absl::ZeroDuration()));
+      if (std::find(expected_statuses.begin(), expected_statuses.end(),
+                    completion.status) == expected_statuses.end()) {
+        return absl::InternalError(
+            absl::StrCat("Unexpected completion status: ", completion.status));
+      }
+    }
+
+    return absl::OkStatus();
+  }
 };
+
+// It should be possible to transition a QP back into reset, then reuse it.
+// In other words, a previously used QP that has been transitioned into reset
+// should behave the same as a newly created QP.
+TEST_F(QpStateTest, ReuseQp) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.remote_qp, setup.local_qp,
+                                    setup.port_attr));
+
+  ASSERT_OK_AND_ASSIGN(
+      ibv_wc_status status,
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), setup.mr->rkey));
+  EXPECT_EQ(status, IBV_WC_SUCCESS);
+
+  // The state diagram indicates that the QP must go to error
+  // before going to reset.
+  // https://www.rdmamojo.com/2012/05/05/qp-state-machine/
+  ASSERT_OK(ibv_.ModifyQpToError(setup.local_qp));
+  ASSERT_OK(ibv_.ModifyQpToError(setup.remote_qp));
+
+  // Set both QPs to reset and re-initialize them.
+  ASSERT_OK(ibv_.ModifyQpToReset(setup.local_qp));
+  ASSERT_OK(ibv_.ModifyQpToReset(setup.remote_qp));
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                    setup.port_attr));
+
+  ASSERT_OK_AND_ASSIGN(
+      status,
+      verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
+                                  setup.buffer.data(), setup.mr->rkey));
+  EXPECT_EQ(status, IBV_WC_SUCCESS);
+}
 
 // IBTA specs says we posting to a QP in RESET, INIT or RTR state should be
 // be returned with immediate error (see IBTA v1, chapter 10.8.2, c10-96).
@@ -698,6 +761,99 @@ TEST_F(QpStateTest, PostSendErr) {
       verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), setup.mr->rkey));
   EXPECT_EQ(status, IBV_WC_WR_FLUSH_ERR);
+}
+
+// Issue repeated batched reads while the QP is transitioned into error
+// and ensure that the all subsequent reads fail with a flush error.
+// Batching is done to increase the likelihood of the transition occurring
+// while SQ WQEs are still pending.
+TEST_F(QpStateTest, PostSendErrConcurrent) {
+  const int kReadBatchSize = 32;
+  const int kNumCycles = 256;
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  absl::Mutex submitter_state_mutex;
+  enum SubmitterState {
+    kIdle,
+    kStartRequest,
+    kFirstBatch,
+    kSubmitting,
+    kStopRequest,
+    kLastBatch,
+    kTerminateRequest,
+  } submitter_state = kIdle;
+
+  std::thread submission_thread([&]() {
+    while (true) {
+      submitter_state_mutex.Lock();
+      submitter_state_mutex.Await(absl::Condition(
+          +[](SubmitterState* state) { return *state != kIdle; },
+          &submitter_state));
+      if (submitter_state == kStartRequest) {
+        submitter_state = kFirstBatch;
+      } else if (submitter_state == kFirstBatch) {
+        submitter_state = kSubmitting;
+      } else if (submitter_state == kStopRequest) {
+        submitter_state = kLastBatch;
+      } else if (submitter_state == kLastBatch) {
+        submitter_state = kIdle;
+      }
+      enum SubmitterState curr_state = submitter_state;
+      submitter_state_mutex.Unlock();
+
+      if (curr_state == kFirstBatch) {
+        // First batch should always succeed.
+        ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_SUCCESS}));
+      } else if (curr_state == kSubmitting) {
+        // A transition into error can occur during subsequent batches,
+        // so flush is a valid response.
+        ASSERT_OK(BatchRead(setup, kReadBatchSize,
+                            {IBV_WC_SUCCESS, IBV_WC_WR_FLUSH_ERR}));
+      } else if (curr_state == kLastBatch) {
+        // The QP is transitioned to error before the stop request, so
+        // the last batch should fail with a flush error.
+        ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR}));
+      } else if (curr_state == kTerminateRequest) {
+        return;
+      }
+    }
+  });
+
+  for (int i = 0; i < kNumCycles; ++i) {
+    setup.local_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    setup.remote_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                      setup.port_attr));
+
+    // Start submitter.
+    submitter_state_mutex.Lock();
+    submitter_state = kStartRequest;
+    submitter_state_mutex.Await(absl::Condition(
+        +[](SubmitterState* state) { return *state == kSubmitting; },
+        &submitter_state));
+    submitter_state_mutex.Unlock();
+
+    // Transition to error while submitter is submitting.
+    ASSERT_OK(ibv_.ModifyQpToError(setup.local_qp));
+
+    // Stop submitter.
+    submitter_state_mutex.Lock();
+    submitter_state = kStopRequest;
+    submitter_state_mutex.Await(absl::Condition(
+        +[](SubmitterState* state) { return *state == kIdle; },
+        &submitter_state));
+    submitter_state_mutex.Unlock();
+
+    ibv_.DestroyQp(setup.local_qp);
+    ibv_.DestroyQp(setup.remote_qp);
+  }
+
+  submitter_state_mutex.Lock();
+  submitter_state = kTerminateRequest;
+  submitter_state_mutex.Unlock();
+
+  submission_thread.join();
 }
 
 TEST_F(QpStateTest, PostRecvErr) {

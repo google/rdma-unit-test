@@ -189,7 +189,7 @@ absl::Status VerbsHelperSuite::ModifyQpToReset(ibv_qp* qp) const {
   int result_code = ModifyQp(qp, attr, IBV_QP_STATE);
   if (result_code) {
     return absl::InternalError(absl::StrFormat(
-        "Modified QP to ERROR state failed (%d).", result_code));
+        "Modified QP to RESET state failed (%d).", result_code));
   }
   return absl::OkStatus();
 }

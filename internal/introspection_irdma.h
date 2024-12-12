@@ -48,9 +48,11 @@ class IntrospectionIrdma : public NicIntrospection {
       const override {
     static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
         {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, ""},
+        {{"QpStateTest", "ReuseQp"}, ""},
         {{"QpStateTest", "PostSendInit"}, ""},
         {{"QpStateTest", "PostSendRtr"}, ""},
         {{"QpStateTest", "PostSendReset"}, ""},
+        {{"QpStateTest", "PostSendErrConcurrent"}, ""},
         {{"LoopbackUdQpTest", "SendTrafficClass"}, ""},
         {{"AdvancedLoopbackTest", "RcSendToUd"}, ""},
         {{"AdvancedLoopbackTest", "UdSendToRc"}, ""},
