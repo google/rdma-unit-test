@@ -147,7 +147,7 @@ class QpAttribute {
   uint8_t timeout_ = 0;     // infinite timeout
   uint8_t retry_cnt_ = 5;
   uint8_t rnr_retry_ = 5;
-  uint8_t max_rd_atomic_ = 10;
+  uint8_t max_rd_atomic_ = 8;
 };
 
 // Helper class for creating ibv_qp_init_attr used by ibv_create_qp.

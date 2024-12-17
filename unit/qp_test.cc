@@ -529,6 +529,33 @@ class QpStateTest : public RdmaVerbsFixture {
   }
 };
 
+TEST_F(QpStateTest, DestroyFromReset) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_cq* cq = ibv_.CreateCq(context);
+  ASSERT_THAT(cq, NotNull());
+  ibv_qp* qp = ibv_.CreateQp(pd, cq);
+  ASSERT_THAT(qp, NotNull());
+  ASSERT_EQ(verbs_util::GetQpState(qp), IBV_QPS_RESET);
+  EXPECT_EQ(ibv_.DestroyQp(qp), 0);
+}
+
+TEST_F(QpStateTest, DestroyFromInit) {
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  ibv_pd* pd = ibv_.AllocPd(context);
+  ASSERT_THAT(pd, NotNull());
+  ibv_cq* cq = ibv_.CreateCq(context);
+  ASSERT_THAT(cq, NotNull());
+  ibv_qp* qp = ibv_.CreateQp(pd, cq);
+  ASSERT_THAT(qp, NotNull());
+  PortAttribute port_attr = ibv_.GetPortAttribute(context);
+  int result_code = ibv_.ModifyRcQpResetToInit(qp, port_attr.port);
+  ASSERT_EQ(result_code, 0);
+  ASSERT_EQ(verbs_util::GetQpState(qp), IBV_QPS_INIT);
+  EXPECT_EQ(ibv_.DestroyQp(qp), 0);
+}
+
 // It should be possible to transition a QP back into reset, then reuse it.
 // In other words, a previously used QP that has been transitioned into reset
 // should behave the same as a newly created QP.
