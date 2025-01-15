@@ -22,9 +22,11 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
+#include "absl/synchronization/barrier.h"
+#include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
-#include "internal/verbs_extension.h"
 #include "public/introspection.h"
 #include "public/rdma_memblock.h"
 
@@ -72,6 +74,7 @@ class ThreadedTest : public RdmaVerbsFixture {
     RdmaMemBlock buffer;
     ibv_pd* pd;
     ibv_cq* cq;
+    ibv_mr* mr;
   };
 
   absl::StatusOr<BasicSetup> CreateBasicSetup() {
@@ -564,6 +567,78 @@ TEST_F(ThreadedTest, CreateSrq) {
       ASSERT_THAT(ibv_destroy_srq(srq), 0);
     }
   }
+}
+
+class ThreadedWorkloadTest : public ThreadedTest {
+ protected:
+  struct WorkloadGeometry {
+    int num_threads;
+    int num_iters;
+    int num_reads;
+  };
+  static constexpr WorkloadGeometry kFastNicGeometry = {
+      .num_threads = 256, .num_iters = 64, .num_reads = 2048};
+  static constexpr WorkloadGeometry kSlowNicGeometry = {
+      .num_threads = 8, .num_iters = 8, .num_reads = 8};
+
+  WorkloadGeometry GetWorkloadGeometry() {
+    if (Introspection().IsSlowNic()) {
+      return kSlowNicGeometry;
+    }
+    return kFastNicGeometry;
+  }
+
+  absl::Status IssueRead(BasicSetup& setup, ibv_qp* qp, ibv_cq* cq) {
+    ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+    ibv_send_wr wr = verbs_util::CreateRdmaWr(
+        IBV_WR_RDMA_READ, 0xDEADBEEF, &sge, /*num_sge=*/1, setup.buffer.data(),
+        setup.mr->rkey);
+    verbs_util::PostSend(qp, wr);
+
+    ASSIGN_OR_RETURN(
+        ibv_wc completion,
+        verbs_util::WaitForCompletion(cq, verbs_util::kDefaultCompletionTimeout,
+                                      absl::ZeroDuration()));
+    if (completion.status != IBV_WC_SUCCESS) {
+      return absl::InternalError(
+          absl::StrCat("Unexpected completion status: ", completion.status));
+    }
+    return absl::OkStatus();
+  }
+};
+
+TEST_F(ThreadedWorkloadTest, QpLifecycle) {
+  const WorkloadGeometry geometry = GetWorkloadGeometry();
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(setup.mr, NotNull());
+
+  ThreadPool pool;
+  absl::Barrier thundering_herd(geometry.num_threads);
+
+  for (int thread_id = 0; thread_id < geometry.num_threads; ++thread_id) {
+    pool.Add([&]() {
+      thundering_herd.Block();
+      for (int i = 0; i < geometry.num_iters; ++i) {
+        ibv_cq* cq = ibv_.CreateCq(setup.context);
+        ASSERT_THAT(cq, NotNull());
+        ibv_qp* local = ibv_.CreateQp(setup.pd, cq);
+        ASSERT_THAT(local, NotNull());
+        ibv_qp* remote = ibv_.CreateQp(setup.pd, cq);
+        ASSERT_THAT(remote, NotNull());
+        ASSERT_OK(ibv_.SetUpLoopbackRcQps(remote, local, setup.port_attr));
+        for (int j = 0; j < geometry.num_reads; ++j) {
+          ASSERT_OK(IssueRead(setup, local, cq));
+        }
+        ASSERT_EQ(ibv_.DestroyQp(local), 0);
+        ASSERT_EQ(ibv_.DestroyQp(remote), 0);
+        ASSERT_EQ(ibv_.DestroyCq(cq), 0);
+      }
+    });
+  }
+
+  pool.JoinAll();
 }
 
 }  // namespace rdma_unit_test

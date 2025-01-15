@@ -249,10 +249,12 @@ cc_library(
     name = "basic_rc_test_cc",
     srcs = ["basic_rc_test.cc"],
     deps = [
+        ":client",
         ":op_profiles",
         ":op_types",
         ":operation_generator",
         ":rdma_stress_fixture",
+        ":test_op",
         "//public:status_matchers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings:str_format",

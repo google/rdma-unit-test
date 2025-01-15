@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <thread>  // NOLINT
 #include <vector>
 
@@ -26,6 +27,7 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/barrier.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
@@ -791,6 +793,153 @@ TEST_F(SrqMultiThreadTest, MultiThreadedSrqLoopback) {
     EXPECT_TRUE(succeeded[i]) << "WR # " << i << " not succeeded.";
   }
   EXPECT_THAT(setup.recv_buffer.subspan(0, kTotalWr), Each(kSendContent));
+}
+
+// Test that an SRQ is able to service multiple QPs concurrently.
+// The SRQ depth is set to a fixed size which is then divided
+// by a batch size to determine the number of QP SR pairs/threads.
+// Each thread submits a batch of send WRs and then polls for completions.
+// The SRQ should never underflow since each thread does one batch at a time
+// and returns the buffers to the SRQ before doing the next batch.
+TEST_F(SrqMultiThreadTest, MultiThreadedMultiQpSingleSrq) {
+  const int kNumIters = Introspection().IsSlowNic() ? 4 : 1024;
+  const int kRxQDepth = Introspection().IsSlowNic() ? 128 : 1024;
+  const int kBatchSize = 32;
+  const int kThreadCount = kRxQDepth / kBatchSize;
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kRxQDepth));
+
+  struct RxBuf {
+    RdmaMemBlock buffer;
+    ibv_sge sge;
+    ibv_recv_wr wr;
+  };
+
+  std::vector<RxBuf> rx_bufs(kRxQDepth);
+
+  // Init and post initial buffers into the SRQ.
+  for (int i = 0; i < kRxQDepth; ++i) {
+    rx_bufs[i].buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+    std::fill(rx_bufs[i].buffer.data(),
+              rx_bufs[i].buffer.data() + rx_bufs[i].buffer.size(), 0);
+    ibv_mr* mr = ibv_.RegMr(setup.pd, rx_bufs[i].buffer);
+    ASSERT_NE(mr, nullptr);
+    rx_bufs[i].sge = verbs_util::CreateSge(rx_bufs[i].buffer.span(), mr);
+    rx_bufs[i].wr = verbs_util::CreateRecvWr(i, &rx_bufs[i].sge,
+                                             /*num_sge=*/1);
+    verbs_util::PostSrqRecv(setup.srq, rx_bufs[i].wr);
+  };
+
+  struct QpPair {
+    ibv_qp* send_qp;
+    ibv_qp* recv_qp;
+    ibv_cq* send_cq;
+    ibv_cq* recv_cq;
+    struct SendBuf {
+      RdmaMemBlock buffer;
+      ibv_sge sge;
+      ibv_send_wr wr;
+    } send_bufs[kBatchSize];
+  };
+
+  std::vector<QpPair> qp_pairs(kThreadCount);
+
+  // Set up all loopback QP pairs.
+  for (int i = 0; i < kThreadCount; ++i) {
+    qp_pairs[i].send_cq = ibv_.CreateCq(setup.context, kBatchSize);
+    ASSERT_NE(qp_pairs[i].send_cq, nullptr);
+    qp_pairs[i].recv_cq = ibv_.CreateCq(setup.context, kBatchSize);
+    ASSERT_NE(qp_pairs[i].recv_cq, nullptr);
+    qp_pairs[i].send_qp =
+        ibv_.CreateQp(setup.pd, qp_pairs[i].send_cq, qp_pairs[i].recv_cq,
+                      setup.srq, IBV_QPT_RC,
+                      QpInitAttribute()
+                          .set_max_send_wr(kBatchSize)
+                          .set_max_recv_wr(kBatchSize));
+    ASSERT_NE(qp_pairs[i].send_qp, nullptr);
+    qp_pairs[i].recv_qp =
+        ibv_.CreateQp(setup.pd, qp_pairs[i].send_cq, qp_pairs[i].recv_cq,
+                      setup.srq, IBV_QPT_RC,
+                      QpInitAttribute()
+                          .set_max_send_wr(kBatchSize)
+                          .set_max_recv_wr(kBatchSize));
+    ASSERT_NE(qp_pairs[i].recv_qp, nullptr);
+    ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pairs[i].send_qp, qp_pairs[i].recv_qp,
+                                      setup.port_attr));
+
+    // Each send QP needs a unique buffer for every item in the batch.
+    for (int j = 0; j < kBatchSize; ++j) {
+      qp_pairs[i].send_bufs[j].buffer = ibv_.AllocBuffer(kBufferMemoryPages);
+      ibv_mr* mr = ibv_.RegMr(setup.pd, qp_pairs[i].send_bufs[j].buffer);
+      ASSERT_NE(mr, nullptr);
+      qp_pairs[i].send_bufs[j].sge =
+          verbs_util::CreateSge(qp_pairs[i].send_bufs[j].buffer.span(), mr);
+      qp_pairs[i].send_bufs[j].wr =
+          verbs_util::CreateSendWr(j, &qp_pairs[i].send_bufs[j].sge,
+                                   /*num_sge=*/1);
+    }
+  }
+
+  std::vector<std::thread> threads;
+  absl::Barrier barrier(kThreadCount);
+
+  for (int thread_id = 0; thread_id < kThreadCount; thread_id++) {
+    threads.push_back(std::thread([thread_id, kRxQDepth, kNumIters, &setup,
+                                   &barrier, &qp_pairs, &rx_bufs]() {
+      barrier.Block();
+      for (int i = 0; i < kNumIters; ++i) {
+        // Post a batch of send WRs.
+        for (int j = 0; j < kBatchSize; ++j) {
+          const uint64_t unique_id = i * thread_id * j;
+          // Put the unique ID at the beginning of the buffer.
+          memcpy(qp_pairs[thread_id].send_bufs[j].buffer.data(), &unique_id,
+                 sizeof(uint64_t));
+          verbs_util::PostSend(qp_pairs[thread_id].send_qp,
+                               qp_pairs[thread_id].send_bufs[j].wr);
+        }
+
+        // Wait for all the send completions.
+        for (int j = 0; j < kBatchSize; ++j) {
+          ASSERT_OK_AND_ASSIGN(
+              ibv_wc wc, verbs_util::WaitForCompletion(
+                             qp_pairs[thread_id].send_cq, absl::Seconds(30),
+                             absl::ZeroDuration()));
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          ASSERT_EQ(wc.opcode, IBV_WC_SEND);
+          // Verify in-order send completions.
+          ASSERT_EQ(wc.wr_id, j);
+        }
+
+        // Wait for all the recv completions.
+        std::vector<ibv_wc> wcs(kBatchSize);
+        for (int j = 0; j < kBatchSize; ++j) {
+          ASSERT_OK_AND_ASSIGN(
+              ibv_wc wc, verbs_util::WaitForCompletion(
+                             qp_pairs[thread_id].recv_cq, absl::Seconds(30),
+                             absl::ZeroDuration()));
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          ASSERT_EQ(wc.opcode, IBV_WC_RECV);
+          ASSERT_LT(wc.wr_id, kRxQDepth);
+          wcs[j] = wc;
+          uint64_t unique_id_actual;
+          const uint64_t unique_id_expected = i * thread_id * j;
+          memcpy(&unique_id_actual, rx_bufs[wc.wr_id].buffer.data(),
+                 sizeof(uint64_t));
+          ASSERT_EQ(unique_id_actual, unique_id_expected);
+        }
+
+        // Return the buffers to the SRQ. Since each thead does one batch
+        // at a time, the SRQ can never underflow.
+        for (int j = 0; j < kBatchSize; ++j) {
+          verbs_util::PostSrqRecv(setup.srq, rx_bufs[wcs[j].wr_id].wr);
+        }
+      }
+    }));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
 }
 
 }  // namespace rdma_unit_test

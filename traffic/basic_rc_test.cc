@@ -21,10 +21,12 @@
 #include "absl/log/log.h"
 #include "absl/strings/str_format.h"
 #include "public/status_matchers.h"
+#include "traffic/client.h"
 #include "traffic/op_profiles.h"
 #include "traffic/op_types.h"
 #include "traffic/operation_generator.h"
 #include "traffic/rdma_stress_fixture.h"
+#include "traffic/test_op.h"
 
 namespace rdma_unit_test {
 namespace {
@@ -46,6 +48,7 @@ class BasicRcTest : public RdmaStressFixture {
   // across each client. `op_generator`: See OperationGenerator, used to
   // generate operation parameters.
   void ExecuteRcTest(const Config& config) {
+    EXPECT_OK(validation_->PreTestValidation());
     // Create two clients for the test.
     const Client::Config client_config = {
         .max_op_size =

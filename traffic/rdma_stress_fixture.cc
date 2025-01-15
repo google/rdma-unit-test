@@ -116,6 +116,7 @@ void RdmaStressFixture::CreateSetUpRcQps(Client& initiator, Client& target,
 void RdmaStressFixture::CreateSetUpOneToOneUdQps(Client& initiator,
                                                  Client& target,
                                                  uint16_t qps_per_client) {
+  EXPECT_OK(validation_->TransportSnapshot());
   for (uint32_t i = 0; i < qps_per_client; ++i) {
     absl::StatusOr<uint32_t> initiator_qp_id =
         initiator.CreateQp(/*is_rc=*/false);
