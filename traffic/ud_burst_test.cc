@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <tuple>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/flags/flag.h"
 #include "absl/log/log.h"
-#include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -68,6 +70,10 @@ class UdBurstTest : public RdmaStressFixture,
 
   void PostOps(Client& initiator, Client& target, int num_qps, int ops_per_qp,
                int op_size) {
+
+    std::tuple<uint64_t, uint64_t> transactions;
+    auto time_since_last_post = absl::InfinitePast();
+    int posted_transactions = 0;
     for (int i = 0; i < ops_per_qp; ++i) {
       for (uint32_t qp_id = 0; qp_id < static_cast<uint32_t>(num_qps);
            ++qp_id) {
@@ -78,6 +84,20 @@ class UdBurstTest : public RdmaStressFixture,
             .op_bytes = op_size,
             .num_ops = 1,
             .initiator_qp_id = remote_qp.qp_state->qp_id()}));
+
+        time_since_last_post = absl::Now();
+        posted_transactions++;
+        // First, sleep for as long as we need to
+        auto inter_op_delay = absl::GetFlag(FLAGS_inter_op_delay_us);
+        if (inter_op_delay > absl::ZeroDuration()) {
+          auto elapsed_time = absl::Now() - time_since_last_post;
+          while (elapsed_time < inter_op_delay) {
+            const auto sleep_time = inter_op_delay - elapsed_time;
+            absl::SleepFor(sleep_time);
+            elapsed_time = absl::Now() - time_since_last_post;
+          }
+        }
+
         ASSERT_OK(initiator.PostOps(Client::OpAttributes{
             .op_type = OpTypes::kSend,
             .op_bytes = op_size,

@@ -30,6 +30,10 @@
 ABSL_FLAG(uint32_t, random_seed, time(nullptr),
           "The seed that initializes the random generator for "
           "the sequence of operations.");
+ABSL_FLAG(bool, write_only_ops, false,
+          "If true, the op generator will only generate write operations. This "
+          "is useful to make a consistent traffic pattern for BNA hash table "
+          "stress testing.");
 
 namespace rdma_unit_test {
 
@@ -49,7 +53,8 @@ RandomizedOperationGenerator::RandomizedOperationGenerator(
               .op_type_proportions()
               .comp_swap_proportion()},
       op_size_lookup_(op_profile.op_size_proportions().size()),
-      op_size_distribution_() {
+      op_size_distribution_(),
+      write_only_ops_(absl::GetFlag(FLAGS_write_only_ops)) {
   if (op_profile.has_ud_op_profile()) {
     // All generated UD operations are sends.
     op_type_distribution_ = std::discrete_distribution<int>({0, 0, 1, 0, 0});
@@ -74,8 +79,10 @@ RandomizedOperationGenerator::RandomizedOperationGenerator(
 }
 
 OperationGenerator::OpAttributes RandomizedOperationGenerator::NextOp() {
-  return {op_type_lookup_[op_type_distribution_(random_engine_)],
-          op_size_lookup_[op_size_distribution_(random_engine_)]};
+  return {
+      op_type_lookup_[write_only_ops_ ? 0
+                                      : op_type_distribution_(random_engine_)],
+      op_size_lookup_[op_size_distribution_(random_engine_)]};
 }
 
 }  // namespace rdma_unit_test

@@ -22,6 +22,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
 
@@ -85,10 +86,11 @@ TEST_P(UdConstantOpTest, OneToOne) {
     initiator.qp_state(qp_id)->set_op_generator(&op_generator);
   }
 
+  auto max_inflight_ops_across_qps = kMaxInflightOps * kNumQps;
   int ops_per_qp = std::max(1, kNumOps / kNumQps);
   int ops_completed =
       initiator.ExecuteOps(target, kNumQps, ops_per_qp, kBatchPerQp,
-                           kMaxInflightOps, kMaxInflightOps * kNumQps);
+                           kMaxInflightOps, max_inflight_ops_across_qps);
   FinalizeStateAndCheckLatencies(initiator, target, kNumQps,
                                  /*ops_expected=*/ops_per_qp * kNumQps,
                                  ops_completed);

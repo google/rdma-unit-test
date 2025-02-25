@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>  // NOLINT
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include "gmock/gmock.h"
@@ -1013,7 +1014,8 @@ TEST_F(QpPostTest, OverflowSendWr) {
   ibv_send_wr wqe = DummySend();
   int max_send_wr = verbs_util::GetQpCap(setup.qp).max_send_wr;
   std::vector<ibv_send_wr> wqes(max_send_wr + 1, wqe);
-  for (unsigned int i = 0; i < wqes.size() - 1; ++i) {
+  const auto num_valid_wqes = wqes.size() - 1;
+  for (unsigned int i = 0; i < num_valid_wqes; ++i) {
     wqes[i].wr_id = wqe.wr_id + i;
     wqes[i].next = &wqes[i + 1];
   }

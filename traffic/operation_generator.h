@@ -26,6 +26,7 @@
 #include "traffic/op_types.h"
 
 ABSL_DECLARE_FLAG(uint32_t, random_seed);
+ABSL_DECLARE_FLAG(bool, write_only_ops);
 
 namespace rdma_unit_test {
 
@@ -103,6 +104,9 @@ class RandomizedOperationGenerator : public OperationGenerator {
 
   std::vector<int> op_size_lookup_;
   std::discrete_distribution<int> op_size_distribution_;
+
+ private:
+  bool write_only_ops_;
 };
 
 class ConstantRcOperationGenerator : public OperationGenerator {

@@ -1,0 +1,17 @@
+"""RDMA Unit Tests
+
+Modules needed for RDMA Unit Tests.
+"""
+
+module(
+    name = "rdma_unit_test",
+    repo_name = "com_google_rdma_unit_test",
+)
+
+bazel_dep(name = "protobuf", version = "29.3")
+bazel_dep(name = "googletest", version = "1.15.2")
+bazel_dep(name = "abseil-cpp", version = "20240722.1")
+bazel_dep(name = "glog", version = "0.7.1")
+bazel_dep(name = "grpc", version = "1.69.0")
+bazel_dep(name = "magic_enum", version = "0.9.6")
+bazel_dep(name = "rules_license", version = "1.0.0")

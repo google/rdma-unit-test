@@ -64,8 +64,6 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"MwType2Test", "CrossQpInvalidate"}, "b/235330853#comment21"},
         {{"QpPostTest", "OverflowSendWr"}, ""},
         {{"SrqTest", "ExceedDeviceMaxWr"}, ""},
-        {{"SrqMultiThreadTest", "MultiThreadedMultiQpSingleSrq"},
-         ""},
         {{"LoopbackUdQpTest", "SendWithTooSmallRecv"}, ""},
         {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
         {{"RdmaAccessTest", "ZeroBasedAccess"}, ""},

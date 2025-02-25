@@ -29,8 +29,8 @@ cc_library(
         ":introspection_registrar",
         ":system_libibverbs",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/strings",
     ],
     alwayslink = 1,
 )
@@ -42,7 +42,7 @@ cc_library(
         ":introspection_registrar",
         ":system_libibverbs",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_map",
     ],
     alwayslink = 1,
 )
@@ -54,7 +54,7 @@ cc_library(
         ":introspection_registrar",
         ":system_libibverbs",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_map",
     ],
     alwayslink = 1,
 )
@@ -65,8 +65,8 @@ cc_library(
     hdrs = ["introspection_registrar.h"],
     deps = [
         ":system_libibverbs",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/strings",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/strings",
     ],
 )
 
@@ -77,7 +77,7 @@ cc_library(
         ":introspection_registrar",
         ":system_libibverbs",
         "//public:introspection",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_map",
     ],
     alwayslink = 1,
 )
@@ -90,7 +90,7 @@ cc_library(
         ":system_libibverbs",
         "//public:rdma_memblock",
         "//public:verbs_util",
-        "@com_google_absl//absl/status",
+        "@abseil-cpp//absl/status",
     ],
 )
 
@@ -101,10 +101,10 @@ cc_library(
     deps = [
         ":system_libibverbs",
         "//public:rdma_memblock",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_googletest//:gtest",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/synchronization",
+        "@googletest//:gtest",
     ],
 )
 
@@ -120,9 +120,9 @@ cc_library(
     hdrs = ["verbs_attribute.h"],
     deps = [
         ":system_libibverbs",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/time",
     ],
 )
 
