@@ -79,6 +79,7 @@ class IntrospectionRxe : public NicIntrospection {
         // TODO(author2): Be more specific.
         {{"QpTest", "OverflowSendWr"}, "Does not handle overflow QP."},
         {{"QpTest", "UnknownType"}, "Can create QPs of unknown type."},
+        {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
         // Does not handle overflow well.
         {{"SrqTest", "OverflowSrq"}, ""},
     };

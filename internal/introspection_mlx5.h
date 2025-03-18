@@ -91,6 +91,7 @@ class IntrospectionMlx5 : public NicIntrospection {
          "Undiagnosed error: provider does not emit completion."},
         // Allows creation over device cap.
         {{"QpTest", "ExceedsDeviceCap"}, ""},
+        {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
     };
     return deviations;
   }

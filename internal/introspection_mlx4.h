@@ -87,6 +87,7 @@ class IntrospectionMlx4 : public NicIntrospection {
         {{"LoopbackRcQpTest", "FetchAddInvalidLKey"}, ""},
         // Allows bind to invalid qp.
         {{"MwTest", "InvalidQp"}, ""},
+        {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
     };
     return deviations;
   }

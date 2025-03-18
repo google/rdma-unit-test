@@ -16,6 +16,7 @@
 #include <sched.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <thread>  // NOLINT
@@ -30,6 +31,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
@@ -588,6 +590,52 @@ TEST_F(QpStateTest, ReuseQp) {
       verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(), setup.mr,
                                   setup.buffer.data(), setup.mr->rkey));
   EXPECT_EQ(status, IBV_WC_SUCCESS);
+}
+
+// Test to ensure that pre-existing QPs continue to function as new
+// QPs are created/destroyed such that the QP ID rolls over.
+TEST_F(QpStateTest, QpIdRollover) {
+  // Number of QPs to create beyond the max QP ID.
+  constexpr int kExtraQps = 32;
+  // Number of xfers to perform after the QP ID rolls over.
+  constexpr int kXfersAfterRollover = 32;
+  const ibv_device_attr& device_attr = Introspection().device_attr();
+  const int qps_to_create = device_attr.max_qp + kExtraQps;
+
+  LOG(INFO) << "QPs to create: " << qps_to_create;
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.remote_qp, setup.local_qp,
+                                    setup.port_attr));
+
+  std::atomic<bool> done = false;
+  std::thread thread([&]() {
+    for (int i = 0; i < qps_to_create; ++i) {
+      ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.cq);
+      ASSERT_THAT(qp, NotNull());
+      ibv_.DestroyQp(qp);
+    }
+    done = true;
+  });
+
+  // Check to ensure the main QP is still functional.
+  int xfers_after_rollover = 0;
+  while (true) {
+    if (done) {
+      if (xfers_after_rollover == kXfersAfterRollover) {
+        break;
+      }
+      xfers_after_rollover++;
+    }
+    ASSERT_OK_AND_ASSIGN(ibv_wc_status status,
+                         verbs_util::ExecuteRdmaRead(
+                             setup.local_qp, setup.buffer.span(), setup.mr,
+                             setup.buffer.data(), setup.mr->rkey));
+    EXPECT_EQ(status, IBV_WC_SUCCESS);
+    absl::SleepFor(absl::Milliseconds(1));
+  }
+
+  thread.join();
 }
 
 // IBTA specs says we posting to a QP in RESET, INIT or RTR state should be

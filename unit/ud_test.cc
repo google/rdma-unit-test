@@ -20,19 +20,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <thread>  // NOLINT
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/barrier.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
 #include "internal/verbs_attribute.h"
+#include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
 
@@ -619,6 +623,45 @@ TEST_F(LoopbackUdQpTest, CompareSwap) {
   EXPECT_EQ(completion.wr_id, 1);
   CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
                     /*post_recv_wqe=*/true);
+}
+
+TEST_F(LoopbackUdQpTest, MultiThreadedAhLifecycle) {
+  const int kAhPerThread = Introspection().IsSlowNic() ? 4 : 128;
+  const int kThreadCount = Introspection().IsSlowNic() ? 4 : 128;
+  const int kNumCycles = Introspection().IsSlowNic() ? 4 : 64;
+
+  ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
+  PortAttribute port_attr = ibv_.GetPortAttribute(context);
+
+  absl::Barrier barrier(kThreadCount);
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kThreadCount; thread_id++) {
+    threads.push_back(std::thread([&]() {
+      ibv_pd* pd = ibv_.AllocPd(context);
+      ASSERT_THAT(pd, NotNull());
+
+      barrier.Block();
+
+      std::vector<ibv_ah*> ah(kAhPerThread);
+      for (int i = 0; i < kNumCycles; i++) {
+        for (int i = 0; i < kAhPerThread; i++) {
+          ah[i] = ibv_.CreateAh(pd, port_attr.port, port_attr.gid_index,
+                                port_attr.gid);
+          ASSERT_THAT(ah[i], NotNull());
+        }
+        for (int i = 0; i < kAhPerThread; i++) {
+          ibv_.DestroyAh(ah[i]);
+        }
+        absl::SleepFor(absl::Milliseconds(100));
+      }
+
+      ibv_.DeallocPd(pd);
+    }));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
 }
 
 class AdvancedLoopbackTest : public RdmaVerbsFixture {

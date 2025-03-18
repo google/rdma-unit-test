@@ -358,11 +358,12 @@ ibv_ah* VerbsHelperSuite::CreateAh(ibv_pd* pd, ibv_ah_attr& ah_attr) {
 }
 
 int VerbsHelperSuite::DestroyAh(ibv_ah* ah) {
+  cleanup_.ReleaseCleanup(ah);
   int result = ibv_destroy_ah(ah);
   if (result == 0) {
     LOG(INFO) << "Destroyed AH " << ah;
-    cleanup_.ReleaseCleanup(ah);
   } else {
+    cleanup_.AddCleanup(ah);
     LOG(INFO) << "Failed to destroy AH: " << std::strerror(errno);
   }
   return result;
@@ -380,11 +381,12 @@ ibv_pd* VerbsHelperSuite::AllocPd(ibv_context* context) {
 }
 
 int VerbsHelperSuite::DeallocPd(ibv_pd* pd) {
+  cleanup_.ReleaseCleanup(pd);
   int result = ibv_dealloc_pd(pd);
   if (result == 0) {
     LOG(INFO) << "Deallocated PD " << pd;
-    cleanup_.ReleaseCleanup(pd);
   } else {
+    cleanup_.AddCleanup(pd);
     LOG(INFO) << "Failed to deallocate PD: " << std::strerror(errno);
   }
   return result;
@@ -414,11 +416,12 @@ int VerbsHelperSuite::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,
 }
 
 int VerbsHelperSuite::DeregMr(ibv_mr* mr) {
+  cleanup_.ReleaseCleanup(mr);
   int result = ibv_dereg_mr(mr);
   if (result == 0) {
     LOG(INFO) << "Deregistered MR " << mr;
-    cleanup_.ReleaseCleanup(mr);
   } else {
+    cleanup_.AddCleanup(mr);
     LOG(INFO) << "Failed to deregister MR: " << std::strerror(errno);
   }
   return result;
@@ -436,11 +439,12 @@ ibv_mw* VerbsHelperSuite::AllocMw(ibv_pd* pd, ibv_mw_type type) {
 }
 
 int VerbsHelperSuite::DeallocMw(ibv_mw* mw) {
+  cleanup_.ReleaseCleanup(mw);
   int result = ibv_dealloc_mw(mw);
   if (result == 0) {
     LOG(INFO) << "Deallocated MW " << mw;
-    cleanup_.ReleaseCleanup(mw);
   } else {
+    cleanup_.AddCleanup(mw);
     LOG(INFO) << "Failed to deallocate MW: " << std::strerror(errno);
   }
   return result;
@@ -458,11 +462,12 @@ ibv_comp_channel* VerbsHelperSuite::CreateChannel(ibv_context* context) {
 }
 
 int VerbsHelperSuite::DestroyChannel(ibv_comp_channel* channel) {
+  cleanup_.ReleaseCleanup(channel);
   int result = ibv_destroy_comp_channel(channel);
   if (result == 0) {
     LOG(INFO) << "Destroyed channel " << channel;
-    cleanup_.ReleaseCleanup(channel);
   } else {
+    cleanup_.AddCleanup(channel);
     LOG(INFO) << "Failed to destroy comp channel: " << std::strerror(errno);
   }
   return result;
@@ -482,11 +487,12 @@ ibv_cq* VerbsHelperSuite::CreateCq(ibv_context* context, int cqe,
 }
 
 int VerbsHelperSuite::DestroyCq(ibv_cq* cq) {
+  cleanup_.ReleaseCleanup(cq);
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
     LOG(INFO) << "Destroyed CQ " << cq;
-    cleanup_.ReleaseCleanup(cq);
   } else {
+    cleanup_.AddCleanup(cq);
     LOG(INFO) << "Failed to destroy CQ: " << std::strerror(errno);
   }
   return result;
@@ -511,12 +517,13 @@ ibv_cq_ex* VerbsHelperSuite::CreateCqEx(ibv_context* context,
 }
 
 int VerbsHelperSuite::DestroyCqEx(ibv_cq_ex* cq_ex) {
+  cleanup_.ReleaseCleanup(cq_ex);
   ibv_cq* cq = ibv_cq_ex_to_cq(cq_ex);
   int result = ibv_destroy_cq(cq);
   if (result == 0) {
     LOG(INFO) << "Destroyed CQ " << cq;
-    cleanup_.ReleaseCleanup(cq_ex);
   } else {
+    cleanup_.AddCleanup(cq_ex);
     LOG(INFO) << "Failed to destroy extended CQ: " << std::strerror(errno);
   }
   return result;
@@ -540,11 +547,12 @@ ibv_srq* VerbsHelperSuite::CreateSrq(ibv_pd* pd, ibv_srq_init_attr& attr) {
 }
 
 int VerbsHelperSuite::DestroySrq(ibv_srq* srq) {
+  cleanup_.ReleaseCleanup(srq);
   int result = ibv_destroy_srq(srq);
   if (result == 0) {
     LOG(INFO) << "Destroyed SRQ " << srq;
-    cleanup_.ReleaseCleanup(srq);
   } else {
+    cleanup_.AddCleanup(srq);
     LOG(INFO) << "Failed to destroy SRQ: " << std::strerror(errno);
   }
   return result;
@@ -581,11 +589,12 @@ ibv_qp* VerbsHelperSuite::CreateQp(ibv_pd* pd, ibv_qp_init_attr& basic_attr) {
 }
 
 int VerbsHelperSuite::DestroyQp(ibv_qp* qp) {
+  cleanup_.ReleaseCleanup(qp);
   int result = ibv_destroy_qp(qp);
   if (result == 0) {
     LOG(INFO) << "Destroyed QP " << qp;
-    cleanup_.ReleaseCleanup(qp);
   } else {
+    cleanup_.AddCleanup(qp);
     LOG(INFO) << "Failed to destroy QP: " << std::strerror(errno);
   }
   return result;

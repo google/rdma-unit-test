@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <sys/select.h>
+#include <sys/poll.h>
 #include <sys/time.h>
 
 #include <cstdint>
@@ -48,7 +48,8 @@ class CompChannelTest : public RdmaVerbsFixture {
   static constexpr int kNotifySolicited = 1;
   static constexpr uint32_t kRKey = 17;
   static constexpr uint32_t kCqMaxWr = 10;
-  static constexpr absl::Duration kSelectRetryTimeout = absl::Milliseconds(10);
+  static constexpr int kPollTimeout = 1;
+  static constexpr absl::Duration kPollRetryTimeout = absl::Milliseconds(20);
 
   struct BasicSetup {
     struct QpEnd {
@@ -174,16 +175,20 @@ class CompChannelTest : public RdmaVerbsFixture {
   }
 
   static bool IsReady(ibv_comp_channel* channel) {
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(channel->fd, &fds);
-    timeval no_block = {.tv_sec = 0, .tv_usec = 0};
-    absl::Time stop = absl::Now() + kSelectRetryTimeout;
+    pollfd pfd = {.fd = channel->fd, .events = POLLIN};
     int result;
-    do {
-      result = select(FD_SETSIZE, &fds, nullptr, nullptr, &no_block);
-      LOG_IF(INFO, result < 0) << "select failed error=" << errno;
-    } while ((result < 0) && (errno == EINTR) && (absl::Now() < stop));
+    absl::Time stop = absl::Now() + kPollRetryTimeout;
+    while (absl::Now() < stop) {
+      result = poll(&pfd, 1, kPollTimeout);
+      if (result < 0) {
+        if (errno == EINTR) continue;  // Retry
+        return false;                  // Error
+      } else if (result == 1) {
+        if (pfd.revents & POLLIN) return true;
+        return false;  // Some other event, probably error.
+      }
+      // return == 0 means timeout, so keep waiting
+    }
     return result == 1;
   }
 };
