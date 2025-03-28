@@ -458,6 +458,8 @@ cc_library(
 cc_binary(
     name = "run_unit_test",
     srcs = [],
+    # Required to build statically, see b/380811817 comment #23.
+    features = ["no_default_linker_script"],
     deps = [
         ":access_test_cc",
         ":ah_test_cc",

@@ -92,6 +92,8 @@ class IntrospectionMlx5 : public NicIntrospection {
         // Allows creation over device cap.
         {{"QpTest", "ExceedsDeviceCap"}, ""},
         {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
+        {{"RdmaAccessTest", "ZeroBasedAccess"},
+         "Mlx does not appear to support zero based access. b/397912012"},
     };
     return deviations;
   }
@@ -101,8 +103,7 @@ class IntrospectionMlx5 : public NicIntrospection {
   ~IntrospectionMlx5() = default;
   explicit IntrospectionMlx5(const std::string& name,
                              const ibv_device_attr& attr)
-      : NicIntrospection(name, attr) {
-  }
+      : NicIntrospection(name, attr) {}
 };
 
 }  // namespace rdma_unit_test
