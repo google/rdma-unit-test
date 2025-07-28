@@ -253,6 +253,42 @@ TEST_F(LoopbackUdQpTest, SendRnr) {
                     /*post_recv_wqe=*/true);
 }
 
+TEST_F(LoopbackUdQpTest, SendRnrUnsignaledBatch) {
+  static constexpr int kBatchSize = 100;
+  static constexpr int kNumCycles = 10;
+  static constexpr int kPayloadLength = 1000;  // Sub-MTU length for UD.
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/1, &lsge, /*num_sge=*/1);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
+  ASSERT_THAT(ah, NotNull());
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+
+  for (int i = 0; i < kNumCycles; ++i) {
+    for (int i = 0; i < kBatchSize; ++i) {
+      send.send_flags &= ~IBV_SEND_SIGNALED;
+      verbs_util::PostSend(local.qp, send);
+    }
+    send.send_flags |= IBV_SEND_SIGNALED;
+    verbs_util::PostSend(local.qp, send);
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(local.cq));
+    EXPECT_THAT(completion.status, AnyOf(IBV_WC_SUCCESS, IBV_WC_GENERAL_ERR));
+    EXPECT_EQ(completion.qp_num, local.qp->qp_num);
+    EXPECT_EQ(completion.wr_id, 1);
+  }
+
+  CheckClassDFaults(local, remote, /*recreate_local_qp=*/true,
+                    /*post_recv_wqe=*/true);
+}
+
 /* According to ROCE v2 Annex A17.9.2, when setting traffic class,
    it should be correctly reflected in GRH, and should be the same on both
    ends. */

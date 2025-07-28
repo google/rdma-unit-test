@@ -136,7 +136,11 @@ TEST_F(RnrNackTest, RetrySuccess) {
 
   // Sleep for long enough for send op to be received and cause an RNR nack.
   // Since rnr_timer is max and rnr_retry is infinite, we will never timeout.
-  absl::SleepFor(absl::Seconds(1));
+  if (absl::GetFlag(FLAGS_silicon)) {
+    absl::SleepFor(absl::Milliseconds(100));
+  } else {
+    absl::SleepFor(absl::Seconds(1));
+  }
 
   // Post 16 recv ops at the target.
   attributes.op_type = OpTypes::kRecv;

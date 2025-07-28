@@ -13,7 +13,9 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <thread>  // NOLINT
 #include <vector>
 
@@ -24,6 +26,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/barrier.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
@@ -605,6 +608,34 @@ class ThreadedWorkloadTest : public ThreadedTest {
     }
     return absl::OkStatus();
   }
+
+  absl::Status MaintainReadBacklog(BasicSetup& setup, ibv_qp* qp, ibv_cq* cq,
+                                   uint64_t depth,
+                                   std::atomic<uint64_t>& curr_backlog) {
+    ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
+    ibv_send_wr wr = verbs_util::CreateRdmaWr(
+        IBV_WR_RDMA_READ, 0xDEADBEEF, &sge, /*num_sge=*/1, setup.buffer.data(),
+        setup.mr->rkey);
+
+    while (true) {
+      while (curr_backlog < depth) {
+        ibv_send_wr* bad_wr = nullptr;
+        if (ibv_post_send(qp, &wr, &bad_wr)) {
+          return absl::InternalError(
+              absl::StrCat("Unexpected error posting send"));
+        }
+        curr_backlog++;
+      }
+      ASSIGN_OR_RETURN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(cq, absl::Seconds(5),
+                                                     absl::ZeroDuration()));
+      if (completion.status != IBV_WC_SUCCESS) {
+        return absl::InternalError(
+            absl::StrCat("Unexpected completion status: ", completion.status));
+      }
+      curr_backlog--;
+    }
+  }
 };
 
 TEST_F(ThreadedWorkloadTest, QpLifecycle) {
@@ -639,6 +670,104 @@ TEST_F(ThreadedWorkloadTest, QpLifecycle) {
   }
 
   pool.JoinAll();
+}
+
+// Create a group of threads that continuously perform RDMA READs on a loopback
+// QP pair. Then, while this is running, delete the target QP.
+// Additionally, run a group of canary threads to ensure that unrelated
+// QPs continue to function as expected.
+TEST_F(ThreadedWorkloadTest, QpDestroyTargetWhileActive) {
+  const int kNumCanaryThreads = 1;
+  const int kNumDeleteThreads = Introspection().IsSlowNic() ? 1 : 8;
+  const int kBacklogDepth = 100;
+  const absl::Duration kDeleteCycleDuration = absl::Seconds(30);
+
+  LOG(INFO) << "Running QpDestroyTargetWhileActive with " << kNumCanaryThreads
+            << " canary threads and " << kNumDeleteThreads
+            << " delete threads.";
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  setup.mr = ibv_.RegMr(setup.pd, setup.buffer);
+  ASSERT_THAT(setup.mr, NotNull());
+
+  std::atomic<bool> terminate = false;
+
+  ThreadPool canary_pool;
+  absl::Barrier canary_barrier(kNumCanaryThreads + 1);
+  for (int thread_id = 0; thread_id < kNumCanaryThreads; ++thread_id) {
+    canary_pool.Add([&]() {
+      ibv_cq* cq = ibv_.CreateCq(setup.context);
+      ASSERT_THAT(cq, NotNull());
+      ibv_qp* local = ibv_.CreateQp(setup.pd, cq);
+      ASSERT_THAT(local, NotNull());
+      ibv_qp* remote = ibv_.CreateQp(setup.pd, cq);
+      ASSERT_THAT(remote, NotNull());
+      ASSERT_OK(ibv_.SetUpLoopbackRcQps(remote, local, setup.port_attr));
+      canary_barrier.Block();
+      while (!terminate) {
+        ASSERT_OK(IssueRead(setup, local, cq));
+        // This is not a performance test...
+        absl::SleepFor(absl::Milliseconds(1));
+      }
+      ASSERT_EQ(ibv_.DestroyQp(local), 0);
+      ASSERT_EQ(ibv_.DestroyQp(remote), 0);
+      ASSERT_EQ(ibv_.DestroyCq(cq), 0);
+    });
+  }
+
+  // Make an attempt to ensure that the canary threads are running before
+  // starting the delete threads. Best effort; not critical.
+  canary_barrier.Block();
+
+  ThreadPool delete_pool;
+  std::atomic<uint64_t> target_deletions = 0;
+  for (int thread_id = 0; thread_id < kNumDeleteThreads; ++thread_id) {
+    canary_pool.Add([&]() {
+      while (!terminate) {
+        ibv_cq* cq = ibv_.CreateCq(setup.context);
+        ASSERT_THAT(cq, NotNull());
+        ibv_qp* local = ibv_.CreateQp(setup.pd, cq);
+        ASSERT_THAT(local, NotNull());
+        ibv_qp* remote = ibv_.CreateQp(setup.pd, cq);
+        ASSERT_THAT(remote, NotNull());
+        ASSERT_OK(ibv_.SetUpLoopbackRcQps(remote, local, setup.port_attr));
+
+        std::atomic<uint64_t> curr_backlog = 0;
+        std::thread thread([&]() {
+          // Do a single read to ensure the QP is ready to go.
+          ASSERT_OK(IssueRead(setup, local, cq));
+          // Read until failure.
+          MaintainReadBacklog(setup, local, cq, kBacklogDepth, curr_backlog)
+              .IgnoreError();
+        });
+
+        // Wait for transfers to be running before deleting the QP (best effort)
+        // If MaintainReadBacklog() fails before the first send, then this
+        // will spin until the test times out.
+        do {
+          absl::SleepFor(absl::Microseconds(10));
+        } while (!curr_backlog);
+
+        // Delete target QP.
+        ASSERT_EQ(ibv_.DestroyQp(remote), 0);
+
+        // Wait for sending thread to exit as a result of QP deletion.
+        thread.join();
+
+        ASSERT_EQ(ibv_.DestroyQp(local), 0);
+        ASSERT_EQ(ibv_.DestroyCq(cq), 0);
+        target_deletions++;
+      }
+    });
+  }
+
+  absl::SleepFor(kDeleteCycleDuration);
+
+  ASSERT_GT(target_deletions, 0);
+
+  terminate = true;
+  delete_pool.JoinAll();
+  canary_pool.JoinAll();
 }
 
 }  // namespace rdma_unit_test

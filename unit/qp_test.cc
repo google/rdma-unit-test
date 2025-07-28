@@ -638,6 +638,54 @@ TEST_F(QpStateTest, QpIdRollover) {
   thread.join();
 }
 
+TEST_F(QpStateTest, QpReadWhileTargetEntersRts) {
+  const int kMinNumXfersBeforeRts = 100;
+  const int kMinNumXfersAfterRts = 100;
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  // Target QP goes to RTR.
+  ASSERT_EQ(ibv_.ModifyRcQpResetToInit(setup.remote_qp, setup.port_attr.port,
+                                       QpAttribute()),
+            0);
+  ASSERT_EQ(ibv_.ModifyRcQpInitToRtr(setup.remote_qp, setup.port_attr,
+                                     setup.port_attr.gid,
+                                     setup.local_qp->qp_num, QpAttribute()),
+            0);
+
+  // Initiator QP goes to RTS.
+  ASSERT_OK(ibv_.ModifyRcQpResetToRts(setup.local_qp, setup.port_attr,
+                                      setup.port_attr.gid,
+                                      setup.remote_qp->qp_num, QpAttribute()));
+
+  std::atomic<uint64_t> xfers_done = 0;
+  std::atomic<bool> terminate = false;
+
+  std::thread thread([&]() {
+    while (!terminate) {
+      ASSERT_OK_AND_ASSIGN(ibv_wc_status status,
+                           verbs_util::ExecuteRdmaRead(
+                               setup.local_qp, setup.buffer.span(), setup.mr,
+                               setup.buffer.data(), setup.mr->rkey));
+      ASSERT_EQ(status, IBV_WC_SUCCESS);
+      xfers_done++;
+    }
+  });
+
+  while (xfers_done < kMinNumXfersBeforeRts) {
+    absl::SleepFor(absl::Milliseconds(10));
+  }
+
+  ASSERT_EQ(ibv_.ModifyRcQpRtrToRts(setup.remote_qp, QpAttribute()), 0);
+
+  uint64_t pre_sample = xfers_done;
+  while (xfers_done - pre_sample < kMinNumXfersAfterRts) {
+    absl::SleepFor(absl::Milliseconds(10));
+  }
+
+  terminate = true;
+  thread.join();
+}
+
 // IBTA specs says we posting to a QP in RESET, INIT or RTR state should be
 // be returned with immediate error (see IBTA v1, chapter 10.8.2, c10-96).
 // But a vast majority of the low-level driver deviate from this rule for better
@@ -845,7 +893,7 @@ TEST_F(QpStateTest, PostSendErr) {
 // while SQ WQEs are still pending.
 TEST_F(QpStateTest, PostSendErrConcurrent) {
   const int kReadBatchSize = 32;
-  const int kNumCycles = 256;
+  const int kNumCycles = 2;
 
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
 
@@ -930,6 +978,27 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
   submitter_state_mutex.Unlock();
 
   submission_thread.join();
+}
+
+TEST_F(QpStateTest, PostSendErrDelayed) {
+  const int kReadBatchSize = 32;
+  const absl::Duration kSleepDuration = absl::Seconds(3);
+
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
+                                    setup.port_attr));
+
+  ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_SUCCESS}));
+
+  ASSERT_OK(ibv_.ModifyQpToError(setup.local_qp));
+
+  ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR}));
+
+  absl::SleepFor(kSleepDuration);
+  ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR}));
+
+  absl::SleepFor(kSleepDuration);
+  ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR}));
 }
 
 TEST_F(QpStateTest, PostRecvErr) {

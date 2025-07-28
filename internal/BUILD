@@ -15,6 +15,8 @@
 # Implementation of RDMA unit test framework.
 # Targets in this packages is designed to be direct dependencies of targets in ../public/ but not ../cases/.
 
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
+
 package(
     default_applicable_licenses = ["//:package_license"],
     default_testonly = True,

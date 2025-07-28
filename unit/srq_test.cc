@@ -14,10 +14,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <thread>  // NOLINT
 #include <vector>
 
@@ -28,10 +30,10 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/barrier.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
-#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -934,6 +936,184 @@ TEST_F(SrqMultiThreadTest, MultiThreadedMultiQpSingleSrq) {
           verbs_util::PostSrqRecv(setup.srq, rx_bufs[wcs[j].wr_id].wr);
         }
       }
+    }));
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+
+// For each thread, a single SRQ+CQ is created, which is shared by a group
+// of QPs. Then, send/recv traffic is generated on each QP. When completions
+// are received, the associated buffers are checked to ensure that they contain
+// the expected data. This is done by poisoning the RX buffers prior to posting
+// them to the SRQ and then verifying the embedded message content when the
+// completions are received.
+TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
+  const int kNumIters = Introspection().IsSlowNic() ? 2048 : 1048576;
+  const int kRxQDepth = Introspection().IsSlowNic() ? 128 : 1024;
+  const int kQpCount = Introspection().IsSlowNic() ? 32 : 128;
+  const int kNumThreads = Introspection().IsSlowNic() ? 2 : 16;
+  const int kBufferPages = 2;
+
+  struct MessageData {
+    uint32_t seed;
+    uint32_t seq_num;
+    uint32_t rqp_num;
+  };
+
+  std::vector<std::thread> threads;
+  for (int thread_id = 0; thread_id < kNumThreads; thread_id++) {
+    threads.push_back(std::thread([&, thread_id]() {
+      const uint32_t seed = thread_id << 16u;
+      const uint32_t kSeedMask = 0xFFFF0000;
+
+      ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kRxQDepth));
+
+      struct RxBuf {
+        RdmaMemBlock buffer;
+        ibv_sge sge;
+        ibv_recv_wr wr;
+      };
+
+      std::vector<RxBuf> rx_bufs(kRxQDepth);
+
+      // Init and post initial buffers into the SRQ.
+      for (uint32_t i = 0; i < kRxQDepth; ++i) {
+        rx_bufs[i].buffer = ibv_.AllocBuffer(kBufferPages);
+        memset(rx_bufs[i].buffer.data(), 0, sizeof(MessageData));
+        ibv_mr* mr = ibv_.RegMr(setup.pd, rx_bufs[i].buffer);
+        ASSERT_NE(mr, nullptr);
+        rx_bufs[i].sge = verbs_util::CreateSge(rx_bufs[i].buffer.span(), mr);
+        rx_bufs[i].wr = verbs_util::CreateRecvWr(i + seed, &rx_bufs[i].sge,
+                                                 /*num_sge=*/1);
+        verbs_util::PostSrqRecv(setup.srq, rx_bufs[i].wr);
+      };
+
+      // Single CQ equal to SRQ size.
+      ibv_cq* recv_cq = ibv_.CreateCq(setup.context, kRxQDepth);
+      ASSERT_NE(recv_cq, nullptr);
+
+      struct QpPair {
+        ibv_qp* send_qp;
+        ibv_qp* recv_qp;
+        ibv_cq* send_cq;  // Unique send CQ, but shared recv CQ.
+        RdmaMemBlock send_buffer;
+        ibv_mr* mr;
+        ibv_sge sge;
+        ibv_send_wr wr;
+        uint32_t rsq = 1;
+      };
+
+      std::vector<QpPair> qp_pairs(kQpCount);
+
+      // Received QPN to local QP index map.
+      absl::flat_hash_map<uint32_t, uint32_t> qpn;
+
+      // Set up all loopback QP pairs.
+      for (int i = 0; i < kQpCount; ++i) {
+        qp_pairs[i].send_buffer = ibv_.AllocBuffer(kBufferPages);
+        qp_pairs[i].mr = ibv_.RegMr(setup.pd, qp_pairs[i].send_buffer);
+        ASSERT_NE(qp_pairs[i].mr, nullptr);
+        qp_pairs[i].sge = verbs_util::CreateSge(qp_pairs[i].send_buffer.span(),
+                                                qp_pairs[i].mr);
+        qp_pairs[i].wr =
+            verbs_util::CreateSendWr(0, &qp_pairs[i].sge, /*num_sge=*/1);
+
+        qp_pairs[i].send_cq = ibv_.CreateCq(setup.context, kRxQDepth);
+        ASSERT_NE(qp_pairs[i].send_cq, nullptr);
+
+        qp_pairs[i].send_qp = ibv_.CreateQp(
+            setup.pd, qp_pairs[i].send_cq, recv_cq, setup.srq, IBV_QPT_RC,
+            QpInitAttribute().set_max_send_wr(kRxQDepth).set_max_recv_wr(
+                kRxQDepth));
+        ASSERT_NE(qp_pairs[i].send_qp, nullptr);
+
+        qp_pairs[i].recv_qp = ibv_.CreateQp(
+            setup.pd, qp_pairs[i].send_cq, recv_cq, setup.srq, IBV_QPT_RC,
+            QpInitAttribute().set_max_send_wr(kRxQDepth).set_max_recv_wr(
+                kRxQDepth));
+        ASSERT_NE(qp_pairs[i].recv_qp, nullptr);
+
+        qpn[qp_pairs[i].recv_qp->qp_num] = i;
+
+        MessageData msg;
+        msg.seed = seed;
+        msg.seq_num = 0;
+        msg.rqp_num = qp_pairs[i].recv_qp->qp_num;
+        memcpy(qp_pairs[i].send_buffer.data(), &msg, sizeof(MessageData));
+
+        ASSERT_OK(ibv_.SetUpLoopbackRcQps(
+            qp_pairs[i].send_qp, qp_pairs[i].recv_qp, setup.port_attr));
+      }
+
+      // Flow control
+      std::atomic<uint32_t> tokens = kRxQDepth;
+
+      // Thread to wait for SRQ completions and repost them to the SRQ.
+      std::thread cq_thread([&]() {
+        for (int completions = 0; completions < kNumIters; ++completions) {
+          ASSERT_OK_AND_ASSIGN(
+              ibv_wc wc, verbs_util::WaitForCompletion(
+                             recv_cq, absl::Seconds(30), absl::ZeroDuration()));
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+
+          // Try to get the QP index from the WC QPN, but since we can't trust
+          // the WC, need to check that the QPN is valid.
+          const auto hqp_index = qpn.find(wc.qp_num);
+          ASSERT_NE(hqp_index, qpn.end());
+          const uint32_t qp_index = hqp_index->second;
+
+          // The upper bits of the wr_id should equal to random_seed.
+          // if not, then maybe this WR ID came from a different thread?
+          ASSERT_EQ(wc.wr_id & kSeedMask, seed);
+
+          const uint32_t buffer_index = wc.wr_id & ~kSeedMask;
+
+          MessageData msg;
+          memcpy(&msg, rx_bufs[buffer_index].buffer.data(),
+                 sizeof(MessageData));
+          ASSERT_EQ(msg.seed, seed);
+          ASSERT_EQ(msg.rqp_num, wc.qp_num);
+          ASSERT_EQ(msg.seq_num, qp_pairs[qp_index].rsq);
+
+          qp_pairs[qp_index].rsq++;
+
+          // Sanitize the buffer.
+          memset(rx_bufs[buffer_index].buffer.data(), 0, sizeof(MessageData));
+
+          verbs_util::PostSrqRecv(setup.srq, rx_bufs[buffer_index].wr);
+
+          tokens++;
+        }
+      });
+
+      for (int send = 0; send < kNumIters; send += kQpCount) {
+        for (int i = 0; i < kQpCount; ++i) {
+          while (!tokens) {
+            absl::SleepFor(absl::Microseconds(1));
+          }
+
+          MessageData msg;
+          memcpy(&msg, qp_pairs[i].send_buffer.data(), sizeof(MessageData));
+          msg.seq_num++;
+          memcpy(qp_pairs[i].send_buffer.data(), &msg, sizeof(MessageData));
+
+          verbs_util::PostSend(qp_pairs[i].send_qp, qp_pairs[i].wr);
+          tokens--;
+        }
+
+        for (int i = 0; i < kQpCount; ++i) {
+          ASSERT_OK_AND_ASSIGN(
+              ibv_wc wc, verbs_util::WaitForCompletion(qp_pairs[i].send_cq,
+                                                       absl::Seconds(3000),
+                                                       absl::ZeroDuration()));
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+        }
+      }
+
+      cq_thread.join();
     }));
   }
 

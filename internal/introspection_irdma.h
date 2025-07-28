@@ -52,7 +52,7 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"QpStateTest", "PostSendInit"}, ""},
         {{"QpStateTest", "PostSendRtr"}, ""},
         {{"QpStateTest", "PostSendReset"}, ""},
-        {{"QpStateTest", "PostSendErrConcurrent"}, ""},
+        {{"ThreadedWorkloadTest", "QpDestroyTargetWhileActive"}, ""},
         {{"LoopbackUdQpTest", "SendTrafficClass"}, ""},
         {{"AdvancedLoopbackTest", "RcSendToUd"}, ""},
         {{"AdvancedLoopbackTest", "UdSendToRc"}, ""},
