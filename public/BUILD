@@ -15,8 +15,6 @@
 # Public Interface for rdma unit tests:
 # Note: These are the target directly referenced by test fixtures and test cases.
 
-load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
-
 package(
     default_applicable_licenses = ["//:package_license"],
     default_testonly = True,

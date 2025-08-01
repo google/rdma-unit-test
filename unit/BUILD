@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//third_party/bazel_rules/rules_cc/cc:cc_binary.bzl", "cc_binary")
-load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
-load("//third_party/bazel_rules/rules_cc/cc:cc_test.bzl", "cc_test")
-
 # Description:
 #   Collection of typed test cases.
 #
@@ -483,34 +479,6 @@ cc_binary(
         ":stress_test_cc",
         ":threaded_test_cc",
         ":ud_test_cc",
-    ],
-)
-
-cc_binary(
-    name = "run_unit_static_link_test",
-    srcs = [],
-    # Required to build statically, see b/380811817 comment #23.
-    features = ["fully_static_link"],
-    deps = [
-        ":access_test_cc",
-        ":ah_test_cc",
-        ":buffer_test_cc",
-        ":comp_channel_test_cc",
-        ":cq_ex_test_cc",
-        ":cq_test_cc",
-        ":device_test_cc",
-        ":gunit_main",
-        ":hugepage_test_cc",
-        ":mr_test_cc",
-        ":mw_test_cc",
-        ":pd_test_cc",
-        ":qp_test_cc",
-        ":rc_test_cc",
-        ":srq_test_cc",
-        ":stress_test_cc",
-        ":threaded_test_cc",
-        ":ud_test_cc",
-        "//third_party/grte:static_libs",
     ],
 )
 
