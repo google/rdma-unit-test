@@ -37,7 +37,7 @@ RpcServer::RpcServer(std::shared_ptr<InboundUpdateInterface> client)
 grpc::Status RpcServer::Update(grpc::ServerContext* context,
                                const OrderedUpdateRequest* request,
                                UpdateResponse* response) {
-  absl::MutexLock guard(&mutex_);
+  absl::MutexLock guard(mutex_);
   DCHECK(client_);
   UpdateReorderQueue& reorder_queue = reorder_queues_[request->source_id()];
   reorder_queue.Push(request->sequence_number(), request->update());

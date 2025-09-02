@@ -108,7 +108,7 @@ void RandomWalkClient::RegisterUpdateDispatcher(
 }
 
 void RandomWalkClient::PushInboundUpdate(const ClientUpdate& update) {
-  absl::MutexLock guard(&mtx_in_updates_);
+  absl::MutexLock guard(mtx_in_updates_);
   CHECK_LT(inbound_updates_.size(), kMaxOustandingUpdates)  // Crash ok
       << "Too many outstanding inbound updates.";
   inbound_updates_.push_back(update);
@@ -1549,7 +1549,7 @@ void RandomWalkClient::PushOutboundUpdate(ClientUpdate& update) {
 }
 
 absl::optional<ClientUpdate> RandomWalkClient::PullInboundUpdate() {
-  absl::MutexLock guard(&mtx_in_updates_);
+  absl::MutexLock guard(mtx_in_updates_);
   if (inbound_updates_.empty()) {
     return absl::nullopt;
   }

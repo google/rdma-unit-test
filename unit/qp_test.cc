@@ -946,7 +946,9 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
 
   for (int i = 0; i < kNumCycles; ++i) {
     setup.local_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    ASSERT_NE(setup.local_qp, nullptr);
     setup.remote_qp = ibv_.CreateQp(setup.pd, setup.cq);
+    ASSERT_NE(setup.remote_qp, nullptr);
     ASSERT_OK(ibv_.SetUpLoopbackRcQps(setup.local_qp, setup.remote_qp,
                                       setup.port_attr));
 

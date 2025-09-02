@@ -461,4 +461,30 @@ TEST_F(CompChannelTest, UpgradeRequest) {
   ASSERT_NO_FATAL_FAILURE(ibv_ack_cq_events(setup.remote.cq, /*nevents=*/1));
 }
 
+TEST_F(CompChannelTest, NoSpuriousEvents) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+
+  // Arm, then perform transaction. An event should be generated.
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
+  ASSERT_FALSE(IsReady(setup.local.channel));
+  DoWrite(setup, setup.local.qp);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+  ASSERT_TRUE(IsReady(setup.local.channel));
+  ASSERT_NO_FATAL_FAILURE(CheckEvent(setup.local.channel, setup.local.cq));
+  ibv_ack_cq_events(setup.local.cq, /*nevents=*/1);
+
+  // Perform another transaction without arming. No event should be generated.
+  DoWrite(setup, setup.local.qp);
+  ASSERT_OK_AND_ASSIGN(completion,
+                       verbs_util::WaitForCompletion(setup.local.cq));
+  ASSERT_EQ(completion.status, IBV_WC_SUCCESS);
+
+  // Arm the CQ. No event should be generated because all completions have been
+  // processed and no more are expected.
+  ASSERT_EQ(ibv_req_notify_cq(setup.local.cq, kNotifyAny), 0);
+  ASSERT_FALSE(IsReady(setup.local.channel));
+}
+
 }  // namespace rdma_unit_test

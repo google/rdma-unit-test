@@ -349,9 +349,6 @@ absl::Duration GetSlowDownTimeout(absl::Duration timeout, uint64_t multiplier) {
   if (!multiplier) {
     LOG(ERROR) << "completion_wait_multiplier should be a positive value";
     multiplier = 1;
-  } else if (multiplier > 1) {
-    LOG(INFO) << "Excepted timeout: " << timeout
-              << ", multiplier: " << multiplier;
   }
   return timeout * multiplier;
 }
