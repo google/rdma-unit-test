@@ -219,9 +219,12 @@ TEST_F(DeviceLimitTest, MaxPd) {
   ASSERT_OK_AND_ASSIGN(ibv_context * context, ibv_.OpenDevice());
   int max_pd = Introspection().device_attr().max_pd;
   int actual_max = 0;
+  std::vector<ibv_pd*> pds;
   for (int i = 0; i < max_pd + kErrorMax + 10; ++i) {
-    if (ibv_.AllocPd(context) != nullptr) {
+    ibv_pd* pd = ibv_.AllocPd(context);
+    if (pd) {
       ++actual_max;
+      pds.push_back(pd);
     } else {
       break;
     }
@@ -229,6 +232,9 @@ TEST_F(DeviceLimitTest, MaxPd) {
   LOG(INFO) << "max_pd = " << max_pd;
   LOG(INFO) << "max_pd (actual) = " << actual_max;
   EXPECT_LE(std::abs(max_pd - actual_max), kErrorMax);
+  for (ibv_pd* pd : pds) {
+    ibv_.DeallocPd(pd);
+  }
 }
 
 TEST_F(DeviceLimitTest, MaxQp) {

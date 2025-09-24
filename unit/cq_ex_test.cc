@@ -221,8 +221,14 @@ class CqExOpTest : public BatchOpFixture {
     // Maps qp_num to the next wr_id.
     absl::flat_hash_map<uint32_t, uint64_t> expected_wr_id;
     expected_wr_id.insert({wc.qp_num, wc.wr_id + 1});
-    uint64_t last_timestamp_hcaclock = 0;
-    uint64_t last_timestamp_wallclock = 0;
+    absl::flat_hash_map<uint32_t, uint64_t> last_timestamp_hcaclock;
+    if (support_completion_timestamp_hcaclock_) {
+      last_timestamp_hcaclock.insert({wc.qp_num, wc.timestamp_hcaclock});
+    }
+    absl::flat_hash_map<uint32_t, uint64_t> last_timestamp_wallclock;
+    if (support_completion_timestamp_wallclock_) {
+      last_timestamp_wallclock.insert({wc.qp_num, wc.timestamp_wallclock});
+    }
     for (int i = 1; i < count; ++i) {
       ASSERT_OK(verbs_util::WaitForNextExtendedCompletion(cq));
       WcInfo wc = GetWcInfo(cq);
@@ -233,10 +239,21 @@ class CqExOpTest : public BatchOpFixture {
       } else {
         ASSERT_EQ(wc.wr_id, iter->second++);
       }
-      EXPECT_GE(wc.timestamp_hcaclock, last_timestamp_hcaclock);
-      EXPECT_GE(wc.timestamp_wallclock, last_timestamp_wallclock);
-      last_timestamp_hcaclock = wc.timestamp_hcaclock;
-      last_timestamp_wallclock = wc.timestamp_wallclock;
+      if (support_completion_timestamp_hcaclock_) {
+        auto hcaclock_iter = last_timestamp_hcaclock.find(wc.qp_num);
+        if (hcaclock_iter != last_timestamp_hcaclock.end()) {
+          EXPECT_GE(wc.timestamp_hcaclock, hcaclock_iter->second);
+        }
+        last_timestamp_hcaclock[wc.qp_num] = wc.timestamp_hcaclock;
+      }
+
+      if (support_completion_timestamp_wallclock_) {
+        auto wallclock_iter = last_timestamp_wallclock.find(wc.qp_num);
+        if (wallclock_iter != last_timestamp_wallclock.end()) {
+          EXPECT_GE(wc.timestamp_wallclock, wallclock_iter->second);
+        }
+        last_timestamp_wallclock[wc.qp_num] = wc.timestamp_wallclock;
+      }
     }
     ibv_end_poll(cq);
   }
