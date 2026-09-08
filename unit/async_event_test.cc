@@ -15,12 +15,16 @@
  */
 
 #include <algorithm>
+#include <thread>  // NOLINT
 #include <tuple>
 #include <utility>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/notification.h"
+#include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
 #include "public/introspection.h"
@@ -111,6 +115,43 @@ TEST_F(AsyncEventTest, WriteRKeyViolation) {
                        verbs_util::WaitForAsyncEvent(remote.context));
   EXPECT_EQ(event.event_type, IBV_EVENT_QP_ACCESS_ERR);
   EXPECT_EQ(event.element.qp, remote.qp);
+}
+
+TEST_F(AsyncEventTest, DeleteUnackedEvent) {
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  ibv_send_wr write = verbs_util::CreateWriteWr(
+      /*wr_id=*/1, &sge, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
+  // Change rkey to be invalid to cause IBV_EVENT_QP_ACCESS_ERR.
+  write.wr.rdma.rkey = 0xDEADBEEF;
+  verbs_util::PostSend(local.qp, write);
+  ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
+  ASSERT_OK_AND_ASSIGN(ibv_async_event event,
+                       verbs_util::WaitForAsyncEventWithoutAck(remote.context));
+  EXPECT_EQ(event.event_type, IBV_EVENT_QP_ACCESS_ERR);
+  EXPECT_EQ(event.element.qp, remote.qp);
+
+  absl::Notification destroy_started;
+  absl::Notification destroy_finished;
+  int destroy_result = -1;
+  std::thread destroy_thread(
+      [this, &remote, &destroy_started, &destroy_finished, &destroy_result]() {
+        destroy_started.Notify();
+        destroy_result = ibv_.DestroyQp(remote.qp);
+        destroy_finished.Notify();
+      });
+
+  destroy_started.WaitForNotification();
+  // Make sure the destroy is blocked on the unacked event
+  EXPECT_FALSE(
+      destroy_finished.WaitForNotificationWithTimeout(absl::Milliseconds(100)));
+  ibv_ack_async_event(&event);
+  destroy_finished.WaitForNotification();
+  destroy_thread.join();
+  EXPECT_EQ(destroy_result, 0);
 }
 
 }  // namespace

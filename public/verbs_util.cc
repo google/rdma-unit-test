@@ -446,8 +446,8 @@ void PrintCompletion(const ibv_wc& completion) {
   LOG(INFO) << "  qp_num = " << completion.qp_num;
 }
 
-absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
-                                                  absl::Duration timeout) {
+absl::StatusOr<ibv_async_event> WaitForAsyncEventWithoutAck(
+    ibv_context* context, absl::Duration timeout) {
   if (context->async_fd < 0) {
     return absl::FailedPreconditionError(
         absl::StrCat("Invalid context async_fd: ", context->async_fd));
@@ -471,7 +471,9 @@ absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
   };
   timeout =
       GetSlowDownTimeout(timeout, absl::GetFlag(FLAGS_other_wait_multiplier));
+retry:
   int poll_result = poll(&poll_fd, 1, absl::ToInt64Milliseconds(timeout));
+  if (poll_result == -1 && errno == EINTR) goto retry;
   if (poll_result < 0) {
     return absl::InternalError(absl::StrCat("Poll error: ", strerror(errno)));
   } else if (poll_result == 0) {
@@ -483,7 +485,6 @@ absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
     return absl::InternalError(
         absl::StrFormat("Failed to get async event (%d).", get_event_result));
   }
-  ibv_ack_async_event(&event);
   return event;
 }
 
@@ -630,6 +631,14 @@ absl::StatusOr<std::pair<ibv_wc_status, ibv_wc_status>> ExecuteSendRecv(
     EXPECT_EQ(IBV_WC_RECV, dst_completion.opcode);
   }
   return std::make_pair(src_completion.status, dst_completion.status);
+}
+
+absl::StatusOr<ibv_async_event> WaitForAsyncEvent(ibv_context* context,
+                                                  absl::Duration timeout) {
+  ASSIGN_OR_RETURN(ibv_async_event event,
+                   WaitForAsyncEventWithoutAck(context, timeout));
+  ibv_ack_async_event(&event);
+  return event;
 }
 
 absl::StatusOr<ibv_context*> OpenUntrackedDevice(

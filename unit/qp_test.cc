@@ -26,6 +26,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -906,42 +907,78 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
     kStopRequest,
     kLastBatch,
     kTerminateRequest,
+    kFatalError,
   } submitter_state = kIdle;
+
+  absl::Status last_batch_result;
 
   std::thread submission_thread([&]() {
     while (true) {
-      submitter_state_mutex.Lock();
-      submitter_state_mutex.Await(absl::Condition(
-          +[](SubmitterState* state) { return *state != kIdle; },
-          &submitter_state));
-      if (submitter_state == kStartRequest) {
-        submitter_state = kFirstBatch;
-      } else if (submitter_state == kFirstBatch) {
-        submitter_state = kSubmitting;
-      } else if (submitter_state == kStopRequest) {
-        submitter_state = kLastBatch;
-      } else if (submitter_state == kLastBatch) {
-        submitter_state = kIdle;
+      SubmitterState curr_state;
+      {
+        absl::MutexLock lock(
+            submitter_state_mutex,
+            absl::Condition(
+                +[](SubmitterState* state) { return *state != kIdle; },
+                &submitter_state));
+        if (submitter_state == kStartRequest) {
+          submitter_state = kFirstBatch;
+        } else if (submitter_state == kFirstBatch) {
+          submitter_state = kSubmitting;
+        } else if (submitter_state == kStopRequest) {
+          submitter_state = kLastBatch;
+        } else if (submitter_state == kLastBatch) {
+          submitter_state = kIdle;
+        }
+        curr_state = submitter_state;
       }
-      enum SubmitterState curr_state = submitter_state;
-      submitter_state_mutex.Unlock();
 
       if (curr_state == kFirstBatch) {
         // First batch should always succeed.
-        ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_SUCCESS}));
+        last_batch_result = BatchRead(setup, kReadBatchSize, {IBV_WC_SUCCESS});
+        if (!last_batch_result.ok()) {
+          absl::MutexLock lock(submitter_state_mutex);
+          submitter_state = kFatalError;
+          return;
+        }
       } else if (curr_state == kSubmitting) {
         // A transition into error can occur during subsequent batches,
         // so flush is a valid response.
-        ASSERT_OK(BatchRead(setup, kReadBatchSize,
-                            {IBV_WC_SUCCESS, IBV_WC_WR_FLUSH_ERR}));
+        last_batch_result =
+            BatchRead(setup, kReadBatchSize,
+                      {IBV_WC_SUCCESS, IBV_WC_WR_FLUSH_ERR, IBV_WC_FATAL_ERR});
+        if (!last_batch_result.ok()) {
+          absl::MutexLock lock(submitter_state_mutex);
+          submitter_state = kFatalError;
+          return;
+        }
       } else if (curr_state == kLastBatch) {
         // The QP is transitioned to error before the stop request, so
         // the last batch should fail with a flush error.
-        ASSERT_OK(BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR}));
+        last_batch_result =
+            BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR});
+        if (!last_batch_result.ok()) {
+          absl::MutexLock lock(submitter_state_mutex);
+          submitter_state = kFatalError;
+          return;
+        }
       } else if (curr_state == kTerminateRequest) {
         return;
       }
     }
+  });
+
+  absl::Cleanup thread_join([&submitter_state_mutex, &submitter_state,
+                             &submission_thread, &last_batch_result]() {
+    {
+      absl::MutexLock lock(submitter_state_mutex);
+      submitter_state = kTerminateRequest;
+    }
+    submission_thread.join();
+    if (!last_batch_result.ok())
+      GTEST_FAIL() << "Fatal error occurred while submitting requests. Last "
+                      "batch result: "
+                   << last_batch_result;
   });
 
   for (int i = 0; i < kNumCycles; ++i) {
@@ -953,33 +990,44 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
                                       setup.port_attr));
 
     // Start submitter.
-    submitter_state_mutex.Lock();
-    submitter_state = kStartRequest;
-    submitter_state_mutex.Await(absl::Condition(
-        +[](SubmitterState* state) { return *state == kSubmitting; },
-        &submitter_state));
-    submitter_state_mutex.Unlock();
+    {
+      absl::MutexLock lock(submitter_state_mutex);
+      submitter_state = kStartRequest;
+      submitter_state_mutex.Await(absl::Condition(
+          +[](SubmitterState* state) {
+            return *state == kSubmitting || *state == kFatalError;
+          },
+          &submitter_state));
+      if (submitter_state == kFatalError) {
+        return;
+      }
+    }
 
     // Transition to error while submitter is submitting.
     ASSERT_OK(ibv_.ModifyQpToError(setup.local_qp));
 
     // Stop submitter.
-    submitter_state_mutex.Lock();
-    submitter_state = kStopRequest;
-    submitter_state_mutex.Await(absl::Condition(
-        +[](SubmitterState* state) { return *state == kIdle; },
-        &submitter_state));
-    submitter_state_mutex.Unlock();
+    {
+      absl::MutexLock lock(submitter_state_mutex);
+      // Check if submitter_state has already transitioned into kFatalError
+      // before we update submitter_state.
+      if (submitter_state == kFatalError) {
+        return;
+      }
+      submitter_state = kStopRequest;
+      submitter_state_mutex.Await(absl::Condition(
+          +[](SubmitterState* state) {
+            return *state == kIdle || *state == kFatalError;
+          },
+          &submitter_state));
+      if (submitter_state == kFatalError) {
+        return;
+      }
+    }
 
     ibv_.DestroyQp(setup.local_qp);
     ibv_.DestroyQp(setup.remote_qp);
   }
-
-  submitter_state_mutex.Lock();
-  submitter_state = kTerminateRequest;
-  submitter_state_mutex.Unlock();
-
-  submission_thread.join();
 }
 
 TEST_F(QpStateTest, PostSendErrDelayed) {

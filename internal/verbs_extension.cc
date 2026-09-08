@@ -14,14 +14,30 @@
 
 #include "internal/verbs_extension.h"
 
+#include <cstdint>
+
+#include "absl/log/log.h"
 #include "infiniband/verbs.h"
 #include "public/rdma_memblock.h"
 
 namespace rdma_unit_test {
 
+using MemoryType = RdmaMemBlock::MemoryType;
+
 ibv_mr* VerbsExtension::RegMr(ibv_pd* pd, const RdmaMemBlock& memblock,
                               int access) {
-  return ibv_reg_mr(pd, memblock.data(), memblock.size(), access);
+  if (memblock.memory_type() == MemoryType::kHost) {
+    return ibv_reg_mr(pd, memblock.data(), memblock.size(), access);
+  } else if (memblock.memory_type() == MemoryType::kGpu) {
+    return ibv_reg_dmabuf_mr(
+        pd, /*offset=*/0, /*length=*/memblock.size(),
+        /*iova=*/reinterpret_cast<uint64_t>(memblock.data()),
+        /*fd=*/memblock.GetFd(), access);
+  } else {
+    LOG(ERROR) << "Unsupported memory type: "
+               << static_cast<int>(memblock.memory_type());
+    return nullptr;
+  }
 }
 
 int VerbsExtension::ReregMr(ibv_mr* mr, int flags, ibv_pd* pd,

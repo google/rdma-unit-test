@@ -32,10 +32,10 @@ void UpdateReorderQueue::Push(uint32_t sequence_number,
   map_util::InsertOrDie(reorder_queue_, sequence_number, update);
 }
 
-absl::optional<ClientUpdate> UpdateReorderQueue::Pull() {
+std::optional<ClientUpdate> UpdateReorderQueue::Pull() {
   auto iter = reorder_queue_.find(next_expected_sequence_number_);
   if (iter == reorder_queue_.end()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   ++next_expected_sequence_number_;
   ClientUpdate update = iter->second;

@@ -847,7 +847,7 @@ absl::StatusCode RandomWalkClient::TryDeallocType1Mw() {
     return absl::StatusCode::kFailedPrecondition;
   }
   bool deallocate_bound = absl::Bernoulli(bitgen_, 0.5);
-  absl::optional<ibv_mw*> mw_sample;
+  std::optional<ibv_mw*> mw_sample;
   if (deallocate_bound) {
     mw_sample = resource_manager_.GetRandomBoundType1Mw();
   } else {
@@ -867,7 +867,7 @@ absl::StatusCode RandomWalkClient::TryDeallocType2Mw() {
     return absl::StatusCode::kFailedPrecondition;
   }
   bool bound = absl::Bernoulli(bitgen_, 0.5);
-  absl::optional<ibv_mw*> mw_sample;
+  std::optional<ibv_mw*> mw_sample;
   if (bound) {
     mw_sample = resource_manager_.GetRandomBoundType2Mw();
   } else {
@@ -1548,10 +1548,10 @@ void RandomWalkClient::PushOutboundUpdate(ClientUpdate& update) {
   dispatcher_->DispatchUpdate(update);
 }
 
-absl::optional<ClientUpdate> RandomWalkClient::PullInboundUpdate() {
+std::optional<ClientUpdate> RandomWalkClient::PullInboundUpdate() {
   absl::MutexLock guard(mtx_in_updates_);
   if (inbound_updates_.empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   ClientUpdate update = inbound_updates_.front();
   inbound_updates_.pop_front();

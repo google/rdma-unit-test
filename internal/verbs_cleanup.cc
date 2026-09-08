@@ -72,57 +72,57 @@ void VerbsCleanup::MwDeleter(ibv_mw* mw) {
 }
 
 void VerbsCleanup::AddCleanup(ibv_context* context) {
-  absl::MutexLock guard(&mtx_contexts_);
+  absl::MutexLock guard(&mtx_contexts_);  // NOLINT
   contexts_.emplace(context, &ContextDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_comp_channel* channel) {
-  absl::MutexLock guard(&mtx_channels_);
+  absl::MutexLock guard(&mtx_channels_);  // NOLINT
   channels_.emplace(channel, &ChannelDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_cq* cq) {
-  absl::MutexLock guard(&mtx_cqs_);
+  absl::MutexLock guard(&mtx_cqs_);  // NOLINT
   cqs_.emplace(cq, &CqDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_cq_ex* cq) {
-  absl::MutexLock guard(&mtx_cqs_ex_);
+  absl::MutexLock guard(&mtx_cqs_ex_);  // NOLINT
   cqs_ex_.emplace(cq, &CqExDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_pd* pd) {
-  absl::MutexLock guard(&mtx_pds_);
+  absl::MutexLock guard(&mtx_pds_);  // NOLINT
   pds_.emplace(pd, &PdDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_ah* ah) {
-  absl::MutexLock guard(&mtx_ahs_);
+  absl::MutexLock guard(&mtx_ahs_);  // NOLINT
   ahs_.emplace(ah, &AhDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_srq* srq) {
-  absl::MutexLock guard(&mtx_srqs_);
+  absl::MutexLock guard(&mtx_srqs_);  // NOLINT
   srqs_.emplace(srq, &SrqDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_qp* qp) {
-  absl::MutexLock guard(&mtx_qps_);
+  absl::MutexLock guard(&mtx_qps_);  // NOLINT
   qps_.emplace(qp, &QpDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_mr* mr) {
-  absl::MutexLock guard(&mtx_mrs_);
+  absl::MutexLock guard(&mtx_mrs_);  // NOLINT
   mrs_.emplace(mr, &MrDeleter);
 }
 
 void VerbsCleanup::AddCleanup(ibv_mw* mw) {
-  absl::MutexLock guard(&mtx_mws_);
+  absl::MutexLock guard(&mtx_mws_);  // NOLINT
   mws_.emplace(mw, &MwDeleter);
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_context* context) {
-  absl::MutexLock guard(&mtx_contexts_);
+  absl::MutexLock guard(&mtx_contexts_);  // NOLINT
   auto node = contexts_.extract(context);
   ASSERT_TRUE(!node.empty());
   ibv_context* found = node.value().release();
@@ -130,7 +130,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_context* context) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_comp_channel* channel) {
-  absl::MutexLock guard(&mtx_channels_);
+  absl::MutexLock guard(&mtx_channels_);  // NOLINT
   auto node = channels_.extract(channel);
   ASSERT_TRUE(!node.empty());
   ibv_comp_channel* found = node.value().release();
@@ -138,7 +138,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_comp_channel* channel) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_cq* cq) {
-  absl::MutexLock guard(&mtx_cqs_);
+  absl::MutexLock guard(&mtx_cqs_);  // NOLINT
   auto node = cqs_.extract(cq);
   ASSERT_TRUE(!node.empty());
   ibv_cq* found = node.value().release();
@@ -146,7 +146,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_cq* cq) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_cq_ex* cq) {
-  absl::MutexLock guard(&mtx_cqs_ex_);
+  absl::MutexLock guard(&mtx_cqs_ex_);  // NOLINT
   auto node = cqs_ex_.extract(cq);
   ASSERT_TRUE(!node.empty());
   ibv_cq_ex* found = node.value().release();
@@ -154,7 +154,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_cq_ex* cq) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_pd* pd) {
-  absl::MutexLock guard(&mtx_pds_);
+  absl::MutexLock guard(&mtx_pds_);  // NOLINT
   auto node = pds_.extract(pd);
   ASSERT_TRUE(!node.empty());
   ibv_pd* found = node.value().release();
@@ -162,7 +162,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_pd* pd) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_ah* ah) {
-  absl::MutexLock guard(&mtx_ahs_);
+  absl::MutexLock guard(&mtx_ahs_);  // NOLINT
   auto node = ahs_.extract(ah);
   ASSERT_TRUE(!node.empty());
   ibv_ah* found = node.value().release();
@@ -170,7 +170,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_ah* ah) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_srq* srq) {
-  absl::MutexLock guard(&mtx_srqs_);
+  absl::MutexLock guard(&mtx_srqs_);  // NOLINT
   auto node = srqs_.extract(srq);
   ASSERT_TRUE(!node.empty());
   ibv_srq* found = node.value().release();
@@ -178,7 +178,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_srq* srq) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_qp* qp) {
-  absl::MutexLock guard(&mtx_qps_);
+  absl::MutexLock guard(&mtx_qps_);  // NOLINT
   auto node = qps_.extract(qp);
   ASSERT_TRUE(!node.empty());
   ibv_qp* found = node.value().release();
@@ -186,7 +186,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_qp* qp) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_mr* mr) {
-  absl::MutexLock guard(&mtx_mrs_);
+  absl::MutexLock guard(&mtx_mrs_);  // NOLINT
   auto node = mrs_.extract(mr);
   ASSERT_TRUE(!node.empty());
   ibv_mr* found = node.value().release();
@@ -194,7 +194,7 @@ void VerbsCleanup::ReleaseCleanup(ibv_mr* mr) {
 }
 
 void VerbsCleanup::ReleaseCleanup(ibv_mw* mw) {
-  absl::MutexLock guard(&mtx_mws_);
+  absl::MutexLock guard(&mtx_mws_);  // NOLINT
   auto node = mws_.extract(mw);
   ASSERT_TRUE(!node.empty());
   ibv_mw* found = node.value().release();

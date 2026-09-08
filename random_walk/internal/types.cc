@@ -18,7 +18,6 @@
 
 #include <cstdint>
 
-#include <magic_enum.hpp>
 
 namespace rdma_unit_test {
 namespace random_walk {

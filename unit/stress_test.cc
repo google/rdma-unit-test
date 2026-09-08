@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <cstdint>
+#include <queue>
+#include <thread>  // NOLINT
 #include <vector>
 
 #include "gmock/gmock.h"
@@ -26,6 +29,7 @@
 #include "absl/types/span.h"
 #include "infiniband/verbs.h"
 #include "internal/verbs_attribute.h"
+#include "public/introspection.h"
 #include "public/rdma_memblock.h"
 
 #include "public/status_matchers.h"
@@ -205,6 +209,347 @@ class StressTest : public RdmaVerbsFixture {
     LOG(INFO) << "Total completion: " << total_completion;
     EXPECT_EQ(total_issued_ops, total_completion);
   }
+
+  void RunAtomicFetchAddCpuRdmaRace(
+      std::vector<BasicSetup>& setups,
+      const std::vector<std::vector<QpPair>>& all_qps,
+      const std::vector<std::vector<ibv_cq*>>& all_cqs, int num_cpu_threads,
+      absl::Duration test_duration, int backlog_size) {
+    int num_nics = setups.size();
+
+    // Set up shared atomic counter memory on NIC 0 and register on remaining
+    // NICs
+    ASSERT_OK_AND_ASSIGN(Memory base_counter, CreateMemory(setups[0], 8));
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(base_counter.buffer.data()) %
+                  alignof(std::atomic<uint64_t>),
+              0)
+        << "RDMA atomic operations and std::atomic require proper alignment.";
+
+    std::vector<ibv_mr*> counter_mrs;
+    counter_mrs.push_back(base_counter.mr);
+    for (int n = 1; n < num_nics; ++n) {
+      ibv_mr* mr =
+          ibv_.RegMr(setups[n].pd, base_counter.buffer,
+                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+      ASSERT_THAT(mr, NotNull());
+      counter_mrs.push_back(mr);
+    }
+
+    std::atomic<uint64_t>* cpu_counter =
+        reinterpret_cast<std::atomic<uint64_t>*>(base_counter.buffer.data());
+    *cpu_counter = 0;
+
+    std::vector<Memory> fetch_mems;
+    std::vector<ibv_qp*> qp_list;
+    std::vector<ibv_cq*> cq_list;
+    std::vector<uint32_t> rkeys;
+    for (int n = 0; n < num_nics; ++n) {
+      for (int i = 0; i < all_qps[n].size(); ++i) {
+        ASSERT_OK_AND_ASSIGN(Memory fetch_mem, CreateMemory(setups[n], 8));
+        fetch_mems.push_back(fetch_mem);
+        qp_list.push_back(all_qps[n][i].requestor);
+        cq_list.push_back(all_cqs[n][i]);
+        rkeys.push_back(counter_mrs[n]->rkey);
+      }
+    }
+    int num_rdma_threads_total = qp_list.size();
+
+    std::vector<uint64_t> cpu_additions(num_cpu_threads, 0);
+    std::vector<uint64_t> rdma_additions(num_rdma_threads_total, 0);
+
+    LOG(INFO) << "Starting mixed CPU/RDMA fetch-and-add test across "
+              << num_nics << " NICs with " << num_cpu_threads
+              << " CPU threads and " << num_rdma_threads_total
+              << " RDMA threads running for " << test_duration;
+
+    absl::Time start_time = absl::Now();
+
+    // CPU Worker: Bashing the counter via standard C++ atomics
+    auto cpu_worker = [&](int thread_id) {
+      while ((absl::Now() - start_time) < test_duration) {
+        cpu_counter->fetch_add(1, std::memory_order_seq_cst);
+        cpu_additions[thread_id]++;
+      }
+    };
+
+    // RDMA Worker: Bashing the same counter via PCIe atomics
+    auto rdma_worker = [&](int thread_id) {
+      int outstanding_ops = 0;
+      ibv_sge sge = verbs_util::CreateSge(
+          fetch_mems[thread_id].buffer.subspan(0, 8), fetch_mems[thread_id].mr);
+      uint64_t posted_ops = 0;
+
+      while ((absl::Now() - start_time) < test_duration) {
+        // Post operations until backlog is full
+        while (outstanding_ops < backlog_size) {
+          ibv_send_wr wr = verbs_util::CreateFetchAddWr(
+              /*wr_id=*/posted_ops, &sge, /*num_sge=*/1,
+              base_counter.buffer.data(), rkeys[thread_id],
+              /*compare_add=*/1);
+          verbs_util::PostSend(qp_list[thread_id], wr);
+          outstanding_ops++;
+          posted_ops++;
+        }
+
+        ibv_wc wc;
+        int num_polled =
+            ibv_poll_cq(cq_list[thread_id], /*num_entries=*/1, &wc);
+        if (num_polled > 0) {
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          outstanding_ops--;
+          rdma_additions[thread_id]++;
+        }
+      }
+
+      // Drain any remaining ops
+      while (outstanding_ops > 0) {
+        ibv_wc wc;
+        int num_polled = ibv_poll_cq(cq_list[thread_id], 1, &wc);
+        if (num_polled > 0) {
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          outstanding_ops--;
+          rdma_additions[thread_id]++;
+        }
+      }
+    };
+
+    // Launch the race
+    std::vector<std::thread> cpu_thread_pool;
+    std::vector<std::thread> rdma_thread_pool;
+    for (int i = 0; i < num_cpu_threads; ++i) {
+      cpu_thread_pool.emplace_back(cpu_worker, i);
+    }
+    for (int i = 0; i < num_rdma_threads_total; ++i) {
+      rdma_thread_pool.emplace_back(rdma_worker, i);
+    }
+
+    for (auto& t : cpu_thread_pool) t.join();
+    for (auto& t : rdma_thread_pool) t.join();
+
+    uint64_t total_successes = 0;
+    for (int i = 0; i < num_cpu_threads; ++i) {
+      total_successes += cpu_additions[i];
+    }
+    for (int i = 0; i < num_rdma_threads_total; ++i) {
+      total_successes += rdma_additions[i];
+    }
+
+    uint64_t final_val = cpu_counter->load();
+
+    LOG(INFO) << "Final Mixed Atomic Counter: " << final_val
+              << " | Expected (total successes): " << total_successes;
+
+    if (num_cpu_threads > 0) {
+      uint64_t cpu_sum = 0;
+      for (uint64_t count : cpu_additions) cpu_sum += count;
+      LOG(INFO) << "Average successful additions per CPU thread: "
+                << static_cast<double>(cpu_sum) / num_cpu_threads;
+    }
+    if (num_rdma_threads_total > 0) {
+      uint64_t rdma_sum = 0;
+      for (uint64_t count : rdma_additions) rdma_sum += count;
+      LOG(INFO) << "Average successful additions per RDMA thread: "
+                << static_cast<double>(rdma_sum) / num_rdma_threads_total;
+    }
+
+    EXPECT_EQ(final_val, total_successes)
+        << "Read-Modify-Write race detected! "
+        << "The environment truly enforces IBV_ATOMIC_HCA (NIC-only coherence) "
+        << "and drops atomicity when interacting with CPU operations.";
+  }
+
+  void RunAtomicCmpAndSwapCpuRdmaRace(
+      std::vector<BasicSetup>& setups,
+      const std::vector<std::vector<QpPair>>& all_qps,
+      const std::vector<std::vector<ibv_cq*>>& all_cqs, int num_cpu_threads,
+      int max_outstanding, absl::Duration test_duration) {
+    int num_nics = setups.size();
+
+    // Set up shared atomic counter memory
+    ASSERT_OK_AND_ASSIGN(Memory base_counter, CreateMemory(setups[0], 8));
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(base_counter.buffer.data()) %
+                  alignof(std::atomic<uint64_t>),
+              0)
+        << "RDMA atomic operations and std::atomic require proper alignment.";
+
+    std::vector<ibv_mr*> counter_mrs;
+    counter_mrs.push_back(base_counter.mr);
+    for (int n = 1; n < num_nics; ++n) {
+      ibv_mr* mr =
+          ibv_.RegMr(setups[n].pd, base_counter.buffer,
+                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+      ASSERT_THAT(mr, NotNull());
+      counter_mrs.push_back(mr);
+    }
+
+    std::atomic<uint64_t>* cpu_counter =
+        reinterpret_cast<std::atomic<uint64_t>*>(base_counter.buffer.data());
+    *cpu_counter = 0;
+
+    std::vector<Memory> fetch_mems;
+    std::vector<ibv_qp*> qp_list;
+    std::vector<ibv_cq*> cq_list;
+    std::vector<uint32_t> rkeys;
+
+    for (int n = 0; n < num_nics; ++n) {
+      for (int i = 0; i < all_qps[n].size(); ++i) {
+        ASSERT_OK_AND_ASSIGN(Memory fetch_mem,
+                             CreateMemory(setups[n], 8 * max_outstanding));
+        uint64_t* fetch_vals =
+            reinterpret_cast<uint64_t*>(fetch_mem.buffer.data());
+        for (int k = 0; k < max_outstanding; ++k) {
+          fetch_vals[k] = 0;
+        }
+        fetch_mems.push_back(fetch_mem);
+        qp_list.push_back(all_qps[n][i].requestor);
+        cq_list.push_back(all_cqs[n][i]);
+        rkeys.push_back(counter_mrs[n]->rkey);
+      }
+    }
+    int num_rdma_threads_total = qp_list.size();
+
+    std::vector<uint64_t> cpu_additions(num_cpu_threads, 0);
+    std::vector<uint64_t> rdma_additions(num_rdma_threads_total, 0);
+
+    LOG(INFO) << "Starting mixed CPU/RDMA compare-and-swap test across "
+              << num_nics << " NICs with " << num_cpu_threads
+              << " CPU threads and " << num_rdma_threads_total
+              << " RDMA threads running for " << test_duration;
+
+    absl::Time start_time = absl::Now();
+
+    auto cpu_worker = [&](int thread_id) {
+      uint64_t expected = cpu_counter->load(std::memory_order_relaxed);
+      while ((absl::Now() - start_time) < test_duration) {
+        // Ensure we succeed once before sleeping.
+        while (!cpu_counter->compare_exchange_strong(
+            expected, expected + 1, std::memory_order_seq_cst)) {
+          if ((absl::Now() - start_time) >= test_duration) return;
+        }
+        cpu_additions[thread_id]++;
+        expected = expected + 1;
+        // Need to sleep to reduce starvation on the RDMA thread.
+        absl::SleepFor(absl::Milliseconds(10));
+      }
+    };
+
+    auto rdma_worker = [&](int thread_id) {
+      int outstanding_ops = 0;
+      uint64_t assumed_value = 0;
+      uint64_t* fetched_values =
+          reinterpret_cast<uint64_t*>(fetch_mems[thread_id].buffer.data());
+
+      std::vector<ibv_sge> sges(max_outstanding);
+      for (int i = 0; i < max_outstanding; ++i) {
+        sges[i] = verbs_util::CreateSge(
+            fetch_mems[thread_id].buffer.subspan(i * 8, 8),
+            fetch_mems[thread_id].mr);
+      }
+
+      int next_post_idx = 0;
+      std::queue<uint64_t> posted_assumes;
+
+      while ((absl::Now() - start_time) < test_duration) {
+        if (outstanding_ops < max_outstanding) {
+          ibv_send_wr wr = verbs_util::CreateCompSwapWr(
+              /*wr_id=*/next_post_idx, &sges[next_post_idx], /*num_sge=*/1,
+              base_counter.buffer.data(), rkeys[thread_id], assumed_value,
+              assumed_value + 1);
+          verbs_util::PostSend(qp_list[thread_id], wr);
+          posted_assumes.push(assumed_value);
+          assumed_value++;
+          outstanding_ops++;
+          next_post_idx = (next_post_idx + 1) % max_outstanding;
+        }
+
+        ibv_wc wc;
+        // Poll for completions if we are at the limit, or opportunistically
+        // otherwise. But to avoid blocking we just poll 1.
+        int num_polled =
+            ibv_poll_cq(cq_list[thread_id], /*num_entries=*/1, &wc);
+        if (num_polled > 0) {
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          outstanding_ops--;
+
+          int polled_idx = wc.wr_id;
+          uint64_t actual_value = fetched_values[polled_idx];
+          uint64_t polled_assume = posted_assumes.front();
+          posted_assumes.pop();
+
+          if (actual_value == polled_assume) {
+            rdma_additions[thread_id]++;
+          } else {
+            assumed_value = actual_value;
+          }
+        }
+      }
+
+      // Drain any remaining ops
+      while (outstanding_ops > 0) {
+        ibv_wc wc;
+        int num_polled = ibv_poll_cq(cq_list[thread_id], 1, &wc);
+        if (num_polled > 0) {
+          ASSERT_EQ(wc.status, IBV_WC_SUCCESS);
+          outstanding_ops--;
+
+          int polled_idx = wc.wr_id;
+          uint64_t actual_value = fetched_values[polled_idx];
+          uint64_t polled_assume = posted_assumes.front();
+          posted_assumes.pop();
+
+          if (actual_value == polled_assume) {
+            rdma_additions[thread_id]++;
+          } else {
+            assumed_value = actual_value;
+          }
+        }
+      }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_cpu_threads; ++i) {
+      threads.emplace_back(cpu_worker, i);
+    }
+    for (int i = 0; i < num_rdma_threads_total; ++i) {
+      threads.emplace_back(rdma_worker, i);
+    }
+
+    for (auto& t : threads) {
+      t.join();
+    }
+
+    uint64_t total_successes = 0;
+    for (int i = 0; i < num_cpu_threads; ++i) {
+      total_successes += cpu_additions[i];
+    }
+    for (int i = 0; i < num_rdma_threads_total; ++i) {
+      total_successes += rdma_additions[i];
+    }
+
+    uint64_t final_val = cpu_counter->load();
+
+    LOG(INFO) << "Final Mixed Atomic Counter: " << final_val
+              << " | Expected (total successes): " << total_successes;
+
+    if (num_cpu_threads > 0) {
+      uint64_t cpu_sum = 0;
+      for (uint64_t count : cpu_additions) cpu_sum += count;
+      LOG(INFO) << "Average successful additions per CPU thread: "
+                << static_cast<double>(cpu_sum) / num_cpu_threads;
+    }
+    if (num_rdma_threads_total > 0) {
+      uint64_t rdma_sum = 0;
+      for (uint64_t count : rdma_additions) rdma_sum += count;
+      LOG(INFO) << "Average successful additions per RDMA thread: "
+                << static_cast<double>(rdma_sum) / num_rdma_threads_total;
+    }
+
+    EXPECT_EQ(final_val, total_successes)
+        << "Compare-And-Swap race detected! "
+        << "The environment dropped atomicity when interacting with CPU ops.";
+  }
 };
 
 TEST_F(StressTest, Write32B100Qp100kOps) {
@@ -219,6 +564,125 @@ TEST_F(StressTest, Write32B100Qp100kOps) {
                        CreateQpPairs(setup, kNumQps, kMaxOutstanding + 10, cq));
   ASSERT_NO_FATAL_FAILURE(ClosedLoopWorkLoadRoundRobin(
       setup, qps, cq, IBV_WR_RDMA_WRITE, kTotalOps, kMaxOutstanding, kOpsSize));
+}
+
+TEST_F(StressTest, AtomicFetchAddCpuRdmaRace) {
+  std::vector<ibv_context*> contexts;
+  ASSERT_OK(ibv_.OpenAllDevices(contexts));
+
+  bool global_atomic_supported = true;
+  for (ibv_context* context : contexts) {
+    ibv_device_attr attr;
+    if (ibv_query_device(context, &attr) != 0 ||
+        attr.atomic_cap != IBV_ATOMIC_GLOB) {
+      global_atomic_supported = false;
+      break;
+    }
+  }
+
+  if (!global_atomic_supported) {
+    GTEST_SKIP() << "Skipping atomic stress test because global atomic is not "
+                    "supported by all HCAs.";
+  }
+
+  if (auto issue = Introspection().KnownIssue(); issue.has_value()) {
+    GTEST_SKIP() << "Skipping atomic stress test due to known issue: "
+                 << *issue;
+  }
+  constexpr int kNumQps = 20;
+  constexpr int kNumCpuThreads = 20;
+  constexpr int kBacklogSize = 1000;
+  const absl::Duration kTestDuration =
+      Introspection().IsSlowNic() ? absl::Seconds(3) : absl::Seconds(10);
+
+  std::vector<BasicSetup> setups;
+  std::vector<std::vector<QpPair>> all_qps;
+  std::vector<std::vector<ibv_cq*>> all_cqs;
+
+  for (ibv_context* context : contexts) {
+    BasicSetup setup;
+    setup.context = context;
+    setup.port_attr = ibv_.GetPortAttribute(context);
+    setup.pd = ibv_.AllocPd(context);
+    ASSERT_THAT(setup.pd, NotNull());
+    setups.push_back(setup);
+
+    std::vector<ibv_cq*> cqs;
+    std::vector<QpPair> qps;
+    for (int i = 0; i < kNumQps; ++i) {
+      ibv_cq* cq = ibv_.CreateCq(setup.context, kBacklogSize + 10);
+      ASSERT_THAT(cq, NotNull());
+      cqs.push_back(cq);
+      ASSERT_OK_AND_ASSIGN(std::vector<QpPair> qp_pair,
+                           CreateQpPairs(setup, 1, kBacklogSize + 10, cq));
+      qps.push_back(qp_pair[0]);
+    }
+    all_cqs.push_back(cqs);
+    all_qps.push_back(qps);
+  }
+
+  ASSERT_NO_FATAL_FAILURE(RunAtomicFetchAddCpuRdmaRace(
+      setups, all_qps, all_cqs, kNumCpuThreads, kTestDuration, kBacklogSize));
+}
+
+TEST_F(StressTest, AtomicCmpAndSwapCpuRdmaRace) {
+  std::vector<ibv_context*> contexts;
+  ASSERT_OK(ibv_.OpenAllDevices(contexts));
+
+  bool global_atomic_supported = true;
+  for (ibv_context* context : contexts) {
+    ibv_device_attr attr;
+    if (ibv_query_device(context, &attr) != 0 ||
+        attr.atomic_cap != IBV_ATOMIC_GLOB) {
+      global_atomic_supported = false;
+      break;
+    }
+  }
+
+  if (!global_atomic_supported) {
+    GTEST_SKIP() << "Skipping atomic stress test because global atomic is not "
+                    "supported by all HCAs.";
+  }
+
+  if (auto issue = Introspection().KnownIssue(); issue.has_value()) {
+    GTEST_SKIP() << "Skipping atomic stress test due to known issue: "
+                 << *issue;
+  }
+  constexpr int kNumQps = 20;
+  constexpr int kNumCpuThreads = 1;
+  constexpr int kMaxOutstanding = 100;
+  const absl::Duration kTestDuration =
+      Introspection().IsSlowNic() ? absl::Seconds(3) : absl::Seconds(10);
+
+  std::vector<BasicSetup> setups;
+  std::vector<std::vector<QpPair>> all_qps;
+  std::vector<std::vector<ibv_cq*>> all_cqs;
+
+  for (ibv_context* context : contexts) {
+    BasicSetup setup;
+    setup.context = context;
+    setup.port_attr = ibv_.GetPortAttribute(context);
+    setup.pd = ibv_.AllocPd(context);
+    ASSERT_THAT(setup.pd, NotNull());
+    setups.push_back(setup);
+
+    std::vector<ibv_cq*> cqs;
+    std::vector<QpPair> qps;
+    for (int i = 0; i < kNumQps; ++i) {
+      ibv_cq* cq = ibv_.CreateCq(setup.context, kMaxOutstanding + 10);
+      ASSERT_THAT(cq, NotNull());
+      cqs.push_back(cq);
+      ASSERT_OK_AND_ASSIGN(std::vector<QpPair> qp_pair,
+                           CreateQpPairs(setup, 1, kMaxOutstanding + 10, cq));
+      qps.push_back(qp_pair[0]);
+    }
+    all_cqs.push_back(cqs);
+    all_qps.push_back(qps);
+  }
+
+  ASSERT_NO_FATAL_FAILURE(
+      RunAtomicCmpAndSwapCpuRdmaRace(setups, all_qps, all_cqs, kNumCpuThreads,
+                                     kMaxOutstanding, kTestDuration));
 }
 
 }  // namespace rdma_unit_test

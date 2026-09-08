@@ -162,7 +162,6 @@ cc_library(
     name = "types",
     srcs = ["types.cc"],
     hdrs = ["types.h"],
-    deps = ["@magic_enum"],
 )
 
 cc_library(

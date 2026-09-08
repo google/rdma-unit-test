@@ -63,10 +63,10 @@ class IntrospectionMlx5 : public NicIntrospection {
         // Will hang.
         {{"CompChannelTest", "AcknowledgeTooMany"}, ""},
         // Allows invalid SGE size for atomics.
-        {{"LoopbackRcQpTest", "FetchAddInvalidSize"}, ""},
-        {{"LoopbackRcQpTest", "FetchAddSmallSge"}, ""},
-        {{"LoopbackRcQpTest", "FetchAddLargeSge"}, ""},
-        {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, ""},
+        {{"LoopbackRcQpTest", "AtomicFetchAddInvalidSize"}, ""},
+        {{"LoopbackRcQpTest", "AtomicFetchAddSmallSge"}, ""},
+        {{"LoopbackRcQpTest", "AtomicFetchAddLargeSge"}, ""},
+        {{"LoopbackRcQpTest", "AtomicCompareSwapInvalidSize"}, ""},
         // Fails to send completion when qp in error state.
         {{"LoopbackRcQpTest", "ReqestOnFailedQp"}, ""},
         // No completions when remote in error state.
@@ -79,10 +79,10 @@ class IntrospectionMlx5 : public NicIntrospection {
         {{"LoopbackRcQpTest", "WriteRemoteQpInErrorState"},
          "Provider does not generate local completion when remote is in error "
          "state."},
-        {{"LoopbackRcQpTest", "FetchAddRemoteQpInErrorState"},
+        {{"LoopbackRcQpTest", "AtomicFetchAddRemoteQpInErrorState"},
          "Provider does not generate local completion when remote is in error "
          "state."},
-        {{"LoopbackRcQpTest", "CompareSwapRemoteQpInErrorState"},
+        {{"LoopbackRcQpTest", "AtomicCompareSwapRemoteQpInErrorState"},
          "Provider does not generate local completion when remote is in error "
          "state."},
         {{"MwType1Test", "UnsignaledBindError"},
@@ -91,9 +91,21 @@ class IntrospectionMlx5 : public NicIntrospection {
          "Undiagnosed error: provider does not emit completion."},
         // Allows creation over device cap.
         {{"QpTest", "ExceedsDeviceCap"}, ""},
+        {{"QpStateTest", "PostSendReset"},
+         "Provider returns early error when posting to QP in non-RTS state."},
+        {{"QpStateTest", "PostRecvReset"},
+         "Provider returns early error when posting to QP in non-RTS state."},
+        {{"QpStateTest", "PostSendInit"},
+         "Provider returns early error when posting to QP in non-RTS state."},
+        {{"QpStateTest", "PostSendRtr"},
+         "Provider returns early error when posting to QP in non-RTS state."},
         {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
         {{"RdmaAccessTest", "ZeroBasedAccess"},
          "Mlx does not appear to support zero based access. b/397912012"},
+        {{"StressTest", "AtomicFetchAddCpuRdmaRace"},
+         "Hardware does not support CPU-NIC-coherent RDMA atomics."},
+        {{"StressTest", "AtomicCmpAndSwapCpuRdmaRace"},
+         "Hardware does not support CPU-NIC-coherent RDMA atomics."},
     };
     return deviations;
   }

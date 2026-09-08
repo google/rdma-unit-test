@@ -37,8 +37,13 @@ namespace rdma_unit_test {
 // size and alignment. The buffer presented will occur at the proper alignment.
 // NOTE: When using huge pages the length will be forced to align to the page
 // size, as it is required by mmap and munmap.
+// This class only represents host memory. GPU memory is represented by
+// GpuRdmaMemBlock.
 class RdmaMemBlock {
  public:
+  // The type of memory to allocate, host or GPU.
+  enum class MemoryType { kHost, kGpu };
+
   RdmaMemBlock() = default;
   // Creates a new memory region with the specified alignment and length in
   // elements. The underlying allocation will be extended to a page size
@@ -49,6 +54,7 @@ class RdmaMemBlock {
   // Allow copy constructor, the underlying filememblock is a shared pointer.
   RdmaMemBlock(const RdmaMemBlock&) = default;
   RdmaMemBlock& operator=(const RdmaMemBlock&) = default;
+
   ~RdmaMemBlock() = default;
 
   // Returns the backing file descriptor. Ownership is not transferred to the
@@ -84,14 +90,27 @@ class RdmaMemBlock {
   // file backed memory.
   RdmaMemBlock subblock(size_t offset, size_t size) const;
 
- private:
+  MemoryType memory_type() const { return memblock_->memory_type; }
+
+ protected:
   struct MemBlock {
     // The memfd used for the shared memory.
     int fd;
     // Defines the range of the allocated memory.
     absl::Span<uint8_t> buffer;
+    // The type of memory that this block represents. Defaults to host memory.
+    MemoryType memory_type = MemoryType::kHost;
   };
 
+  // Maintain a span to encapsulate the alignment/size of the requested
+  // buffer.
+  absl::Span<uint8_t> span_;
+
+  // Underlying file backed memory. Defined as a shared ptr to deallocate
+  // the memory block when there are no more references.
+  std::shared_ptr<MemBlock> memblock_;
+
+ private:
   // In several syscalls such as fallocate we have to retry an operation that
   // receives EINTR, but this really shouldn't happen very often, so the failure
   // becomes fatal after this many retries, so this constant should be large
@@ -104,20 +123,12 @@ class RdmaMemBlock {
   static std::shared_ptr<MemBlock> Create(size_t size,
                                           bool use_huge_page = false);
 
-  // Custom deleters to cleanup fd's and shared memory.
+  // Custom deleters to cleanup fd's and shared memory. Only for kHost memory.
   static void MemBlockDeleter(MemBlock* memblock);
 
   // Offset into the original file backed memory that this buffer is allocated
-  // to.
+  // to. Only for kHost memory.
   size_t offset_;
-
-  // Maintain a span to encapsulate the alignment/size of the requested
-  // buffer.
-  absl::Span<uint8_t> span_;
-
-  // Underlying file backed memory. Defined as a shared ptr to deallocate
-  // the memory block when there are no more references.
-  std::shared_ptr<MemBlock> memblock_;
 };
 std::ostream& operator<<(std::ostream& os, const RdmaMemBlock& block);
 

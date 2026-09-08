@@ -47,7 +47,7 @@ class IntrospectionIrdma : public NicIntrospection {
   const absl::flat_hash_map<TestcaseKey, std::string>& GetDeviations()
       const override {
     static const absl::flat_hash_map<TestcaseKey, std::string> deviations{
-        {{"LoopbackRcQpTest", "CompareSwapInvalidSize"}, ""},
+        {{"LoopbackRcQpTest", "AtomicCompareSwapInvalidSize"}, ""},
         {{"QpStateTest", "ReuseQp"}, ""},
         {{"QpStateTest", "PostSendInit"}, ""},
         {{"QpStateTest", "PostSendRtr"}, ""},
@@ -56,7 +56,8 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"LoopbackUdQpTest", "SendTrafficClass"}, ""},
         {{"AdvancedLoopbackTest", "RcSendToUd"}, ""},
         {{"AdvancedLoopbackTest", "UdSendToRc"}, ""},
-        {{"LoopbackRcQpTest", "FetchAddSplitSgl"}, "b/197723945#comment5"},
+        {{"LoopbackRcQpTest", "AtomicFetchAddSplitSgl"},
+         "b/197723945#comment5"},
         {{"CompChannelTest", "RequestNotificationInvalidCq"}, ""},
         {{"CompChannelTest", "RequestNotificationOnCqWithoutCompChannel"},
          ""},
@@ -65,6 +66,9 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"QpPostTest", "OverflowSendWr"}, ""},
         {{"SrqTest", "ExceedDeviceMaxWr"}, ""},
         {{"LoopbackUdQpTest", "SendWithTooSmallRecv"}, ""},
+        {{"LoopbackUdQpTest", "SrcQpInCompletion"}, ""},
+        {{"LoopbackUdQpTest", "SrcQpInCompletionMultipleSenders"},
+         ""},
         {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
         {{"RdmaAccessTest", "ZeroBasedAccess"}, ""},
         {{"MwGeneralTest", "ReadZeroBased"}, ""},

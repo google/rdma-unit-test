@@ -193,6 +193,10 @@ void PrintCompletion(const ibv_wc& completion);
 absl::StatusOr<ibv_async_event> WaitForAsyncEvent(
     ibv_context* context, absl::Duration timeout = absl::Seconds(100));
 
+// Wait for an async event on a ibv_context without acking it.
+absl::StatusOr<ibv_async_event> WaitForAsyncEventWithoutAck(
+    ibv_context* context, absl::Duration timeout = absl::Seconds(100));
+
 // Executes a type 1 MW Bind operation synchronously.
 absl::StatusOr<ibv_wc_status> ExecuteType1MwBind(
     ibv_qp* qp, ibv_mw* mw, absl::Span<uint8_t> buffer, ibv_mr* mr,

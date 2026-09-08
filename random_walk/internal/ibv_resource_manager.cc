@@ -67,11 +67,11 @@ IbvResourceManager::CqInfo IbvResourceManager::GetCqInfo(ibv_cq* cq) const {
   return map_util::FindOrDie(cqs_, cq);
 }
 
-absl::optional<ibv_cq*> IbvResourceManager::GetRandomCq() const {
+std::optional<ibv_cq*> IbvResourceManager::GetRandomCq() const {
   return sampler_.GetRandomMapKey(cqs_);
 }
 
-absl::optional<ibv_cq*> IbvResourceManager::GetRandomCqNoReference() const {
+std::optional<ibv_cq*> IbvResourceManager::GetRandomCqNoReference() const {
   StreamSampler<ibv_cq*> stream_sampler;
   for (const auto& [cq, cq_info] : cqs_) {
     if (cq_info.send_qps.empty() && cq_info.recv_qps.empty()) {
@@ -107,11 +107,11 @@ IbvResourceManager::PdInfo IbvResourceManager::GetPdInfo(ibv_pd* pd) const {
   return map_util::FindOrDie(pds_, pd);
 }
 
-absl::optional<ibv_pd*> IbvResourceManager::GetRandomPd() const {
+std::optional<ibv_pd*> IbvResourceManager::GetRandomPd() const {
   return sampler_.GetRandomMapKey(pds_);
 }
 
-absl::optional<ibv_pd*> IbvResourceManager::GetRandomPdNoReference() const {
+std::optional<ibv_pd*> IbvResourceManager::GetRandomPdNoReference() const {
   StreamSampler<ibv_pd*> stream_sampler;
   for (const auto& [pd, pd_info] : pds_) {
     if (pd_info.mrs.empty() && pd_info.type_1_mws.empty() &&
@@ -141,11 +141,11 @@ IbvResourceManager::MrInfo IbvResourceManager::GetMrInfo(ibv_mr* mr) const {
   return map_util::FindOrDie(mrs_, mr);
 }
 
-absl::optional<ibv_mr*> IbvResourceManager::GetRandomMr() const {
+std::optional<ibv_mr*> IbvResourceManager::GetRandomMr() const {
   return sampler_.GetRandomMapKey(mrs_);
 }
 
-absl::optional<ibv_mr*> IbvResourceManager::GetRandomMrNoReference() const {
+std::optional<ibv_mr*> IbvResourceManager::GetRandomMrNoReference() const {
   StreamSampler<ibv_mr*> stream_sampler;
   for (const auto& [mr, mr_info] : mrs_) {
     if (mr_info.bound_mws.empty()) {
@@ -155,7 +155,7 @@ absl::optional<ibv_mr*> IbvResourceManager::GetRandomMrNoReference() const {
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_mr*> IbvResourceManager::GetRandomMr(ibv_pd* pd) const {
+std::optional<ibv_mr*> IbvResourceManager::GetRandomMr(ibv_pd* pd) const {
   StreamSampler<ibv_mr*> stream_sampler;
   for (const auto& [mr, mr_info] : mrs_) {
     if (mr->pd == pd) {
@@ -187,11 +187,11 @@ IbvResourceManager::Type1MwBindInfo IbvResourceManager::GetType1BindInfo(
   return map_util::FindOrDie(type_1_mws_bound_, mw);
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType1Mw() const {
+std::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType1Mw() const {
   return sampler_.GetRandomSetElement(type_1_mws_unbound_);
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType1Mw(
+std::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType1Mw(
     ibv_pd* pd) const {
   StreamSampler<ibv_mw*> stream_sampler;
   for (const auto& mw : type_1_mws_unbound_) {
@@ -202,11 +202,11 @@ absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType1Mw(
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType1Mw() const {
+std::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType1Mw() const {
   return sampler_.GetRandomMapKey(type_1_mws_bound_);
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType1Mw(
+std::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType1Mw(
     ibv_pd* pd) const {
   StreamSampler<ibv_mw*> stream_sampler;
   for (const auto& [mw, mw_info] : type_1_mws_bound_) {
@@ -245,20 +245,20 @@ IbvResourceManager::Type2MwBindInfo IbvResourceManager::GetType2BindInfo(
   return map_util::FindOrDie(type_2_mws_bound_, rkey);
 }
 
-absl::optional<IbvResourceManager::Type2MwBindInfo>
+std::optional<IbvResourceManager::Type2MwBindInfo>
 IbvResourceManager::TryGetType2BindInfo(uint32_t rkey) const {
   auto iter = type_2_mws_bound_.find(rkey);
   if (iter == type_2_mws_bound_.end()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return iter->second;
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType2Mw() const {
+std::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType2Mw() const {
   return sampler_.GetRandomSetElement(type_2_mws_unbound_);
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType2Mw(
+std::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType2Mw(
     ibv_pd* pd) const {
   StreamSampler<ibv_mw*> stream_sampler;
   for (const auto& mw : type_2_mws_unbound_) {
@@ -269,15 +269,15 @@ absl::optional<ibv_mw*> IbvResourceManager::GetRandomUnboundType2Mw(
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType2Mw() const {
+std::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType2Mw() const {
   auto sample = sampler_.GetRandomMapValue(type_2_mws_bound_);
   if (!sample.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return sample.value().mw;
 }
 
-absl::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType2Mw(
+std::optional<ibv_mw*> IbvResourceManager::GetRandomBoundType2Mw(
     ibv_pd* pd) const {
   StreamSampler<ibv_mw*> stream_sampler;
   for (const auto& [rkey, mw_info] : type_2_mws_bound_) {
@@ -308,7 +308,7 @@ void IbvResourceManager::InsertRdmaMemory(ClientId client_id, uint32_t rkey,
                    .addr = addr,
                    .length = length,
                    .pd_handle = pd_handle,
-                   .qp_num = absl::nullopt};
+                   .qp_num = std::nullopt};
   map_util::InsertOrDie(rdma_memories_, value);
 }
 
@@ -324,12 +324,12 @@ void IbvResourceManager::InsertRdmaMemory(ClientId client_id, uint32_t rkey,
   map_util::InsertOrDie(rdma_memories_, memory);
 }
 
-absl::optional<IbvResourceManager::RdmaMemory>
+std::optional<IbvResourceManager::RdmaMemory>
 IbvResourceManager::GetRandomRdmaMemory() const {
   return sampler_.GetRandomSetElement(rdma_memories_);
 }
 
-absl::optional<IbvResourceManager::RdmaMemory>
+std::optional<IbvResourceManager::RdmaMemory>
 IbvResourceManager::GetRandomRemoteBoundType2Mw() const {
   StreamSampler<RdmaMemory> stream_sampler;
   for (const auto& memory : rdma_memories_) {
@@ -434,7 +434,7 @@ IbvResourceManager::QpInfo* IbvResourceManager::GetMutableQpInfo(
   return qp_info;
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForModifyError(
+std::optional<ibv_qp*> IbvResourceManager::GetRandomQpForModifyError(
     bool allow_outstanding_ops) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
@@ -453,7 +453,7 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForModifyError(
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind() const {
+std::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind() const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
     if (verbs_util::GetQpState(qp_info.qp) == IBV_QPS_RTS &&
@@ -464,7 +464,7 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForBind() const {
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForMessaging(
+std::optional<ibv_qp*> IbvResourceManager::GetRandomQpForMessaging(
     ibv_qp_type qp_type) const {
   StreamSampler<ibv_qp*> stream_sampler;
   switch (qp_type) {
@@ -492,7 +492,7 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForMessaging(
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForRdma(
+std::optional<ibv_qp*> IbvResourceManager::GetRandomQpForRdma(
     ClientId client_id, uint32_t pd_handle) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
@@ -507,7 +507,7 @@ absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForRdma(
   return stream_sampler.ExtractSample();
 }
 
-absl::optional<ibv_qp*> IbvResourceManager::GetRandomQpForDestroy(
+std::optional<ibv_qp*> IbvResourceManager::GetRandomQpForDestroy(
     bool allow_outstanding_ops) const {
   StreamSampler<ibv_qp*> stream_sampler;
   for (const auto& [qp_num, qp_info] : rc_qps_) {
@@ -580,7 +580,7 @@ void IbvResourceManager::EraseRemoteUdQp(ClientId client_id, uint32_t qp_num) {
   map_util::CheckPresentAndErase(remote_ud_qps_, {client_id, qp_num});
 }
 
-absl::optional<IbvResourceManager::RemoteUdQpInfo>
+std::optional<IbvResourceManager::RemoteUdQpInfo>
 IbvResourceManager::GetRandomRemoteUdQp(ClientId client_id) const {
   StreamSampler<RemoteUdQpInfo> stream_sampler;
   for (const auto& remote_ud_info : remote_ud_qps_) {
@@ -600,11 +600,11 @@ IbvResourceManager::AhInfo IbvResourceManager::GetAhInfo(ibv_ah* ah) const {
   return map_util::FindOrDie(ahs_, ah);
 }
 
-absl::optional<ibv_ah*> IbvResourceManager::GetRandomAh() const {
+std::optional<ibv_ah*> IbvResourceManager::GetRandomAh() const {
   return sampler_.GetRandomMapKey(ahs_);
 }
 
-absl::optional<ibv_ah*> IbvResourceManager::GetRandomAh(ibv_pd* pd) const {
+std::optional<ibv_ah*> IbvResourceManager::GetRandomAh(ibv_pd* pd) const {
   StreamSampler<ibv_ah*> stream_sampler;
   for (const auto& [ah, ah_info] : ahs_) {
     if (ah->pd == pd) {

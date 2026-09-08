@@ -426,7 +426,7 @@ TEST_F(PdRcLoopbackMrTest, BasicWriteMrOtherPdRemote) {
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
-TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
+TEST_F(PdRcLoopbackMrTest, BasicAtomicFetchAddMrOtherPdLocal) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -445,7 +445,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdLocal) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
-TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
+TEST_F(PdRcLoopbackMrTest, BasicAtomicFetchAddMrOtherPdRemote) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -467,7 +467,7 @@ TEST_F(PdRcLoopbackMrTest, BasicFetchAddMrOtherPdRemote) {
   EXPECT_EQ(completion.status, expected);
 }
 
-TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
+TEST_F(PdRcLoopbackMrTest, BasicAtomicCompSwapMrOtherPdLocal) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.other_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -486,7 +486,7 @@ TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdLocal) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
-TEST_F(PdRcLoopbackMrTest, BasicCompSwapMrOtherPdRemote) {
+TEST_F(PdRcLoopbackMrTest, BasicAtomicCompSwapMrOtherPdRemote) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_mr* local_mr = ibv_.RegMr(setup.qp_pd, setup.buffer);
   ASSERT_THAT(local_mr, NotNull());
@@ -674,7 +674,7 @@ TEST_F(PdType1MwTest, WriteMwOtherPd) {
   EXPECT_EQ(completion.status, IBV_WC_REM_ACCESS_ERR);
 }
 
-TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
+TEST_F(PdType1MwTest, AtomicFetchAddMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
   ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
   ibv_sge sge = verbs_util::CreateSge(setup.buffer.span(), setup.mr);
@@ -691,7 +691,7 @@ TEST_F(PdType1MwTest, FetchAddMwOtherPd) {
   EXPECT_EQ(completion.status, expected);
 }
 
-TEST_F(PdType1MwTest, CompSwapMwOtherPd) {
+TEST_F(PdType1MwTest, AtomicCompSwapMwOtherPd) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup(kClientMemoryPages));
   ASSERT_OK_AND_ASSIGN(ibv_mw * mw, CreateMwWithAlternatePd(setup));
 

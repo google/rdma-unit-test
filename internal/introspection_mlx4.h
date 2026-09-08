@@ -84,9 +84,13 @@ class IntrospectionMlx4 : public NicIntrospection {
          "max_mw is not correctly reported for the device."},
         {{"DeviceLimitTest", "MaxQp"}, "Can create much more QPs than max_qp."},
         // Provider still update remote buffer when LKey is invalid.
-        {{"LoopbackRcQpTest", "FetchAddInvalidLKey"}, ""},
+        {{"LoopbackRcQpTest", "AtomicFetchAddInvalidLKey"}, ""},
         // Allows bind to invalid qp.
         {{"MwTest", "InvalidQp"}, ""},
+        {{"StressTest", "AtomicFetchAddCpuRdmaRace"},
+         "Hardware does not support CPU-NIC-coherent RDMA atomics."},
+        {{"StressTest", "AtomicCmpAndSwapCpuRdmaRace"},
+         "Hardware does not support CPU-NIC-coherent RDMA atomics."},
         {{"QpStateTest", "QpIdRollover"}, "b/400217404"},
     };
     return deviations;

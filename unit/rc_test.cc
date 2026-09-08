@@ -1650,7 +1650,7 @@ TEST_F(LoopbackRcQpTest, WriteUnregisteredAddress) {
   EXPECT_THAT(buffer.span(), Each(kRemoteBufferContent));
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddInvalidSize) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1681,7 +1681,7 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidSize) {
   }
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddNoOp) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1708,7 +1708,7 @@ TEST_F(LoopbackRcQpTest, FetchAddNoOp) {
 // Note: Multiple SGEs for Atomics are specifically not supported by the IBTA
 // spec, but some Mellanox NICs and its successors choose to
 // support it.
-TEST_F(LoopbackRcQpTest, FetchAddSplitSgl) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddSplitSgl) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   static constexpr uint64_t kSrcContent = 0xAAAAAAAAAAAAAAAA;
@@ -1792,7 +1792,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledFetchAdd) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 12);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddIncrementBy1) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddIncrementBy1) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1816,7 +1816,7 @@ TEST_F(LoopbackRcQpTest, FetchAddIncrementBy1) {
 }
 
 // This tests increments by a value that is larger than 32 bits.
-TEST_F(LoopbackRcQpTest, FetchAddLargeIncrement) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddLargeIncrement) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1838,7 +1838,7 @@ TEST_F(LoopbackRcQpTest, FetchAddLargeIncrement) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddUnaligned) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddUnaligned) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1867,7 +1867,7 @@ TEST_F(LoopbackRcQpTest, FetchAddUnaligned) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(remote.buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddInvalidLKey) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1913,7 +1913,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledFetchAddError) {
   EXPECT_EQ(completion.status, IBV_WC_LOC_PROT_ERR);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1940,7 +1940,7 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddInvalidLKeyAndInvalidRKey) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddInvalidLKeyAndInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1969,7 +1969,7 @@ TEST_F(LoopbackRcQpTest, FetchAddInvalidLKeyAndInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidLKey) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddUnalignedInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -1998,7 +1998,7 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
+TEST_F(LoopbackRcQpTest, AtomicFetchAddUnalignedInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2027,7 +2027,7 @@ TEST_F(LoopbackRcQpTest, FetchAddUnalignedInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapNotEqualNoSwap) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapNotEqualNoSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2051,7 +2051,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapNotEqualNoSwap) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapEqualWithSwap) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapEqualWithSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2074,7 +2074,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapEqualWithSwap) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 2);
 }
 
-TEST_F(LoopbackRcQpTest, UnsignaledCompareSwap) {
+TEST_F(LoopbackRcQpTest, AtomicUnsignaledCompareSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2104,7 +2104,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledCompareSwap) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 3);
 }
 
-TEST_F(LoopbackRcQpTest, UnsignaledCompareSwapError) {
+TEST_F(LoopbackRcQpTest, AtomicUnsignaledCompareSwapError) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2132,7 +2132,7 @@ TEST_F(LoopbackRcQpTest, UnsignaledCompareSwapError) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapInvalidLKey) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2159,7 +2159,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKey) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2187,7 +2187,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKeyAndInvalidLKey) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapInvalidRKeyAndInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2214,7 +2214,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidRKeyAndInvalidLKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapInvalidSize) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapInvalidSize) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2236,7 +2236,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapInvalidSize) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapUnaligned) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapUnaligned) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2262,7 +2262,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapUnaligned) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidRKey) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapUnalignedInvalidRKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -2288,7 +2288,7 @@ TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidRKey) {
   EXPECT_EQ(*(reinterpret_cast<uint64_t*>(local.buffer.data())), 1);
 }
 
-TEST_F(LoopbackRcQpTest, CompareSwapUnalignedInvalidLKey) {
+TEST_F(LoopbackRcQpTest, AtomicCompareSwapUnalignedInvalidLKey) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;

@@ -90,6 +90,7 @@ cc_library(
         ":system_libibverbs",
         "//public:rdma_memblock",
         "//public:verbs_util",
+        "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/status",
     ],
 )

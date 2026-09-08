@@ -42,5 +42,8 @@ ABSL_FLAG(int, gid_index, -1,
           "The GID index used for connection establishment. Ignore ipv4_only "
           "when assigned. Default: -1 (use the first available IPv6 GID, if "
           "none available, use the first available IPv4 GID)");
+ABSL_FLAG(
+    bool, enable_cuda, false,
+    "Whether to initialize the CUDA driver API and run CUDA-related tests.");
 ABSL_FLAG(bool, skip_default_gid, false,
           "If true, skip the Default GIDs (link-local IPv6 in RoCEv2).");

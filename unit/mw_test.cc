@@ -926,7 +926,7 @@ class MwType2AdvancedTest : public LoopbackFixture {
   // failure or |max_count| is reached.
   void ReaderLoop(const BasicSetup& basic, uint32_t rkey, QpInfo& qp_info,
                   std::atomic<size_t>& total_reads,
-                  absl::optional<int> max_count,
+                  std::optional<int> max_count,
                   absl::Notification& cancel_notification) {
     // Setup a single read.
     ibv_sge sg = verbs_util::CreateSge(basic.buffer.span(), basic.mr);
@@ -980,7 +980,7 @@ class MwType2AdvancedTest : public LoopbackFixture {
   void StartReaderThreads(AdvancedSetup& advanced, uint32_t rkey,
                           std::atomic<size_t>& total_reads,
                           absl::Notification& cancel_notification,
-                          absl::optional<int> max_count = {}) {
+                          std::optional<int> max_count = {}) {
     advanced.threads.push_back(std::thread([this, &advanced, rkey, &total_reads,
                                             max_count, &cancel_notification]() {
       ReaderLoop(advanced.basic, rkey, advanced.reader, total_reads, max_count,

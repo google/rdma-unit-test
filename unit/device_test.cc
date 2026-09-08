@@ -222,7 +222,7 @@ TEST_F(DeviceLimitTest, MaxPd) {
   std::vector<ibv_pd*> pds;
   for (int i = 0; i < max_pd + kErrorMax + 10; ++i) {
     ibv_pd* pd = ibv_.AllocPd(context);
-    if (pd) {
+    if (pd != nullptr) {
       ++actual_max;
       pds.push_back(pd);
     } else {

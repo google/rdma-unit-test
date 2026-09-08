@@ -14,6 +14,7 @@
 
 #include <errno.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -100,22 +101,6 @@ TEST_F(MrTest, RemoteAtomicWithoutLocalWrite) {
               IsNull());
 }
 
-// Test using ibv_rereg_mr to associate the MR with another buffer.
-TEST_F(MrTest, ReregMrChangeAddress) {
-  if (!Introspection().SupportsReRegMr()) {
-    GTEST_SKIP() << "Nic does not support rereg_mr.";
-  }
-  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
-  ibv_mr* mr = ibv_.RegMr(setup.pd, setup.buffer);
-  ASSERT_THAT(mr, NotNull());
-  RdmaMemBlock buffer = ibv_.AllocBuffer(kBufferMemoryPages);
-  ASSERT_EQ(
-      ibv_.ReregMr(mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr, &buffer, 0),
-      0);
-  EXPECT_EQ(mr->addr, buffer.data());
-  EXPECT_EQ(mr->length, buffer.size());
-}
-
 // Test using ibv_rereg_mr to associate the MR with another PD.
 TEST_F(MrTest, ReregMrChangePd) {
   if (!Introspection().SupportsReRegMr()) {
@@ -191,9 +176,8 @@ class MrLoopbackTest : public LoopbackFixture {
     absl::Notification running_notification;
     std::thread another_thread([&local, &wqes, &cancel_notification,
                                 &running_notification, results]() {
-      // Must have enough outstanding to saturate the QP, but not too many
-      // outstanding to overflow the default CQ size.
-      constexpr int kTargetOutstanding = 100;
+      // Set target outstanding to the default CQ size.
+      constexpr int kTargetOutstanding = verbs_util::kDefaultMaxWr;
       int outstanding = 0;
       int total_results = 0;
       bool done = false;
@@ -277,6 +261,56 @@ TEST_F(MrLoopbackTest, ReregMrChangeAccess) {
   EXPECT_EQ(completion.wr_id, 0);
 }
 
+TEST_F(MrLoopbackTest, ReregMrChangeAddress) {
+  if (!Introspection().SupportsReRegMr()) {
+    GTEST_SKIP() << "Nic does not support rereg_mr.";
+  }
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
+
+  RdmaMemBlock new_buffer = ibv_.AllocBuffer(MrTest::kBufferMemoryPages);
+  RdmaMemBlock new_local_buffer = ibv_.AllocBuffer(MrTest::kBufferMemoryPages);
+
+  ASSERT_EQ(ibv_.ReregMr(remote.mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
+                         &new_buffer, 0),
+            0);
+
+  ASSERT_EQ(ibv_.ReregMr(local.mr, IBV_REREG_MR_CHANGE_TRANSLATION, nullptr,
+                         &new_local_buffer, 0),
+            0);
+
+  constexpr uint64_t kTestData = 0xDDDDDDDDDDDDDDDD;
+  *reinterpret_cast<uint64_t*>(new_local_buffer.data()) = kTestData;
+
+  // 1. Test Remote Write
+  ibv_sge sg_write = verbs_util::CreateSge(
+      new_local_buffer.span().subspan(0, sizeof(kTestData)), local.mr);
+  ibv_send_wr write = verbs_util::CreateWriteWr(
+      /*wr_id=*/1, &sg_write, /*num_sge=*/1, new_buffer.data(),
+      remote.mr->rkey);
+  verbs_util::PostSend(local.qp, write);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc write_completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  ASSERT_EQ(write_completion.status, IBV_WC_SUCCESS);
+  ASSERT_EQ(*reinterpret_cast<uint64_t*>(new_buffer.data()), kTestData);
+
+  // 2. Test Remote Read
+  ibv_sge sg_read = verbs_util::CreateSge(
+      new_local_buffer.span().subspan(sizeof(kTestData), sizeof(kTestData)),
+      local.mr);
+  ibv_send_wr read = verbs_util::CreateReadWr(
+      /*wr_id=*/2, &sg_read, /*num_sge=*/1, new_buffer.data(), remote.mr->rkey);
+  verbs_util::PostSend(local.qp, read);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc read_completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  ASSERT_EQ(read_completion.status, IBV_WC_SUCCESS);
+  ASSERT_EQ(
+      *reinterpret_cast<uint64_t*>(new_local_buffer.data() + sizeof(kTestData)),
+      kTestData);
+}
+
 TEST_F(MrLoopbackTest, OutstandingRead) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
@@ -285,10 +319,23 @@ TEST_F(MrLoopbackTest, OutstandingRead) {
       /*wr_id=*/1, &sg, /*num_sge=*/1, remote.buffer.data(), remote.mr->rkey);
 
   std::vector<uint64_t> results;
-  auto deregister = [this, &local = local]() {
+  auto deregister = [this, &local = local, &remote = remote]() {
     EXPECT_EQ(ibv_.DeregMr(local.mr), 0);
+    std::atomic<uint64_t>* data =
+        reinterpret_cast<std::atomic<uint64_t>*>(remote.buffer.data());
+    // Store new secret data into deregistered buffer.
+    data->store(0xaabbccdd11223344);
   };
+
+  uint64_t* remote_data = reinterpret_cast<uint64_t*>(remote.buffer.data());
+  *remote_data = 0x55667788aabbccdd;
   StressDereg(local, read, deregister, &results);
+
+  // Make sure we weren't able to pick up the secret data.
+  uint64_t* local_data = reinterpret_cast<uint64_t*>(local.buffer.data());
+  EXPECT_NE(local_data[0], 0xaabbccdd11223344);
+  // It also shouldn't be corrupted.
+  EXPECT_EQ(local_data[0], 0x55667788aabbccdd);
 
   // TODO(author1): Update to expect IBV_WC_WR_FLUSH_ERR when QP
   // cancellation is implemented.
@@ -306,8 +353,21 @@ TEST_F(MrLoopbackTest, OutstandingWrite) {
   std::vector<uint64_t> results;
   auto deregister = [this, &local = local]() {
     ASSERT_EQ(ibv_.DeregMr(local.mr), 0);
+    std::atomic<uint64_t>* data =
+        reinterpret_cast<std::atomic<uint64_t>*>(local.buffer.data());
+    // Store new secret data into deregistered buffer.
+    data->store(0xaabbccdd11223344);
   };
+
+  uint64_t* local_data = reinterpret_cast<uint64_t*>(local.buffer.data());
+  *local_data = 0x55667788aabbccdd;
   StressDereg(local, write, deregister, &results);
+
+  // Make sure we weren't able to pick up the secret data.
+  uint64_t* remote_data = reinterpret_cast<uint64_t*>(remote.buffer.data());
+  EXPECT_NE(remote_data[0], 0xaabbccdd11223344);
+  // It also shouldn't be corrupted.
+  EXPECT_EQ(remote_data[0], 0x55667788aabbccdd);
 
   EXPECT_GT(results[IBV_WC_SUCCESS], 0);
   // Not checking for IBV_WC_LOC_PROT_ERR since all ops might have already sent

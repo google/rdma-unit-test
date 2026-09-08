@@ -34,6 +34,7 @@
 #include "absl/time/time.h"
 #include "infiniband/verbs.h"
 #include "internal/handle_garble.h"
+#include "internal/verbs_attribute.h"
 #include "public/introspection.h"
 #include "public/page_size.h"
 #include "public/rdma_memblock.h"
@@ -731,6 +732,9 @@ class SrqMultiThreadTest : public SrqTest {
         ibv_.SetUpLoopbackRcQps(setup.send_qp, setup.recv_qp, setup.port_attr));
     return setup;
   }
+
+ protected:
+  void RunMultiThreadedMultiSrq(bool flow_control);
 };
 
 TEST_F(SrqMultiThreadTest, MultiThreadedSrqLoopback) {
@@ -950,11 +954,11 @@ TEST_F(SrqMultiThreadTest, MultiThreadedMultiQpSingleSrq) {
 // the expected data. This is done by poisoning the RX buffers prior to posting
 // them to the SRQ and then verifying the embedded message content when the
 // completions are received.
-TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
+void SrqMultiThreadTest::RunMultiThreadedMultiSrq(bool flow_control) {
   const int kNumIters = Introspection().IsSlowNic() ? 2048 : 1048576;
-  const int kRxQDepth = Introspection().IsSlowNic() ? 128 : 1024;
-  const int kQpCount = Introspection().IsSlowNic() ? 32 : 128;
-  const int kNumThreads = Introspection().IsSlowNic() ? 2 : 16;
+  const int kRxQDepth = Introspection().IsSlowNic() ? 128 : 512;
+  const int kQpCount = Introspection().IsSlowNic() ? 32 : 64;
+  const int kNumThreads = Introspection().IsSlowNic() ? 2 : 14;
   const int kBufferPages = 2;
 
   struct MessageData {
@@ -1044,8 +1048,9 @@ TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
         msg.rqp_num = qp_pairs[i].recv_qp->qp_num;
         memcpy(qp_pairs[i].send_buffer.data(), &msg, sizeof(MessageData));
 
-        ASSERT_OK(ibv_.SetUpLoopbackRcQps(
-            qp_pairs[i].send_qp, qp_pairs[i].recv_qp, setup.port_attr));
+        ASSERT_OK(ibv_.SetUpLoopbackRcQps(qp_pairs[i].send_qp,
+                                          qp_pairs[i].recv_qp, setup.port_attr,
+                                          QpAttribute().set_min_rnr_timer(1)));
       }
 
       // Flow control
@@ -1086,12 +1091,23 @@ TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
           verbs_util::PostSrqRecv(setup.srq, rx_bufs[buffer_index].wr);
 
           tokens++;
+
+          if (!flow_control) {
+            // Cause periodic stalls to force RnRs.
+            if (completions % 100 == 0) {
+              absl::SleepFor(absl::Milliseconds(1));
+            }
+          }
+          if (thread_id == 0) {
+            LOG_EVERY_N_SEC(INFO, 3) << "\t#Completions = " << completions
+                                     << " out of " << kNumIters;
+          }
         }
       });
 
       for (int send = 0; send < kNumIters; send += kQpCount) {
         for (int i = 0; i < kQpCount; ++i) {
-          while (!tokens) {
+          while (!tokens && flow_control) {
             absl::SleepFor(absl::Microseconds(1));
           }
 
@@ -1120,6 +1136,16 @@ TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
   for (auto& thread : threads) {
     thread.join();
   }
+}
+
+// Uses local token based flow control.
+TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrq) {
+  RunMultiThreadedMultiSrq(/*flow_control=*/true);
+}
+
+// Relies on RnR for flow control.
+TEST_F(SrqMultiThreadTest, MultiThreadedMultiSrqNoFlowControl) {
+  RunMultiThreadedMultiSrq(/*flow_control=*/false);
 }
 
 }  // namespace rdma_unit_test

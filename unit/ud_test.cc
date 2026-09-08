@@ -192,6 +192,115 @@ TEST_F(LoopbackUdQpTest, Send) {
   EXPECT_THAT(recv_payload, Each(kLocalBufferContent));
 }
 
+TEST_F(LoopbackUdQpTest, SrcQpInCompletion) {
+  constexpr int kPayloadLength = 1000;
+  Client local, remote;
+  ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
+  ASSERT_NE(local.qp->qp_num, remote.qp->qp_num);
+
+  ibv_sge rsge = verbs_util::CreateSge(remote.buffer.span(), remote.mr);
+  rsge.length = kPayloadLength + sizeof(ibv_grh);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/100, &rsge, /*num_sge=*/1);
+  verbs_util::PostRecv(remote.qp, recv);
+
+  ibv_sge lsge = verbs_util::CreateSge(local.buffer.span(), local.mr);
+  lsge.length = kPayloadLength;
+  ibv_send_wr send =
+      verbs_util::CreateSendWr(/*wr_id=*/200, &lsge, /*num_sge=*/1);
+  ibv_ah* ah = ibv_.CreateAh(local.pd, local.port_attr.port,
+                             local.port_attr.gid_index, remote.port_attr.gid);
+  ASSERT_THAT(ah, NotNull());
+  send.wr.ud.ah = ah;
+  send.wr.ud.remote_qpn = remote.qp->qp_num;
+  send.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(local.qp, send);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc send_completion,
+                       verbs_util::WaitForCompletion(local.cq));
+  EXPECT_EQ(send_completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(send_completion.opcode, IBV_WC_SEND);
+  EXPECT_EQ(send_completion.qp_num, local.qp->qp_num);
+  EXPECT_EQ(send_completion.wr_id, 200);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc recv_completion,
+                       verbs_util::WaitForCompletion(remote.cq));
+  EXPECT_EQ(recv_completion.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(recv_completion.opcode, IBV_WC_RECV);
+  EXPECT_EQ(recv_completion.byte_len, sizeof(ibv_grh) + kPayloadLength);
+  EXPECT_EQ(recv_completion.qp_num, remote.qp->qp_num);
+  EXPECT_EQ(recv_completion.wr_id, 100);
+  EXPECT_EQ(recv_completion.src_qp, local.qp->qp_num);
+}
+
+TEST_F(LoopbackUdQpTest, SrcQpInCompletionMultipleSenders) {
+  constexpr int kPayloadLength = 512;
+  Client receiver;
+  ASSERT_OK_AND_ASSIGN(receiver, CreateClient(IBV_QPT_UD));
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(receiver.qp, kQKey));
+
+  Client sender1, sender2;
+  ASSERT_OK_AND_ASSIGN(sender1, CreateClient(IBV_QPT_UD));
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(sender1.qp, kQKey));
+  ASSERT_OK_AND_ASSIGN(sender2, CreateClient(IBV_QPT_UD));
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(sender2.qp, kQKey));
+
+  ASSERT_NE(receiver.qp->qp_num, sender1.qp->qp_num);
+  ASSERT_NE(receiver.qp->qp_num, sender2.qp->qp_num);
+  ASSERT_NE(sender1.qp->qp_num, sender2.qp->qp_num);
+
+  for (int i = 1; i <= 2; ++i) {
+    ibv_sge rsge = verbs_util::CreateSge(receiver.buffer.span(), receiver.mr);
+    rsge.length = kPayloadLength + sizeof(ibv_grh);
+    ibv_recv_wr recv = verbs_util::CreateRecvWr(i, &rsge, 1);
+    verbs_util::PostRecv(receiver.qp, recv);
+  }
+
+  // Send from Sender1 -> Receiver
+  ibv_sge sge1 = verbs_util::CreateSge(sender1.buffer.span(), sender1.mr);
+  sge1.length = kPayloadLength;
+  ibv_send_wr send1 = verbs_util::CreateSendWr(1, &sge1, 1);
+  ibv_ah* ah1 =
+      ibv_.CreateAh(sender1.pd, sender1.port_attr.port,
+                    sender1.port_attr.gid_index, receiver.port_attr.gid);
+  ASSERT_THAT(ah1, NotNull());
+  send1.wr.ud.ah = ah1;
+  send1.wr.ud.remote_qpn = receiver.qp->qp_num;
+  send1.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(sender1.qp, send1);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc s1_wc, verbs_util::WaitForCompletion(sender1.cq));
+  EXPECT_EQ(s1_wc.status, IBV_WC_SUCCESS);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc r1_wc,
+                       verbs_util::WaitForCompletion(receiver.cq));
+  EXPECT_EQ(r1_wc.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(r1_wc.qp_num, receiver.qp->qp_num);
+  EXPECT_EQ(r1_wc.src_qp, sender1.qp->qp_num);
+
+  // Send from Sender2 -> Receiver
+  ibv_sge sge2 = verbs_util::CreateSge(sender2.buffer.span(), sender2.mr);
+  sge2.length = kPayloadLength;
+  ibv_send_wr send2 = verbs_util::CreateSendWr(2, &sge2, 1);
+  ibv_ah* ah2 =
+      ibv_.CreateAh(sender2.pd, sender2.port_attr.port,
+                    sender2.port_attr.gid_index, receiver.port_attr.gid);
+  ASSERT_THAT(ah2, NotNull());
+  send2.wr.ud.ah = ah2;
+  send2.wr.ud.remote_qpn = receiver.qp->qp_num;
+  send2.wr.ud.remote_qkey = kQKey;
+  verbs_util::PostSend(sender2.qp, send2);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc s2_wc, verbs_util::WaitForCompletion(sender2.cq));
+  EXPECT_EQ(s2_wc.status, IBV_WC_SUCCESS);
+
+  ASSERT_OK_AND_ASSIGN(ibv_wc r2_wc,
+                       verbs_util::WaitForCompletion(receiver.cq));
+  EXPECT_EQ(r2_wc.status, IBV_WC_SUCCESS);
+  EXPECT_EQ(r2_wc.qp_num, receiver.qp->qp_num);
+  EXPECT_EQ(r2_wc.src_qp, sender2.qp->qp_num);
+}
+
 TEST_F(LoopbackUdQpTest, SendLargerThanMtu) {
   constexpr size_t kPages = 20;
   Client local, remote;
@@ -605,7 +714,7 @@ TEST_F(LoopbackUdQpTest, Write) {
 }
 
 // FetchAndAdd not supported on UD.
-TEST_F(LoopbackUdQpTest, FetchAdd) {
+TEST_F(LoopbackUdQpTest, AtomicFetchAdd) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;
@@ -634,7 +743,7 @@ TEST_F(LoopbackUdQpTest, FetchAdd) {
 }
 
 // CompareAndSwap not supported on UD.
-TEST_F(LoopbackUdQpTest, CompareSwap) {
+TEST_F(LoopbackUdQpTest, AtomicCompareSwap) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
   *reinterpret_cast<uint64_t*>(local.buffer.data()) = 1;

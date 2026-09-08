@@ -72,6 +72,20 @@ cc_library(
 )
 
 cc_library(
+    name = "gpu_rdma_memblock",
+    srcs = ["gpu_rdma_memblock.cc"],
+    hdrs = ["gpu_rdma_memblock.h"],
+    deps = [
+        ":cuda_helper",
+        ":rdma_memblock",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_library(
     name = "map_util",
     hdrs = ["map_util.h"],
     deps = [
@@ -161,6 +175,28 @@ cc_library(
 cc_library(
     name = "page_size",
     hdrs = ["page_size.h"],
+)
+
+cc_library(
+    name = "cuda_helper",
+    srcs = ["cuda_helper.cc"],
+    hdrs = ["cuda_helper.h"],
+    deps = [
+        ":status_matchers",
+        "//platforms/gpus/cuda/dynamic_libcuda",
+        "//third_party/gpus/cuda:cuda_headers",
+        "//util/task:status",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/memory",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/synchronization",
+        "@googletest//:gtest",
+    ],
 )
 
 cc_library(
