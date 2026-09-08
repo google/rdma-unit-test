@@ -549,9 +549,6 @@ cc_binary(
     ],
     linkopts = ["-Wl,--dynamic-linker=/usr/lib/ld-linux-aarch64.so.1"],
     linkstatic = 1,
-    visibility = [
-        "//net/diorite/hpc/staging/gpudirect:__subpackages__",
-    ],
     deps = [
         ":access_test_cc",
         ":ah_test_cc",
