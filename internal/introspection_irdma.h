@@ -13,7 +13,8 @@ namespace rdma_unit_test {
 
 // Enable irdma according to
 // https://github.com/linux-rdma/rdma-core/blob/master/kernel-boot/rdma-persistent-naming.rules
-const absl::string_view kNetworkInterfaceName = "roce[8086:145c]";
+const absl::string_view kNetworkInterfaceNameE2100 = "roce[8086:145c]";
+const absl::string_view kNetworkInterfaceNameNextIpu = "roce[8086:de2]";
 
 // Concrete class to override specific behaviour for irdma NIC.
 class IntrospectionIrdma : public NicIntrospection {
@@ -25,7 +26,12 @@ class IntrospectionIrdma : public NicIntrospection {
           return new IntrospectionIrdma(name, attr);
         });
     IntrospectionRegistrar::GetInstance().Register(
-        kNetworkInterfaceName,
+        kNetworkInterfaceNameE2100,
+        [](const std::string& name, const ibv_device_attr& attr) {
+          return new IntrospectionIrdma(name, attr);
+        });
+    IntrospectionRegistrar::GetInstance().Register(
+        kNetworkInterfaceNameNextIpu,
         [](const std::string& name, const ibv_device_attr& attr) {
           return new IntrospectionIrdma(name, attr);
         });
