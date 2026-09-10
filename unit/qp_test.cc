@@ -917,7 +917,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
       SubmitterState curr_state;
       {
         absl::MutexLock lock(
-            submitter_state_mutex,
+            &submitter_state_mutex,
             absl::Condition(
                 +[](SubmitterState* state) { return *state != kIdle; },
                 &submitter_state));
@@ -937,7 +937,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
         // First batch should always succeed.
         last_batch_result = BatchRead(setup, kReadBatchSize, {IBV_WC_SUCCESS});
         if (!last_batch_result.ok()) {
-          absl::MutexLock lock(submitter_state_mutex);
+          absl::MutexLock lock(&submitter_state_mutex);
           submitter_state = kFatalError;
           return;
         }
@@ -948,7 +948,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
             BatchRead(setup, kReadBatchSize,
                       {IBV_WC_SUCCESS, IBV_WC_WR_FLUSH_ERR, IBV_WC_FATAL_ERR});
         if (!last_batch_result.ok()) {
-          absl::MutexLock lock(submitter_state_mutex);
+          absl::MutexLock lock(&submitter_state_mutex);
           submitter_state = kFatalError;
           return;
         }
@@ -958,7 +958,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
         last_batch_result =
             BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR});
         if (!last_batch_result.ok()) {
-          absl::MutexLock lock(submitter_state_mutex);
+          absl::MutexLock lock(&submitter_state_mutex);
           submitter_state = kFatalError;
           return;
         }
@@ -971,7 +971,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
   absl::Cleanup thread_join([&submitter_state_mutex, &submitter_state,
                              &submission_thread, &last_batch_result]() {
     {
-      absl::MutexLock lock(submitter_state_mutex);
+      absl::MutexLock lock(&submitter_state_mutex);
       submitter_state = kTerminateRequest;
     }
     submission_thread.join();
@@ -991,7 +991,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
 
     // Start submitter.
     {
-      absl::MutexLock lock(submitter_state_mutex);
+      absl::MutexLock lock(&submitter_state_mutex);
       submitter_state = kStartRequest;
       submitter_state_mutex.Await(absl::Condition(
           +[](SubmitterState* state) {
@@ -1008,7 +1008,7 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
 
     // Stop submitter.
     {
-      absl::MutexLock lock(submitter_state_mutex);
+      absl::MutexLock lock(&submitter_state_mutex);
       // Check if submitter_state has already transitioned into kFatalError
       // before we update submitter_state.
       if (submitter_state == kFatalError) {

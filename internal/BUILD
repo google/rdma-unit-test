@@ -30,7 +30,7 @@ cc_library(
         ":system_libibverbs",
         "//public:introspection",
         "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
     ],
     alwayslink = 1,
 )

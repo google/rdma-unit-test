@@ -1,10 +1,11 @@
 #ifndef THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_IRDMA_H_
 #define THIRD_PARTY_RDMA_UNIT_TEST_INTERNAL_INTROSPECTION_IRDMA_H_
 
+#include <cstdint>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/strings/string_view.h"
+#include "absl/strings/str_format.h"
 #include "infiniband/verbs.h"
 #include "internal/introspection_registrar.h"
 #include "public/introspection.h"
@@ -13,8 +14,8 @@ namespace rdma_unit_test {
 
 // Enable irdma according to
 // https://github.com/linux-rdma/rdma-core/blob/master/kernel-boot/rdma-persistent-naming.rules
-const absl::string_view kNetworkInterfaceNameE2100 = "roce[8086:145c]";
-const absl::string_view kNetworkInterfaceNameNextIpu = "roce[8086:de2]";
+constexpr uint32_t kDeviceIdE2100 = 0x145c;
+constexpr uint32_t kDeviceIdNextIpu = 0x0de2;
 
 // Concrete class to override specific behaviour for irdma NIC.
 class IntrospectionIrdma : public NicIntrospection {
@@ -26,18 +27,23 @@ class IntrospectionIrdma : public NicIntrospection {
           return new IntrospectionIrdma(name, attr);
         });
     IntrospectionRegistrar::GetInstance().Register(
-        kNetworkInterfaceNameE2100,
+        absl::StrFormat("roce[8086:%x]", kDeviceIdE2100),
         [](const std::string& name, const ibv_device_attr& attr) {
           return new IntrospectionIrdma(name, attr);
         });
     IntrospectionRegistrar::GetInstance().Register(
-        kNetworkInterfaceNameNextIpu,
+        absl::StrFormat("roce[8086:%x]", kDeviceIdNextIpu),
         [](const std::string& name, const ibv_device_attr& attr) {
           return new IntrospectionIrdma(name, attr);
         });
   }
 
   bool SupportsZeroLengthMr() const override { return false; }
+
+  bool CqeHasCorrectSrcQpn() const override {
+    return device_attr().vendor_part_id != kDeviceIdE2100 &&
+           device_attr().vendor_part_id != kDeviceIdNextIpu;
+  }
 
   bool SupportsReRegMr() const override { return true; }
 
@@ -72,9 +78,6 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"QpPostTest", "OverflowSendWr"}, ""},
         {{"SrqTest", "ExceedDeviceMaxWr"}, ""},
         {{"LoopbackUdQpTest", "SendWithTooSmallRecv"}, ""},
-        {{"LoopbackUdQpTest", "SrcQpInCompletion"}, ""},
-        {{"LoopbackUdQpTest", "SrcQpInCompletionMultipleSenders"},
-         ""},
         {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
         {{"RdmaAccessTest", "ZeroBasedAccess"}, ""},
         {{"MwGeneralTest", "ReadZeroBased"}, ""},

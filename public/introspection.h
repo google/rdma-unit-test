@@ -126,6 +126,9 @@ class NicIntrospection {
   // Returns true if the NIC supports UD Queue Pairs.
   virtual bool SupportsUdQp() const { return true; }
 
+  // Returns true if UD receive CQEs report the correct remote sender QPN.
+  virtual bool CqeHasCorrectSrcQpn() const { return true; }
+
   // Returns true if the NIC supports RC Queue Pairs.
   virtual bool SupportsRcQp() const { return true; }
 
