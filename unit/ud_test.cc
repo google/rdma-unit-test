@@ -193,9 +193,6 @@ TEST_F(LoopbackUdQpTest, Send) {
 }
 
 TEST_F(LoopbackUdQpTest, SrcQpInCompletion) {
-  if (!Introspection().CqeHasCorrectSrcQpn()) {
-    GTEST_SKIP() << "NIC does not report correct src_qp in UD receive CQE.";
-  }
   constexpr int kPayloadLength = 1000;
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateUdClientsPair());
@@ -237,9 +234,6 @@ TEST_F(LoopbackUdQpTest, SrcQpInCompletion) {
 }
 
 TEST_F(LoopbackUdQpTest, SrcQpInCompletionMultipleSenders) {
-  if (!Introspection().CqeHasCorrectSrcQpn()) {
-    GTEST_SKIP() << "NIC does not report correct src_qp in UD receive CQE.";
-  }
   constexpr int kPayloadLength = 512;
   Client receiver;
   ASSERT_OK_AND_ASSIGN(receiver, CreateClient(IBV_QPT_UD));
