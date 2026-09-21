@@ -439,58 +439,6 @@ cc_library(
     alwayslink = 1,
 )
 
-cc_library(
-    name = "gpu_mr_test_cc",
-    srcs = ["gpu_mr_test.cc"],
-    deps = [
-        ":rdma_verbs_fixture",
-        ":system_libibverbs",
-        "//public:cuda_helper",
-        "//public:flags",
-        "//public:gpu_rdma_memblock",
-        "//third_party/gloop/util/status:status_macros",
-        "@abseil-cpp//absl/algorithm:container",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/log",
-        "@abseil-cpp//absl/log:check",
-        "@abseil-cpp//absl/status",
-        "@abseil-cpp//absl/status:status_matchers",
-        "@abseil-cpp//absl/status:statusor",
-        "@googletest//:gtest",
-    ],
-    alwayslink = 1,
-)
-
-cc_library(
-    name = "gpu_rc_test_cc",
-    srcs = ["gpu_rc_test.cc"],
-    deps = [
-        ":loopback_fixture",
-        ":rdma_verbs_fixture",
-        ":system_libibverbs",
-        "//internal:verbs_attribute",
-        "//public:cuda_helper",
-        "//public:flags",
-        "//public:gpu_rdma_memblock",
-        "//public:introspection",
-        "//public:rdma_memblock",
-        "//public:verbs_helper_suite",
-        "//public:verbs_util",
-        "//third_party/gloop/util/status:ret_check",
-        "//third_party/gloop/util/status:status_macros",
-        "//third_party/gpus/cuda:cuda_headers",
-        "@abseil-cpp//absl/algorithm:container",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/log",
-        "@abseil-cpp//absl/log:check",
-        "@abseil-cpp//absl/status",
-        "@abseil-cpp//absl/status:status_matchers",
-        "@abseil-cpp//absl/status:statusor",
-        "@googletest//:gtest",
-    ],
-    alwayslink = 1,
-)
-
 # The gunit_main is linked into the opensource version of the tests below.  rdma_unit_test depends
 # on the following libraries: glog/gflag/gtest
 # The standard opensource gunit_main does not initialize gflags or glog.  This target contains a
@@ -509,6 +457,7 @@ cc_library(
         "@abseil-cpp//absl/log:initialize",
         "@googletest//:gtest",
     ],
+    alwayslink = 1,
 )
 
 cc_binary(
@@ -516,39 +465,6 @@ cc_binary(
     srcs = [],
     # Required to build statically, see b/380811817 comment #23.
     features = ["no_default_linker_script"],
-    deps = [
-        ":access_test_cc",
-        ":ah_test_cc",
-        ":async_event_test_cc",
-        ":buffer_test_cc",
-        ":comp_channel_test_cc",
-        ":cq_ex_test_cc",
-        ":cq_test_cc",
-        ":device_test_cc",
-        ":gunit_main",
-        ":hugepage_test_cc",
-        ":mr_test_cc",
-        ":mw_test_cc",
-        ":pd_test_cc",
-        ":qp_test_cc",
-        ":rc_test_cc",
-        ":srq_test_cc",
-        ":stress_test_cc",
-        ":threaded_test_cc",
-        ":ud_test_cc",
-    ],
-)
-
-cc_binary(
-    name = "run_gpu_unit_test_on_arm",
-    srcs = [],
-    # Required to build statically, see b/380811817 comment #23.
-    features = [
-        "no_default_linker_script",
-        "-enable_relr",
-    ],
-    linkopts = ["-Wl,--dynamic-linker=/usr/lib/ld-linux-aarch64.so.1"],
-    linkstatic = 1,
     deps = [
         ":access_test_cc",
         ":ah_test_cc",

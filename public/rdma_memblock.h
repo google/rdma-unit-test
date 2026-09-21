@@ -37,12 +37,13 @@ namespace rdma_unit_test {
 // size and alignment. The buffer presented will occur at the proper alignment.
 // NOTE: When using huge pages the length will be forced to align to the page
 // size, as it is required by mmap and munmap.
-// This class only represents host memory. GPU memory is represented by
-// GpuRdmaMemBlock.
+// This class only represents host memory.
 class RdmaMemBlock {
  public:
-  // The type of memory to allocate, host or GPU.
-  enum class MemoryType { kHost, kGpu };
+  // The type of memory to allocate.
+  enum class MemoryType {
+    kHost,
+  };
 
   RdmaMemBlock() = default;
   // Creates a new memory region with the specified alignment and length in
