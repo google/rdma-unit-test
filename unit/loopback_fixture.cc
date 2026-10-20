@@ -71,7 +71,7 @@ absl::StatusOr<ibv_wc_status> LoopbackFixture::ExecuteRdmaOp(
 }
 
 absl::StatusOr<LoopbackFixture::Client> LoopbackFixture::CreateClient(
-    ibv_qp_type qp_type, int pages, QpInitAttribute qp_init_attr) {
+    ibv_qp_type qp_type, int pages, QpInitAttribute qp_init_attr, int cqe) {
   Client client;
   client.buffer = ibv_.AllocBuffer(pages);
   std::fill_n(client.buffer.data(), client.buffer.size(), '-');
@@ -81,7 +81,7 @@ absl::StatusOr<LoopbackFixture::Client> LoopbackFixture::CreateClient(
   if (!client.pd) {
     return absl::InternalError("Failed to allocate pd.");
   }
-  client.cq = ibv_.CreateCq(client.context);
+  client.cq = ibv_.CreateCq(client.context, cqe);
   if (!client.cq) {
     return absl::InternalError("Failed to create cq.");
   }

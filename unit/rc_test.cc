@@ -75,12 +75,13 @@ class LoopbackRcQpTest : public LoopbackFixture {
  protected:
   absl::StatusOr<std::pair<Client, Client>> CreateConnectedClientsPair(
       int pages = kPages, QpInitAttribute qp_init_attr = QpInitAttribute(),
-      QpAttribute qp_attr = QpAttribute()) {
+      QpAttribute qp_attr = QpAttribute(),
+      int cqe = verbs_util::kDefaultMaxWr) {
     ASSIGN_OR_RETURN(Client local,
-                     CreateClient(IBV_QPT_RC, pages, qp_init_attr));
+                     CreateClient(IBV_QPT_RC, pages, qp_init_attr, cqe));
     std::fill_n(local.buffer.data(), local.buffer.size(), kLocalBufferContent);
     ASSIGN_OR_RETURN(Client remote,
-                     CreateClient(IBV_QPT_RC, pages, qp_init_attr));
+                     CreateClient(IBV_QPT_RC, pages, qp_init_attr, cqe));
     std::fill_n(remote.buffer.data(), remote.buffer.size(),
                 kRemoteBufferContent);
     RETURN_IF_ERROR(ibv_.ModifyRcQpResetToRts(local.qp, local.port_attr,
@@ -2546,6 +2547,12 @@ TEST_F(LoopbackRcQpTest, FullSubmissionQueue) {
   Client local, remote;
   ASSERT_OK_AND_ASSIGN(std::tie(local, remote), CreateConnectedClientsPair());
   uint32_t send_queue_size = verbs_util::GetQpCap(local.qp).max_send_wr;
+  if (static_cast<uint32_t>(local.cq->cqe) < send_queue_size) {
+    ASSERT_OK_AND_ASSIGN(
+        std::tie(local, remote),
+        CreateConnectedClientsPair(kPages, QpInitAttribute(), QpAttribute(),
+                                   /*cqe=*/send_queue_size));
+  }
   if (send_queue_size % 2) {
     // The test assume local send queue has even size in order to hit its
     // boundary. If not, we round it down and this test will not hit QP's

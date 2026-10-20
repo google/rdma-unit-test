@@ -78,6 +78,14 @@ class IntrospectionIrdma : public NicIntrospection {
         {{"PdSrqTest", "QpSrqPdMismatchWriteWithImm"}, ""},
         {{"RdmaAccessTest", "ZeroBasedAccess"}, ""},
         {{"MwGeneralTest", "ReadZeroBased"}, ""},
+        {{"SrqTest", "QpLastWqeReached"},
+         "Diorite does not support IBV_EVENT_QP_LAST_WQE_REACHED."},
+        {{"SrqTest", "UdQpLastWqeReached"},
+         "Diorite does not support IBV_EVENT_QP_LAST_WQE_REACHED."},
+        {{"SrqTest", "DestroyQpNoAsyncEvent"},
+         "Diorite does not support IBV_EVENT_QP_LAST_WQE_REACHED."},
+        {{"SrqTest", "ResetQpNoAsyncEvent"},
+         "Diorite does not support IBV_EVENT_QP_LAST_WQE_REACHED."},
     };
     return deviations;
   }

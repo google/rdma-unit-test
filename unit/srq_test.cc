@@ -483,6 +483,68 @@ TEST_F(SrqTest, SrqLimit) {
   EXPECT_EQ(event.event_type, IBV_EVENT_SRQ_LIMIT_REACHED);
 }
 
+TEST_F(SrqTest, QpLastWqeReached) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_sge rsge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostSrqRecv(setup.srq, recv);
+
+  ASSERT_OK(ibv_.ModifyQpToError(setup.recv_qp));
+  ASSERT_OK_AND_ASSIGN(ibv_async_event event,
+                       verbs_util::WaitForAsyncEvent(setup.context));
+  EXPECT_EQ(event.event_type, IBV_EVENT_QP_LAST_WQE_REACHED);
+  EXPECT_EQ(event.element.qp, setup.recv_qp);
+
+  ASSERT_EQ(ibv_.DestroyQp(setup.recv_qp), 0);
+  auto event_or = verbs_util::WaitForAsyncEvent(
+      setup.context, verbs_util::kDefaultErrorCompletionTimeout);
+  EXPECT_EQ(event_or.status().code(), absl::StatusCode::kDeadlineExceeded);
+}
+
+TEST_F(SrqTest, UdQpLastWqeReached) {
+  if (!Introspection().SupportsUdQp()) {
+    GTEST_SKIP();
+  }
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_qp* qp = ibv_.CreateQp(setup.pd, setup.recv_cq, setup.recv_cq, setup.srq,
+                             IBV_QPT_UD);
+  ASSERT_THAT(qp, NotNull());
+  ASSERT_OK(ibv_.ModifyUdQpResetToRts(qp, setup.port_attr, /*qkey=*/200));
+
+  ASSERT_OK(ibv_.ModifyQpToError(qp));
+  ASSERT_OK_AND_ASSIGN(ibv_async_event event,
+                       verbs_util::WaitForAsyncEvent(setup.context));
+  EXPECT_EQ(event.event_type, IBV_EVENT_QP_LAST_WQE_REACHED);
+  EXPECT_EQ(event.element.qp, qp);
+}
+
+TEST_F(SrqTest, DestroyQpNoAsyncEvent) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_sge rsge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostSrqRecv(setup.srq, recv);
+
+  ASSERT_EQ(ibv_.DestroyQp(setup.recv_qp), 0);
+  auto event_or = verbs_util::WaitForAsyncEvent(
+      setup.context, verbs_util::kDefaultErrorCompletionTimeout);
+  EXPECT_EQ(event_or.status().code(), absl::StatusCode::kDeadlineExceeded);
+}
+
+TEST_F(SrqTest, ResetQpNoAsyncEvent) {
+  ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
+  ibv_sge rsge = verbs_util::CreateSge(setup.recv_buffer.span(), setup.recv_mr);
+  ibv_recv_wr recv =
+      verbs_util::CreateRecvWr(/*wr_id=*/0, &rsge, /*num_sge=*/1);
+  verbs_util::PostSrqRecv(setup.srq, recv);
+
+  ASSERT_OK(ibv_.ModifyQpToReset(setup.recv_qp));
+  auto event_or = verbs_util::WaitForAsyncEvent(
+      setup.context, verbs_util::kDefaultErrorCompletionTimeout);
+  EXPECT_EQ(event_or.status().code(), absl::StatusCode::kDeadlineExceeded);
+}
+
 TEST_F(SrqTest, SendRnr) {
   ASSERT_OK_AND_ASSIGN(BasicSetup setup, CreateBasicSetup());
   ibv_sge sge = verbs_util::CreateSge(setup.send_buffer.span(), setup.send_mr);

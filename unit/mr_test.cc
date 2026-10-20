@@ -13,11 +13,14 @@
 // limitations under the License.
 
 #include <errno.h>
+#include <sys/mman.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
+#include <ios>
 #include <thread>  // NOLINT
 #include <tuple>
 #include <utility>
@@ -341,6 +344,86 @@ TEST_F(MrLoopbackTest, OutstandingRead) {
   // cancellation is implemented.
   EXPECT_GT(results[IBV_WC_SUCCESS], 0);
   EXPECT_GT(results[IBV_WC_LOC_PROT_ERR], 0);
+}
+
+TEST_F(MrLoopbackTest, LargeMrWritesLandInCorrectBlock) {
+  constexpr size_t kHalfMiB = 512ull << 10;
+  constexpr size_t kTwoMiB = 2ull << 20;
+  constexpr size_t kTwoGiB = 2ull << 30;
+  constexpr size_t kLength = 5ull << 29;  // 2.5 GiB (> 2 GiB is required)
+  constexpr size_t kMarkerOffset = 64;    // never on a block boundary
+  constexpr uint64_t kTag = 0xA5A5000000000000ull;
+#ifndef MADV_COLLAPSE
+  constexpr int kMadvCollapse = 25;
+#else
+  constexpr int kMadvCollapse = MADV_COLLAPSE;
+#endif
+
+  ASSERT_OK_AND_ASSIGN(Client local, CreateClient());
+  ASSERT_OK_AND_ASSIGN(Client remote, CreateClient());
+  ASSERT_OK(ibv_.SetUpLoopbackRcQps(local.qp, remote.qp, local.port_attr));
+  //  Allocate with slack, then carve out a 2 MiB-aligned window.
+  RdmaMemBlock raw = ibv_.AllocAlignedBufferByBytes(kLength + kTwoMiB);
+  ASSERT_THAT(raw.data(), NotNull());
+  const uintptr_t base = reinterpret_cast<uintptr_t>(raw.data());
+  const size_t off = (kTwoMiB - (base % kTwoMiB)) % kTwoMiB;
+  RdmaMemBlock buf = raw.subblock(off, kLength);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(buf.data()) % kTwoMiB, 0u);
+  memset(buf.data(), 0, buf.size());
+
+  // Fault in a single 2 MiB THP, verify/collapse it with MADV_COLLAPSE, and
+  // mremap its middle 1 MiB across the 2 GiB boundary.
+  void* thp_raw = mmap(nullptr, 2 * kTwoMiB, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(thp_raw, MAP_FAILED);
+  const uintptr_t thp_addr = reinterpret_cast<uintptr_t>(thp_raw);
+  uint8_t* thp = reinterpret_cast<uint8_t*>(
+      thp_addr + ((kTwoMiB - (thp_addr % kTwoMiB)) % kTwoMiB));
+  madvise(thp, kTwoMiB, MADV_HUGEPAGE);
+  memset(thp, 0, kTwoMiB);
+  if (madvise(thp, kTwoMiB, kMadvCollapse) != 0) {
+    LOG(INFO) << "MADV_COLLAPSE failed (" << strerror(errno)
+              << "); continuing with MADV_HUGEPAGE mapping";
+  }
+  ASSERT_NE(
+      mremap(thp + kHalfMiB, 2 * kHalfMiB, 2 * kHalfMiB,
+             MREMAP_MAYMOVE | MREMAP_FIXED, buf.data() + kTwoGiB - kHalfMiB),
+      MAP_FAILED)
+      << strerror(errno);
+
+  ibv_mr* mr = ibv_.RegMr(remote.pd, buf);
+  ASSERT_EQ(munmap(thp_raw, 2 * kTwoMiB), 0);
+  ASSERT_THAT(mr, NotNull());
+
+  // RDMA-WRITE a unique marker into every 2 MiB block.
+  const size_t nblocks = kLength / kTwoMiB;
+  uint64_t* src = reinterpret_cast<uint64_t*>(local.buffer.data());
+  ibv_sge sge = verbs_util::CreateSge(local.buffer.subspan(0, 8), local.mr);
+  for (size_t k = 0; k < nblocks; ++k) {
+    *src = kTag | k;
+    ibv_send_wr wr = verbs_util::CreateWriteWr(
+        /*wr_id=*/k, &sge, /*num_sge=*/1,
+        buf.data() + k * kTwoMiB + kMarkerOffset, mr->rkey);
+    verbs_util::PostSend(local.qp, wr);
+    ASSERT_OK_AND_ASSIGN(ibv_wc completion,
+                         verbs_util::WaitForCompletion(local.cq));
+    ASSERT_EQ(completion.status, IBV_WC_SUCCESS) << "block " << k;
+  }
+
+  size_t bad = 0;
+  for (size_t k = 0; k < nblocks; ++k) {
+    uint64_t got;
+    memcpy(&got, buf.data() + k * kTwoMiB + kMarkerOffset, sizeof(got));
+    if (got != (kTag | k)) {
+      if (bad < 8) {
+        ADD_FAILURE() << "block " << k << " (offset 0x" << std::hex
+                      << k * kTwoMiB << ") holds 0x" << got
+                      << ", expected marker of block " << std::dec << k;
+      }
+      ++bad;
+    }
+  }
+  EXPECT_EQ(bad, 0u) << bad << "/" << nblocks << " blocks mismatched";
 }
 
 TEST_F(MrLoopbackTest, OutstandingWrite) {

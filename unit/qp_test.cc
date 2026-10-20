@@ -954,9 +954,9 @@ TEST_F(QpStateTest, PostSendErrConcurrent) {
         }
       } else if (curr_state == kLastBatch) {
         // The QP is transitioned to error before the stop request, so
-        // the last batch should fail with a flush error.
-        last_batch_result =
-            BatchRead(setup, kReadBatchSize, {IBV_WC_WR_FLUSH_ERR});
+        // the last batch should fail with a flush or fatal error.
+        last_batch_result = BatchRead(setup, kReadBatchSize,
+                                      {IBV_WC_WR_FLUSH_ERR, IBV_WC_FATAL_ERR});
         if (!last_batch_result.ok()) {
           absl::MutexLock lock(&submitter_state_mutex);
           submitter_state = kFatalError;
@@ -1262,7 +1262,6 @@ TEST_P(ResponderQpStateTest, ResponderNotReadyToReceive) {
   EXPECT_EQ(verbs_util::GetQpState(responder.qp), responder_state);
 
   if (!Introspection().BuffersMessagesWhenNotReadyToReceive()) {
-
     LOG(INFO) << "Provider does not buffer incoming messages. Expecting "
                  "unsuccessful completions.";
     ASSERT_OK_AND_ASSIGN(ibv_wc completion,

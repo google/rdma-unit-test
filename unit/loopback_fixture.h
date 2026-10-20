@@ -54,7 +54,8 @@ class LoopbackFixture : public RdmaVerbsFixture {
   // Create a client given a specific QP type, memory buffer size and content.
   absl::StatusOr<Client> CreateClient(
       ibv_qp_type qp_type = IBV_QPT_RC, int pages = 1,
-      QpInitAttribute qp_init_attr = QpInitAttribute());
+      QpInitAttribute qp_init_attr = QpInitAttribute(),
+      int cqe = verbs_util::kDefaultMaxWr);
 
   // Creates a BasicSetup struct. The object contains basic ibverbs objects that
   // facilitate a loopback connecction that sends traffic.
