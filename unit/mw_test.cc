@@ -298,7 +298,11 @@ TEST_P(MwGeneralTest, DeregMrWhenBound) {
                                     setup.mr, setup.buffer.data(), mw->rkey),
         IsOkAndHolds(IBV_WC_REM_OP_ERR));
   } else {
-    EXPECT_EQ(result, EBUSY);
+    // IBTA 10.6.7.2.6 makes it an error to deregister an MR that still has
+    // MWs bound and allows the CI to reject the operation, but it does not
+    // specify the error code. Accept any failure (EBUSY, EINVAL, ...) instead
+    // of requiring a particular one.
+    EXPECT_NE(result, 0);
     EXPECT_THAT(
         verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
                                     setup.mr, setup.buffer.data(), mw->rkey),
@@ -627,7 +631,11 @@ TEST_F(MwType2Test, DeregMrWhenBound) {
         IsOkAndHolds(IBV_WC_REM_ACCESS_ERR));
 
   } else {
-    EXPECT_EQ(result, EBUSY);
+    // IBTA 10.6.7.2.6 makes it an error to deregister an MR that still has
+    // MWs bound and allows the CI to reject the operation, but it does not
+    // specify the error code. Accept any failure (EBUSY, EINVAL, ...) instead
+    // of requiring a particular one.
+    EXPECT_NE(result, 0);
     EXPECT_THAT(
         verbs_util::ExecuteRdmaRead(setup.local_qp, setup.buffer.span(),
                                     setup.mr, setup.buffer.data(), mw->rkey),
