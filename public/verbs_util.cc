@@ -515,6 +515,8 @@ absl::StatusOr<ibv_wc_status> ExecuteType2MwBind(ibv_qp* qp, ibv_mw* mw,
   EXPECT_EQ(completion.qp_num, qp->qp_num);
   if (completion.status == IBV_WC_SUCCESS) {
     EXPECT_EQ(IBV_WC_BIND_MW, completion.opcode);
+    // Preserve the HCA-assigned index and save the new consumer-supplied key.
+    mw->rkey = (mw->rkey & 0xffffff00u) | (rkey & 0xffu);
   }
   return completion.status;
 }
